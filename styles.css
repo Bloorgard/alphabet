@@ -61,6 +61,13 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 #letter-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 
 .workspace-label { position: absolute; top: 14px; left: 14px; color: rgba(241, 237, 229, .55); pointer-events: none; }
+
+/* Буква может принести свою бумагу — подписи над ней становятся чернильными. */
+.letter-workspace[data-ground="paper"] { background: var(--paper); }
+.letter-workspace[data-ground="paper"] .workspace-label { color: rgba(22, 22, 22, .5); }
+.letter-workspace[data-ground="paper"] .workspace-hint { color: rgba(22, 22, 22, .38); }
+.letter-workspace[data-ground="paper"] .dialog-close { color: rgba(22, 22, 22, .5); }
+.letter-workspace[data-ground="paper"] .dialog-close:hover { color: var(--ink); }
 .workspace-hint { position: absolute; right: 14px; bottom: 14px; font-family: var(--mono); font-size: 10px; letter-spacing: .03em; color: rgba(241, 237, 229, .35); pointer-events: none; }
 .dialog-close { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 32px; height: 32px; border: 0; background: none; color: rgba(241, 237, 229, .55); font-size: 20px; line-height: 1; }
 .dialog-close:hover { color: var(--paper); }

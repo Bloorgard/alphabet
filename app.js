@@ -1,4 +1,5 @@
 import { mountA } from './letters/a.js';
+import { mountB } from './letters/b.js';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',
@@ -12,7 +13,8 @@ const DAY = 86400000;
 
 // Буква считается готовой, когда у неё есть mount-модуль.
 const READY = new Map([
-  ['А', mountA]
+  ['А', mountA],
+  ['Б', mountB]
 ]);
 
 const grid = document.querySelector('#letter-grid');
@@ -84,5 +86,5 @@ dialog.addEventListener('cancel', (event) => {
 });
 
 renderGrid();
-const initialLetter = new URLSearchParams(window.location.search).get('letter');
-if (initialLetter === 'а' || initialLetter === 'a') openLetter('А');
+const initialLetter = (new URLSearchParams(window.location.search).get('letter') || '').toUpperCase();
+if (READY.has(initialLetter)) openLetter(initialLetter);

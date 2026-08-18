@@ -19,7 +19,8 @@
   .tools { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
   .tools label { display: flex; gap: 6px; align-items: center; }
   .tools input[type=range] { width: 110px; }
-  .tools button { border: 1px solid rgba(22,22,22,.18); padding: 5px 9px; background: none; font: inherit; text-transform: uppercase; letter-spacing: .08em; cursor: pointer; }
+  .tools button { border: 1px solid rgba(22,22,22,.18); padding: 5px 9px; background: none; color: var(--muted); font: inherit; text-transform: uppercase; letter-spacing: .08em; cursor: pointer; }
+  .tools button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--paper); }
   #note { color: var(--muted); text-transform: none; letter-spacing: .02em; }
 </style>
 </head>
