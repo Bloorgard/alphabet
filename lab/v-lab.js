@@ -8,6 +8,8 @@ const RED = [224, 33, 15];
 const PAPER = [241, 237, 229];
 const DARK = [96, 8, 4];
 const PAPER_CSS = `rgb(${[241, 237, 229].join(',')})`;
+const CANVAS_BLUE = '#0d47d9';
+const FORM_WHITE = '#ffffff';
 
 // Лента живёт в экранных координатах, а глубина — рисованная:
 // дальний конец уже и бледнее, ближний крупнее и насыщеннее.
@@ -654,9 +656,42 @@ function sceneToJSON() {
   });
 }
 
-function saveScene() {
+// Собрать форму в центр кадра вместе с окружностями.
+function centerScene() {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const p of ring) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const dx = S / 2 - (minX + maxX) / 2;
+  const dy = S / 2 - (minY + maxY) / 2;
+  for (const p of ring) { p.x += dx; p.y += dy; p.px += dx; p.py += dy; }
+  for (const peg of pegs) {
+    peg.x = snap(peg.x + dx);
+    peg.y = snap(peg.y + dy);
+    peg.tx = peg.x;
+    peg.ty = peg.y;
+  }
+}
+
+// Поставить окружности левого края на одну вертикаль.
+function alignLeft() {
+  const sorted = [...pegs].sort((a, b) => a.x - b.x);
+  const group = sorted.filter((p) => p.x - sorted[0].x < S * 0.08);
+  if (group.length < 2) return;
+  const x = group.reduce((sum, p) => sum + p.x, 0) / group.length;
+  for (const peg of group) { peg.x = snap(x); peg.tx = peg.x; peg.ty = peg.y; }
+}
+
+function saveScene(quiet) {
   const json = sceneToJSON();
   localStorage.setItem(SCENE_KEY, json);
+  if (quiet) return;
   navigator.clipboard?.writeText(json).catch(() => {});
   console.log(json);
   note.textContent = 'сцена сохранена: она подхватится при следующем запуске, а JSON лежит в буфере и в консоли';
@@ -679,12 +714,13 @@ function loadScene() {
 }
 
 function buildThread() {
+  if (toolInputs.radius) toolInputs.radius.disabled = !selectedPeg;
   ring.length = 0;
   const saved = loadScene();
 
   if (saved) {
     pegs.length = 0;
-    for (const [x, y, r] of saved.pegs) pegs.push({ x: x * S, y: y * S, r: r * S, target: r * S });
+    for (const [x, y, r] of saved.pegs) pegs.push({ x: x * S, y: y * S, tx: x * S, ty: y * S, r: r * S, target: r * S });
     // Нитка восстанавливается по сохранённому контуру и лишь дотягивается —
     // порядок появления кругов воспроизводить не нужно.
     const dense = Math.round(Number(getTool('nodes')));
@@ -719,6 +755,18 @@ function stepThread() {
   for (const peg of pegs) {
     if (peg.target === undefined) peg.target = peg.r;
     peg.r += (peg.target - peg.r) * 0.12;
+
+    // За кадр окружность проходит не больше своего радиуса, иначе она
+    // перескакивает нитку целиком и столкновению нечего ловить.
+    if (peg.tx === undefined) continue;
+    const dx = peg.tx - peg.x;
+    const dy = peg.ty - peg.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 0.01) { peg.x = peg.tx; peg.y = peg.ty; continue; }
+    const limit = Math.max(1.5, peg.r * 0.5);
+    const move = Math.min(dist, limit);
+    peg.x += (dx / dist) * move;
+    peg.y += (dy / dist) * move;
   }
 
   const tension = Number(getTool('tension'));
@@ -797,24 +845,33 @@ function insideLoop(x, y) {
 }
 
 function drawThread() {
-  ctx.clearRect(0, 0, S, S);
+  ctx.fillStyle = CANVAS_BLUE;
+  ctx.fillRect(0, 0, S, S);
 
+  // Кривые через середины звеньев: по ломаной были видны грани на поворотах.
   const loop = () => {
+    const n = ring.length;
+    const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
     ctx.beginPath();
-    ctx.moveTo(ring[0].x, ring[0].y);
-    for (const p of ring) ctx.lineTo(p.x, p.y);
+    const start = mid(ring[n - 1], ring[0]);
+    ctx.moveTo(start.x, start.y);
+    for (let i = 0; i < n; i += 1) {
+      const p = ring[i];
+      const m = mid(p, ring[(i + 1) % n]);
+      ctx.quadraticCurveTo(p.x, p.y, m.x, m.y);
+    }
     ctx.closePath();
   };
 
   if (getTool('fill')) {
     loop();
-    ctx.fillStyle = `rgb(${RED.join(',')})`;
+    ctx.fillStyle = FORM_WHITE;
     ctx.fill();
   }
 
   const filled = getTool('fill');
   for (const peg of pegs) {
-    ctx.fillStyle = filled && insideLoop(peg.x, peg.y) ? `rgb(${RED.join(',')})` : PAPER_CSS;
+    ctx.fillStyle = filled && insideLoop(peg.x, peg.y) ? FORM_WHITE : CANVAS_BLUE;
     ctx.beginPath();
     ctx.arc(peg.x, peg.y, peg.r, 0, Math.PI * 2);
     ctx.fill();
@@ -822,7 +879,7 @@ function drawThread() {
 
   if (getTool('stroke')) {
     loop();
-    ctx.strokeStyle = '#161616';
+    ctx.strokeStyle = FORM_WHITE;
     ctx.lineWidth = S * 0.014;
     ctx.lineJoin = 'round';
     ctx.stroke();
@@ -830,7 +887,8 @@ function drawThread() {
 
   if (getTool('frame')) {
     ctx.save();
-    ctx.strokeStyle = 'rgba(22,22,22,.4)';
+    ctx.globalCompositeOperation = 'difference';
+    ctx.strokeStyle = 'rgba(255,255,255,.55)';
     ctx.lineWidth = 1;
     for (const peg of pegs) {
       ctx.beginPath();
@@ -843,9 +901,10 @@ function drawThread() {
   // Обводку получает только выделенная — остальные растворяются в фоне.
   if (selectedPeg) {
     ctx.save();
-    ctx.strokeStyle = 'rgba(22,22,22,.45)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
+    ctx.globalCompositeOperation = 'difference';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
     ctx.beginPath();
     ctx.arc(selectedPeg.x, selectedPeg.y, selectedPeg.r, 0, Math.PI * 2);
     ctx.stroke();
@@ -857,17 +916,29 @@ function drawThread() {
 function selectPeg(peg) {
   selectedPeg = peg;
   if (peg) setTool('radius', Number(((peg.target ?? peg.r) / S).toFixed(3)));
+  // Без выделения крутить радиус нечему.
+  if (toolInputs.radius) toolInputs.radius.disabled = !peg;
 }
 
 function removePeg(peg) {
   const i = pegs.indexOf(peg);
   if (i < 0) return;
   pegs.splice(i, 1);
-  if (selectedPeg === peg) selectedPeg = null;
+  if (selectedPeg === peg) selectPeg(null);
+  saveScene(true);
 }
 
 function applyRadius() {
-  if (selectedPeg) selectedPeg.target = S * Number(getTool('radius'));
+  if (!selectedPeg) return;
+  selectedPeg.target = S * Number(getTool('radius'));
+  saveScene(true);
+}
+
+// Невидимая сетка: шаг задаётся ползунком и по умолчанию равен радиусу малого круга.
+function snap(value) {
+  const step = S * Number(getTool('grid'));
+  if (!(step > 0)) return value;
+  return Math.round(value / step) * step;
 }
 
 function pegAt(p) {
@@ -893,27 +964,38 @@ const THREAD_POINTER = {
       if (d < bestDist) { bestDist = d; best = point; }
     }
     ringDrag = best;
+    if (!best) selectPeg(null);
     return Boolean(best);
   },
   move(p) {
     if (THREAD_POINTER.peg) {
-      THREAD_POINTER.peg.x = p.x;
-      THREAD_POINTER.peg.y = p.y;
+      THREAD_POINTER.peg.tx = p.x;
+      THREAD_POINTER.peg.ty = p.y;
       return;
     }
     if (!ringDrag) return;
     ringDrag.x = p.x;
     ringDrag.y = p.y;
   },
-  up() { ringDrag = null; THREAD_POINTER.peg = null; },
+  up() {
+    const peg = THREAD_POINTER.peg;
+    if (peg && peg.tx !== undefined) {
+      peg.tx = snap(peg.tx);
+      peg.ty = snap(peg.ty);
+    }
+    if (peg || ringDrag) saveScene(true);
+    ringDrag = null;
+    THREAD_POINTER.peg = null;
+  },
   // Двойной клик ставит новую окружность или убирает ту, по которой попали.
   double(p) {
     const peg = pegAt(p);
     if (peg) { removePeg(peg); return; }
     const size = S * Number(getTool('radius'));
-    const fresh = { x: p.x, y: p.y, r: size * 0.2, target: size };
+    const fresh = { x: snap(p.x), y: snap(p.y), tx: snap(p.x), ty: snap(p.y), r: size * 0.2, target: size };
     pegs.push(fresh);
     selectPeg(fresh);
+    saveScene(true);
   },
 };
 
@@ -929,12 +1011,15 @@ const MODES = {
     pointer: THREAD_POINTER,
     tools: [
       { key: 'tension', label: 'натяжение', min: 0.05, max: 1.5, step: 0.05, value: 0.5 },
+      { key: 'grid', label: 'шаг сетки', min: 0, max: 0.08, step: 0.002, value: 0.02 },
       { key: 'radius', label: 'радиус выделенной', min: 0.02, max: 0.3, step: 0.005, value: 0.13, live: applyRadius },
       { type: 'button', label: 'удалить выделенную', action: () => removePeg(selectedPeg) },
       { key: 'weight', label: 'тяжесть', min: 0, max: 2, step: 0.05, value: 0 },
-      { key: 'nodes', label: 'узлов', min: 80, max: 500, step: 10, value: 260, rebuild: true },
-      { type: 'toggle', key: 'fill', label: 'залить форму', value: false },
-      { type: 'toggle', key: 'stroke', label: 'контур', value: true },
+      { key: 'nodes', label: 'узлов', min: 120, max: 900, step: 20, value: 420, rebuild: true },
+      { type: 'toggle', key: 'fill', label: 'залить форму', value: true },
+      { type: 'toggle', key: 'stroke', label: 'контур', value: false },
+      { type: 'button', label: 'выровнять слева', action: () => alignLeft() },
+      { type: 'button', label: 'центрировать', action: () => centerScene() },
       { type: 'button', label: 'сохранить сцену', action: () => saveScene() },
       { type: 'button', label: 'забыть сцену', action: () => forgetScene() },
     ],
@@ -1030,8 +1115,8 @@ const MODES = {
 
 const COMMON = [
   { key: 'points', label: 'сегментов', min: 60, max: 260, step: 2, value: 140, rebuild: true },
-  { type: 'toggle', key: 'frame', label: 'каркас', value: false },
-  { type: 'button', label: 'заново', action: () => setMode(current) },
+  { type: 'toggle', key: 'frame', label: 'каркас', value: true },
+  { type: 'button', label: 'заново', action: () => restartMode() },
 ];
 
 function renderTools(mode) {
@@ -1083,6 +1168,12 @@ function renderTools(mode) {
     label.append(input);
     toolsBar.append(label);
   }
+}
+
+// Перезапуск не должен стирать расстановку: она сохраняется и подхватывается заново.
+function restartMode() {
+  if (current === 'thread') saveScene(true);
+  setMode(current);
 }
 
 function setMode(name) {
