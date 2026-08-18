@@ -7,6 +7,7 @@ const note = document.getElementById('note');
 const RED = [224, 33, 15];
 const PAPER = [241, 237, 229];
 const DARK = [96, 8, 4];
+const PAPER_CSS = `rgb(${[241, 237, 229].join(',')})`;
 
 // Лента живёт в экранных координатах, а глубина — рисованная:
 // дальний конец уже и бледнее, ближний крупнее и насыщеннее.
@@ -23,7 +24,13 @@ let restCurve = [];
 let drag = null;
 
 const toolValues = {};
+const toolInputs = {};
 function getTool(key) { return toolValues[key]; }
+
+function setTool(key, value) {
+  toolValues[key] = value;
+  if (toolInputs[key]) toolInputs[key].value = value;
+}
 
 /* ---------- лента ---------- */
 
@@ -473,7 +480,7 @@ function beltCircles() {
       x: o.x + Math.cos(lobe.rootAng) * spread,
       y: o.y + Math.sin(lobe.rootAng) * spread,
       r: lobe.rootR,
-      s: 1,
+      s: -1,
       lobe,
       root: true,
     });
@@ -481,7 +488,7 @@ function beltCircles() {
       x: o.x + Math.cos(lobe.ang) * lobe.len,
       y: o.y + Math.sin(lobe.ang) * lobe.len,
       r: lobe.tipR,
-      s: -1,
+      s: 1,
       lobe,
     });
   }
@@ -514,24 +521,34 @@ function beltPath(ox, oy) {
     legs.push(leg);
   }
 
-  ctx.beginPath();
-  const tail = S * 0.14;
-  const first = legs[0].from;
-  ctx.moveTo(first.x - tail + ox, first.y + tail * 0.35 + oy);
-  ctx.lineTo(first.x + ox, first.y + oy);
-
+  // Дуги считаются вручную: сторона обхвата задаётся знаком круга,
+  // а не флагом canvas — иначе ремень перехлёстывается.
+  const pts = [];
   for (let i = 0; i < legs.length; i += 1) {
-    const leg = legs[i];
-    ctx.lineTo(leg.to.x + ox, leg.to.y + oy);
+    pts.push(legs[i].from);
+    pts.push(legs[i].to);
     const next = legs[i + 1];
     if (!next) break;
     const c = circles[i + 1];
-    const a1 = Math.atan2(leg.to.y - c.y, leg.to.x - c.x);
+    const dir = c.s > 0 ? -1 : 1;
+    const a1 = Math.atan2(legs[i].to.y - c.y, legs[i].to.x - c.x);
     const a2 = Math.atan2(next.from.y - c.y, next.from.x - c.x);
-    ctx.arc(c.x + ox, c.y + oy, c.r, a1, a2, c.s > 0);
+    let sweep = (a2 - a1) * dir;
+    while (sweep < 0) sweep += Math.PI * 2;
+    const steps = Math.max(3, Math.ceil((sweep / (Math.PI * 2)) * 48));
+    for (let k = 1; k < steps; k += 1) {
+      const a = a1 + dir * sweep * (k / steps);
+      pts.push({ x: c.x + Math.cos(a) * c.r, y: c.y + Math.sin(a) * c.r });
+    }
   }
 
-  const last = legs[legs.length - 1].to;
+  const tail = S * 0.14;
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+
+  ctx.beginPath();
+  ctx.moveTo(first.x - tail + ox, first.y + tail * 0.35 + oy);
+  for (const p of pts) ctx.lineTo(p.x + ox, p.y + oy);
   ctx.lineTo(last.x + tail * 0.2 + ox, last.y + tail * 0.5 + oy);
   return true;
 }
@@ -557,10 +574,12 @@ function drawBelt() {
   const dx = Math.cos(-2.3);
   const dy = Math.sin(-2.3);
 
-  ctx.fillStyle = '#1c0503';
-  for (let k = steps; k >= 1; k -= 1) {
-    const t = (k / steps) * depth;
-    if (beltPath(dx * t, dy * t)) ctx.fill('nonzero');
+  if (!getTool('outline')) {
+    ctx.fillStyle = '#1c0503';
+    for (let k = steps; k >= 1; k -= 1) {
+      const t = (k / steps) * depth;
+      if (beltPath(dx * t, dy * t)) ctx.fill('nonzero');
+    }
   }
 
   if (beltPath(0, 0)) {
@@ -610,9 +629,230 @@ const BELT_POINTER = {
   up() { beltDrag = null; },
 };
 
+
+/* ---------- резинка на окружностях ---------- */
+
+// Замкнутая нитка стягивается сама, а окружности ей мешают: она их обтекает
+// и садится по касательным и дугам сама, без всякой геометрии.
+const ring = [];
+const pegs = [];
+let ringDrag = null;
+let selectedPeg = null;
+
+function buildThread() {
+  ring.length = 0;
+  const n = Math.round(Number(getTool('nodes')));
+  const r = S * 0.36;
+  for (let i = 0; i < n; i += 1) {
+    const a = (i / n) * Math.PI * 2;
+    const x = S * 0.5 + Math.cos(a) * r;
+    const y = S * 0.5 + Math.sin(a) * r * 1.15;
+    ring.push({ x, y, px: x, py: y });
+  }
+  if (!pegs.length) {
+    pegs.push({ x: S * 0.44, y: S * 0.34, r: S * 0.13, target: S * 0.13 });
+    pegs.push({ x: S * 0.56, y: S * 0.66, r: S * 0.13, target: S * 0.13 });
+  }
+}
+
+function stepThread() {
+  // Радиус подтягивается к заданному плавно: рывком окружность выворачивает петлю наружу.
+  for (const peg of pegs) {
+    if (peg.target === undefined) peg.target = peg.r;
+    peg.r += (peg.target - peg.r) * 0.12;
+  }
+
+  const tension = Number(getTool('tension'));
+  const gravity = Number(getTool('weight')) * 0.04;
+  const damp = 0.94;
+
+  for (const p of ring) {
+    if (p === ringDrag) { p.px = p.x; p.py = p.y; continue; }
+    const vx = (p.x - p.px) * damp;
+    const vy = (p.y - p.py) * damp;
+    p.px = p.x;
+    p.py = p.y;
+    p.x += vx;
+    p.y += vy + gravity;
+  }
+
+  // Нитка стремится укоротиться: длина звена всегда чуть меньше текущей.
+  for (let iter = 0; iter < 14; iter += 1) {
+    for (let i = 0; i < ring.length; i += 1) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy) || 1e-6;
+      const rest = dist * (1 - tension * 0.06);
+      const diff = ((dist - rest) / dist) * 0.5;
+      const aFree = a === ringDrag ? 0 : 1;
+      const bFree = b === ringDrag ? 0 : 1;
+      const total = aFree + bFree || 1;
+      a.x += dx * diff * (2 * aFree) / total;
+      a.y += dy * diff * (2 * aFree) / total;
+      b.x -= dx * diff * (2 * bFree) / total;
+      b.y -= dy * diff * (2 * bFree) / total;
+    }
+
+    // Окружности не пускают нитку внутрь — отсюда берутся дуги обхвата.
+    // Проверяется весь отрезок, иначе мелкий круг проскакивает между узлами.
+    for (const peg of pegs) {
+      for (let i = 0; i < ring.length; i += 1) {
+        const a = ring[i];
+        const b = ring[(i + 1) % ring.length];
+        const ex = b.x - a.x;
+        const ey = b.y - a.y;
+        const lenSq = ex * ex + ey * ey || 1e-6;
+        let t = ((peg.x - a.x) * ex + (peg.y - a.y) * ey) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        const cx = a.x + ex * t;
+        const cy = a.y + ey * t;
+        let dx = cx - peg.x;
+        let dy = cy - peg.y;
+        let dist = Math.hypot(dx, dy);
+        if (dist >= peg.r) continue;
+        if (dist < 1e-6) { dx = 0; dy = -1; dist = 1e-6; }
+        const push = peg.r - dist;
+        const nx = (dx / dist) * push;
+        const ny = (dy / dist) * push;
+        a.x += nx * (1 - t);
+        a.y += ny * (1 - t);
+        b.x += nx * t;
+        b.y += ny * t;
+      }
+    }
+  }
+}
+
+function drawThread() {
+  ctx.clearRect(0, 0, S, S);
+
+  const loop = () => {
+    ctx.beginPath();
+    ctx.moveTo(ring[0].x, ring[0].y);
+    for (const p of ring) ctx.lineTo(p.x, p.y);
+    ctx.closePath();
+  };
+
+  if (getTool('fill')) {
+    loop();
+    ctx.fillStyle = `rgb(${RED.join(',')})`;
+    ctx.fill();
+  }
+
+  // Окружности — цвета бумаги и под ниткой: видно только то, что они делают с формой.
+  ctx.fillStyle = PAPER_CSS;
+  for (const peg of pegs) {
+    ctx.beginPath();
+    ctx.arc(peg.x, peg.y, peg.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  loop();
+  ctx.strokeStyle = '#161616';
+  ctx.lineWidth = S * 0.014;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // Обводку получает только выделенная — остальные растворяются в фоне.
+  if (selectedPeg) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(22,22,22,.45)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(selectedPeg.x, selectedPeg.y, selectedPeg.r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// Ползунок радиуса всегда показывает выделенную окружность.
+function selectPeg(peg) {
+  selectedPeg = peg;
+  if (peg) setTool('radius', Number(((peg.target ?? peg.r) / S).toFixed(3)));
+}
+
+function removePeg(peg) {
+  const i = pegs.indexOf(peg);
+  if (i < 0) return;
+  pegs.splice(i, 1);
+  if (selectedPeg === peg) selectedPeg = null;
+}
+
+function applyRadius() {
+  if (selectedPeg) selectedPeg.target = S * Number(getTool('radius'));
+}
+
+function pegAt(p) {
+  for (let i = pegs.length - 1; i >= 0; i -= 1) {
+    if (Math.hypot(p.x - pegs[i].x, p.y - pegs[i].y) <= pegs[i].r) return pegs[i];
+  }
+  return null;
+}
+
+const THREAD_POINTER = {
+  down(p) {
+    const peg = pegAt(p);
+    if (peg) {
+      ringDrag = null;
+      THREAD_POINTER.peg = peg;
+      selectPeg(peg);
+      return true;
+    }
+    let best = null;
+    let bestDist = S * 0.05;
+    for (const point of ring) {
+      const d = Math.hypot(p.x - point.x, p.y - point.y);
+      if (d < bestDist) { bestDist = d; best = point; }
+    }
+    ringDrag = best;
+    return Boolean(best);
+  },
+  move(p) {
+    if (THREAD_POINTER.peg) {
+      THREAD_POINTER.peg.x = p.x;
+      THREAD_POINTER.peg.y = p.y;
+      return;
+    }
+    if (!ringDrag) return;
+    ringDrag.x = p.x;
+    ringDrag.y = p.y;
+  },
+  up() { ringDrag = null; THREAD_POINTER.peg = null; },
+  // Двойной клик ставит новую окружность или убирает ту, по которой попали.
+  double(p) {
+    const peg = pegAt(p);
+    if (peg) { removePeg(peg); return; }
+    const size = S * Number(getTool('peg'));
+    const fresh = { x: p.x, y: p.y, r: size * 0.2, target: size };
+    pegs.push(fresh);
+    selectPeg(fresh);
+  },
+};
+
 /* ---------- режимы ---------- */
 
 const MODES = {
+  thread: {
+    label: 'резинка',
+    note: 'замкнутая нитка стягивается и обтекает окружности; 2× клик — поставить или убрать окружность, круги и нитку можно таскать',
+    build: buildThread,
+    step: stepThread,
+    draw: drawThread,
+    pointer: THREAD_POINTER,
+    tools: [
+      { key: 'tension', label: 'натяжение', min: 0.05, max: 1.5, step: 0.05, value: 0.5 },
+      { key: 'peg', label: 'размер новой', min: 0.03, max: 0.22, step: 0.005, value: 0.1 },
+      { key: 'radius', label: 'радиус выделенной', min: 0.02, max: 0.3, step: 0.005, value: 0.13, live: applyRadius },
+      { type: 'button', label: 'удалить выделенную', action: () => removePeg(selectedPeg) },
+      { key: 'weight', label: 'тяжесть', min: 0, max: 2, step: 0.05, value: 0 },
+      { key: 'nodes', label: 'узлов', min: 80, max: 500, step: 10, value: 260, rebuild: true },
+      { type: 'toggle', key: 'fill', label: 'заливка', value: false },
+    ],
+  },
+
   belt: {
     label: 'ремень',
     note: 'одна непрерывная лента по цепочке окружностей: крупная на носу капли, маленькая внутри основания',
@@ -742,7 +982,11 @@ function renderTools(mode) {
     input.step = tool.step;
     input.value = value;
     toolValues[tool.key] = value;
-    input.addEventListener('input', () => { toolValues[tool.key] = Number(input.value); });
+    toolInputs[tool.key] = input;
+    input.addEventListener('input', () => {
+      toolValues[tool.key] = Number(input.value);
+      if (tool.live) tool.live();
+    });
     if (tool.rebuild) {
       input.addEventListener('change', () => {
         const m = MODES[current];
@@ -838,6 +1082,11 @@ canvas.addEventListener('pointermove', (event) => {
   drag.point.py = p.y;
 });
 
+canvas.addEventListener('dblclick', (event) => {
+  const pointer = MODES[current].pointer;
+  if (pointer && pointer.double) pointer.double(scenePoint(event));
+});
+
 function endDrag() {
   const pointer = MODES[current] && MODES[current].pointer;
   if (pointer) pointer.up();
@@ -846,6 +1095,16 @@ function endDrag() {
 }
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
+
+window.addEventListener('keydown', (event) => {
+  if (event.target.closest('input')) return;
+  if (event.key === 'Delete' || event.key === 'Backspace') removePeg(selectedPeg);
+  if (!selectedPeg) return;
+  const stepSize = S * 0.008;
+  const target = selectedPeg.target ?? selectedPeg.r;
+  if (event.key === '[' || event.key === 'х') selectPeg(Object.assign(selectedPeg, { target: Math.max(S * 0.02, target - stepSize) }));
+  if (event.key === ']' || event.key === 'ъ') selectPeg(Object.assign(selectedPeg, { target: Math.min(S * 0.3, target + stepSize) }));
+});
 
 function frame() {
   const mode = MODES[current];
@@ -858,5 +1117,5 @@ function frame() {
 
 new ResizeObserver(resize).observe(canvas);
 resize();
-setMode('belt');
+setMode('thread');
 requestAnimationFrame(frame);
