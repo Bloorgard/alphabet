@@ -1,18 +1,25 @@
 const CONTROLS = [
-  { key: 'rate', label: 'темп', min: 60, max: 900, step: 10 },
   { key: 'bigScale', label: 'крупные формы', min: 0.7, max: 1.6, step: 0.02, refill: true },
   { key: 'crumbScale', label: 'калибр мелочи', min: 0.5, max: 2, step: 0.02, refill: true },
   { key: 'crumbs', label: 'сколько мелочи', min: 8, max: 70, step: 1, refill: true },
   { key: 'contrast', label: 'контраст масс', min: 0, max: 1, step: 0.02 },
 ];
 
+const RATE = 220;   // пауза между падениями, мс
+
 const PARAMS = {
-  rate: 220,        // пауза между падениями, мс
   bigScale: 1.15,   // калибр крупных форм
   crumbScale: 1,    // калибр мелочи
-  crumbs: 34,       // сколько мелких фигур
-  contrast: 0.45,   // насколько мелочь бледнее буквы
+  crumbs: 42,       // сколько мелких фигур
+  contrast: 0,      // насколько мелочь бледнее буквы
+  magnet: false,    // тянуть ли формы на свои места
+  float: false,     // снять ли вес
 };
+
+const SWITCHES = [
+  { key: 'magnet', label: 'магнит' },
+  { key: 'float', label: 'невесомость' },
+];
 
 const RED = [224, 33, 15];
 const PAPER = [241, 237, 229];
@@ -149,6 +156,39 @@ export function mountB(workspace) {
       timer = 0;
     }
 
+    // Тяга крупных форм на свои места; мелочь при этом выдавливается прочь.
+    function pullToTargets() {
+      const k = 1.4 * 6e-6;
+      const goals = {
+        bar: { x: S * 0.5, y: S * 0.29, angle: -0.045 },
+        belly: { x: S * 0.5, y: S * 0.66, angle: 0 },
+      };
+      for (const body of bodies) {
+        const goal = goals[body.label];
+        if (!goal) continue;
+        const dx = goal.x - body.position.x;
+        const dy = goal.y - body.position.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        // Ближе к месту — жёстче хватка, но издалека тяга не пропадает совсем.
+        const grip = 1 / (1 + (dist / (S * 0.28)) ** 2);
+        const f = k * body.mass * (0.3 + 0.7 * grip) / dist;
+        Body.applyForce(body, body.position, { x: dx * f * S * 0.5, y: dy * f * S * 0.5 });
+        const da = ((goal.angle - body.angle + Math.PI) % (Math.PI * 2)) - Math.PI;
+        Body.setAngularVelocity(body, body.angularVelocity * 0.9 + da * 0.08 * grip);
+      }
+      for (const body of bodies) {
+        if (body.label !== 'crumb') continue;
+        for (const goal of Object.values(goals)) {
+          const dx = body.position.x - goal.x;
+          const dy = body.position.y - goal.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          if (dist > S * 0.34) continue;
+          const push = k * body.mass * 0.8 * (1 - dist / (S * 0.34));
+          Body.applyForce(body, body.position, { x: (dx / dist) * push * S * 0.3, y: (dy / dist) * push * S * 0.3 });
+        }
+      }
+    }
+
     function spawn() {
       const next = queue.shift();
       Body.setPosition(next.body, { x: next.x, y: -S * 0.15 });
@@ -201,11 +241,13 @@ export function mountB(workspace) {
     function frame(now) {
       const dt = Math.min(48, now - last);
       last = now;
+      world.gravity.y = params.float ? 0 : 1;
+      if (params.magnet) pullToTargets();
       if (queue.length) {
         timer -= dt;
         if (timer <= 0) {
           spawn();
-          timer = params.rate;
+          timer = RATE;
         }
       }
       Engine.update(engine, dt);
@@ -241,6 +283,19 @@ export function mountB(workspace) {
       label.append(input);
       panel.append(label);
     }
+    for (const item of SWITCHES) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'sketch-switch';
+      button.textContent = item.label;
+      button.setAttribute('aria-pressed', String(params[item.key]));
+      button.addEventListener('click', () => {
+        params[item.key] = !params[item.key];
+        button.setAttribute('aria-pressed', String(params[item.key]));
+      });
+      panel.append(button);
+    }
+
     const again = document.createElement('button');
     again.type = 'button';
     again.className = 'sketch-action';
