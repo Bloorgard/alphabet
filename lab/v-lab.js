@@ -225,7 +225,7 @@ function drawRibbon() {
   ctx.fill();
 
   // Каждый сегмент красится отдельно: наклон нормали даёт блик вдоль сгиба.
-  const gloss = Number(getTool('gloss'));
+  const gloss = 0.7;
   for (let i = 0; i < points.length - 1; i += 1) {
     const lit = Math.max(0, left[i].nx * 0.75 + left[i].ny * -0.66);
     const depth = 1 - depthAt(i);
@@ -639,8 +639,67 @@ const pegs = [];
 let ringDrag = null;
 let selectedPeg = null;
 
+const SCENE_KEY = 'alphabet-v-scene';
+
+// Сохранять приходится и нитку тоже: по одним кругам не восстановить, что
+// оказалось внутри петли, а что снаружи — это след порядка их появления.
+function sceneToJSON() {
+  const n = (v) => Number((v / S).toFixed(4));
+  const stride = Math.max(1, Math.round(ring.length / 140));
+  const path = [];
+  for (let i = 0; i < ring.length; i += stride) path.push([n(ring[i].x), n(ring[i].y)]);
+  return JSON.stringify({
+    pegs: pegs.map((p) => [n(p.x), n(p.y), n(p.target ?? p.r)]),
+    ring: path,
+  });
+}
+
+function saveScene() {
+  const json = sceneToJSON();
+  localStorage.setItem(SCENE_KEY, json);
+  navigator.clipboard?.writeText(json).catch(() => {});
+  console.log(json);
+  note.textContent = 'сцена сохранена: она подхватится при следующем запуске, а JSON лежит в буфере и в консоли';
+}
+
+function forgetScene() {
+  localStorage.removeItem(SCENE_KEY);
+  pegs.length = 0;
+  setMode(current);
+}
+
+function loadScene() {
+  const raw = localStorage.getItem(SCENE_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    return null;
+  }
+}
+
 function buildThread() {
   ring.length = 0;
+  const saved = loadScene();
+
+  if (saved) {
+    pegs.length = 0;
+    for (const [x, y, r] of saved.pegs) pegs.push({ x: x * S, y: y * S, r: r * S, target: r * S });
+    // Нитка восстанавливается по сохранённому контуру и лишь дотягивается —
+    // порядок появления кругов воспроизводить не нужно.
+    const dense = Math.round(Number(getTool('nodes')));
+    for (let i = 0; i < dense; i += 1) {
+      const t = (i / dense) * saved.ring.length;
+      const a = saved.ring[Math.floor(t) % saved.ring.length];
+      const b = saved.ring[(Math.floor(t) + 1) % saved.ring.length];
+      const k = t - Math.floor(t);
+      const x = (a[0] + (b[0] - a[0]) * k) * S;
+      const y = (a[1] + (b[1] - a[1]) * k) * S;
+      ring.push({ x, y, px: x, py: y });
+    }
+    return;
+  }
+
   const n = Math.round(Number(getTool('nodes')));
   const r = S * 0.36;
   for (let i = 0; i < n; i += 1) {
@@ -725,6 +784,18 @@ function stepThread() {
   }
 }
 
+// Круг внутри петли принимает цвет формы, снаружи — цвет холста.
+function insideLoop(x, y) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const a = ring[i];
+    const b = ring[j];
+    if ((a.y > y) === (b.y > y)) continue;
+    if (x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
 function drawThread() {
   ctx.clearRect(0, 0, S, S);
 
@@ -741,19 +812,33 @@ function drawThread() {
     ctx.fill();
   }
 
-  // Окружности — цвета бумаги и под ниткой: видно только то, что они делают с формой.
-  ctx.fillStyle = PAPER_CSS;
+  const filled = getTool('fill');
   for (const peg of pegs) {
+    ctx.fillStyle = filled && insideLoop(peg.x, peg.y) ? `rgb(${RED.join(',')})` : PAPER_CSS;
     ctx.beginPath();
     ctx.arc(peg.x, peg.y, peg.r, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  loop();
-  ctx.strokeStyle = '#161616';
-  ctx.lineWidth = S * 0.014;
-  ctx.lineJoin = 'round';
-  ctx.stroke();
+  if (getTool('stroke')) {
+    loop();
+    ctx.strokeStyle = '#161616';
+    ctx.lineWidth = S * 0.014;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+
+  if (getTool('frame')) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(22,22,22,.4)';
+    ctx.lineWidth = 1;
+    for (const peg of pegs) {
+      ctx.beginPath();
+      ctx.arc(peg.x, peg.y, peg.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 
   // Обводку получает только выделенная — остальные растворяются в фоне.
   if (selectedPeg) {
@@ -825,7 +910,7 @@ const THREAD_POINTER = {
   double(p) {
     const peg = pegAt(p);
     if (peg) { removePeg(peg); return; }
-    const size = S * Number(getTool('peg'));
+    const size = S * Number(getTool('radius'));
     const fresh = { x: p.x, y: p.y, r: size * 0.2, target: size };
     pegs.push(fresh);
     selectPeg(fresh);
@@ -844,12 +929,14 @@ const MODES = {
     pointer: THREAD_POINTER,
     tools: [
       { key: 'tension', label: 'натяжение', min: 0.05, max: 1.5, step: 0.05, value: 0.5 },
-      { key: 'peg', label: 'размер новой', min: 0.03, max: 0.22, step: 0.005, value: 0.1 },
       { key: 'radius', label: 'радиус выделенной', min: 0.02, max: 0.3, step: 0.005, value: 0.13, live: applyRadius },
       { type: 'button', label: 'удалить выделенную', action: () => removePeg(selectedPeg) },
       { key: 'weight', label: 'тяжесть', min: 0, max: 2, step: 0.05, value: 0 },
       { key: 'nodes', label: 'узлов', min: 80, max: 500, step: 10, value: 260, rebuild: true },
-      { type: 'toggle', key: 'fill', label: 'заливка', value: false },
+      { type: 'toggle', key: 'fill', label: 'залить форму', value: false },
+      { type: 'toggle', key: 'stroke', label: 'контур', value: true },
+      { type: 'button', label: 'сохранить сцену', action: () => saveScene() },
+      { type: 'button', label: 'забыть сцену', action: () => forgetScene() },
     ],
   },
 
@@ -943,7 +1030,6 @@ const MODES = {
 
 const COMMON = [
   { key: 'points', label: 'сегментов', min: 60, max: 260, step: 2, value: 140, rebuild: true },
-  { key: 'gloss', label: 'блик', min: 0, max: 1, step: 0.02, value: 0.7 },
   { type: 'toggle', key: 'frame', label: 'каркас', value: false },
   { type: 'button', label: 'заново', action: () => setMode(current) },
 ];
