@@ -6,54 +6,59 @@ const LETTERS = [
   'Ц', 'Ч', 'Ш', 'Щ', 'Ъ', 'Ы', 'Ь', 'Э', 'Ю', 'Я'
 ];
 
+// Челлендж стартовал с А: каждая следующая буква — следующий день.
+const START = Date.UTC(2026, 7, 17);
+const DAY = 86400000;
+
+// Буква считается готовой, когда у неё есть mount-модуль.
 const READY = new Map([
-  ['А', {
-    number: '01',
-    status: 'готово',
-    description: 'Первая буква. Поле для будущей идеи.',
-    mount: mountA
-  }]
+  ['А', mountA]
 ]);
 
 const grid = document.querySelector('#letter-grid');
 const dialog = document.querySelector('#letter-dialog');
 const workspace = document.querySelector('#letter-workspace');
-const dialogTitle = document.querySelector('#dialog-title');
-const dialogKicker = document.querySelector('#dialog-kicker');
-const dialogStatus = document.querySelector('#dialog-status');
-const dialogDescription = document.querySelector('#dialog-description');
+const workspaceLabel = document.querySelector('#workspace-label');
 let unmountCurrent = null;
 
+function numberOf(letter) {
+  return String(LETTERS.indexOf(letter) + 1).padStart(2, '0');
+}
+
+function dateOf(letter) {
+  const date = new Date(START + LETTERS.indexOf(letter) * DAY);
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${day}.${month}`;
+}
+
 function renderGrid() {
-  grid.innerHTML = LETTERS.map((letter, index) => {
-    const item = READY.get(letter);
-    const number = String(index + 1).padStart(2, '0');
-    const state = item ? item.status : 'скоро';
+  grid.innerHTML = LETTERS.map((letter) => {
+    const ready = READY.has(letter);
+    const state = ready ? 'готово' : dateOf(letter);
     return `
-      <button class="letter-card ${item ? 'ready' : ''}" type="button"
-        ${item ? `data-letter="${letter}"` : 'aria-disabled="true" disabled'}
-        aria-label="Буква ${letter}, ${state}">
+      <button class="letter-card ${ready ? 'ready' : ''}" type="button"
+        ${ready ? `data-letter="${letter}"` : 'aria-disabled="true" disabled'}
+        aria-label="Буква ${letter}, ${ready ? 'готово' : `появится ${state}`}">
         <span class="letter-glyph" aria-hidden="true">${letter}</span>
         <span class="letter-meta">
-          <span>${number} / 33</span>
+          <span>${numberOf(letter)} / 33</span>
           <span class="letter-state">${state}</span>
-          ${item ? '<span class="letter-arrow" aria-hidden="true">↗</span>' : ''}
         </span>
       </button>`;
   }).join('');
+  document.querySelector('#ready-count').textContent = READY.size;
 }
 
 function openLetter(letter) {
-  const item = READY.get(letter);
-  if (!item) return;
+  const mount = READY.get(letter);
+  if (!mount) return;
   if (unmountCurrent) unmountCurrent();
-  dialogTitle.textContent = letter;
-  dialogKicker.textContent = `буква ${item.number} / 33`;
-  dialogStatus.textContent = item.status;
-  dialogDescription.textContent = item.description;
   workspace.querySelectorAll('[data-letter-layer]').forEach((node) => node.remove());
+  workspaceLabel.textContent = `${letter} · ${numberOf(letter)} / 33`;
+  dialog.setAttribute('aria-label', `Буква ${letter}`);
   dialog.showModal();
-  unmountCurrent = item.mount(workspace) || null;
+  unmountCurrent = mount(workspace) || null;
   history.replaceState(null, '', `?letter=${encodeURIComponent(letter.toLowerCase())}`);
 }
 

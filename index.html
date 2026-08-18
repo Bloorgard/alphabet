@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f1ede5">
-  <meta name="description" content="Алфавит, который вайбкодится по одной букве в день.">
-  <title>Алфавит / pustota</title>
+  <meta name="description" content="Буквальный челлендж: одна кириллическая буква в день, нарисованная кодом.">
+  <title>Буквальный челлендж / pustota</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -16,58 +16,36 @@
     <header class="masthead">
       <a class="wordmark" href="./" aria-label="Алфавит, на главную">pustota<span>.link</span></a>
       <div class="masthead-meta">
-        <span>ежедневный челлендж</span>
-        <span class="live-dot" aria-hidden="true"></span>
+        <span>буквальный челлендж</span>
         <span>2026</span>
       </div>
     </header>
 
     <section class="intro" aria-labelledby="page-title">
-      <div class="intro-index">01—33</div>
-      <div class="intro-copy">
-        <p class="eyebrow">кириллический алфавит</p>
-        <h1 id="page-title">Каждый день<br><em>одна буква.</em></h1>
-        <p class="intro-text">Я рисую буквы кодом. Здесь они будут появляться по одной, превращаясь в маленькие интерактивные миры.</p>
-      </div>
-      <div class="intro-note">
-        <span class="note-mark">↳</span>
-        <span>нажми на готовую<br>букву, чтобы войти</span>
-      </div>
+      <p class="eyebrow">кириллический алфавит</p>
+      <h1 id="page-title">Каждый день<br>одна буква.</h1>
+      <p class="intro-text">Я рисую буквы кодом. Здесь они появляются по одной, превращаясь в маленькие интерактивные миры. Нажми на готовую букву, чтобы войти.</p>
     </section>
 
     <section class="alphabet-section" aria-labelledby="alphabet-heading">
       <div class="section-heading">
         <h2 id="alphabet-heading">Алфавит</h2>
-        <p><span id="ready-count">1</span> из 33 готовы</p>
+        <p><span id="ready-count">0</span> из 33 готовы</p>
       </div>
       <div class="letter-grid" id="letter-grid" aria-label="Буквы русского алфавита"></div>
     </section>
 
     <footer class="site-footer">
       <span>буквы строятся в браузере</span>
-      <span>pustota / alphabet</span>
+      <a href="https://t.me/vse_pustoe" rel="me noopener" target="_blank">@vse_pustoe</a>
     </footer>
   </main>
 
-  <dialog class="letter-dialog" id="letter-dialog" aria-labelledby="dialog-title">
-    <div class="dialog-inner">
-      <button class="dialog-close" type="button" data-close-dialog aria-label="Закрыть окно">закрыть <span>×</span></button>
-      <div class="dialog-topline">
-        <span id="dialog-kicker">буква 01 / 33</span>
-        <span id="dialog-status">в работе</span>
-      </div>
-      <div class="letter-workspace" id="letter-workspace">
-        <div class="workspace-label">интерактивный эскиз</div>
-        <canvas id="letter-canvas" aria-label="Интерактивная анимация буквы А"></canvas>
-        <div class="workspace-hint">перетаскивай источник и преграду</div>
-      </div>
-      <div class="dialog-caption">
-        <h2 id="dialog-title">А</h2>
-        <div>
-          <p id="dialog-description">Точка света и А-преграда. Перетаскивай обе, чтобы менять тень.</p>
-          <span class="mono-note">v. 0.2 / shadow geometry</span>
-        </div>
-      </div>
+  <dialog class="letter-dialog" id="letter-dialog">
+    <div class="letter-workspace" id="letter-workspace">
+      <canvas id="letter-canvas"></canvas>
+      <div class="workspace-label" id="workspace-label"></div>
+      <button class="dialog-close" type="button" data-close-dialog aria-label="Закрыть окно">×</button>
     </div>
   </dialog>
 
