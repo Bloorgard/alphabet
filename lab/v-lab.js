@@ -425,9 +425,213 @@ const FOLD_POINTER = {
   up() { foldDrag = null; },
 };
 
+
+/* ---------- ремень по шкивам ---------- */
+
+// Одна непрерывная лента, натянутая по цепочке окружностей: крупная на носу
+// капли, маленькая у основания. Направление обхода чередуется, поэтому между
+// соседними кругами идут перекрёстные касательные.
+const lobes = [];
+let beltDrag = null;
+
+function beltOrigin() {
+  return { x: S * 0.2, y: S * 0.74 };
+}
+
+function buildBelt() {
+  lobes.length = 0;
+  const count = Math.round(Number(getTool('lobes')));
+  const nose = Number(getTool('nose'));
+  const root = Number(getTool('root'));
+
+  for (let i = 0; i < count; i += 1) {
+    const t = count === 1 ? 0 : i / (count - 1);
+    const ang = -1.42 + t * 1.62;
+    const len = S * (0.5 - 0.13 * t) * (0.85 + 0.3 * Math.random());
+    const tipR = S * nose * (1 - 0.55 * t) * (0.8 + 0.4 * Math.random());
+    lobes.push({
+      ang,
+      len,
+      tipR,
+      rootR: S * root * (0.6 + 0.8 * (1 - t)),
+      rootAng: -1.5 + t * 1.7,
+      restAng: ang,
+      restLen: len,
+      vAng: 0,
+      vLen: 0,
+    });
+  }
+}
+
+// Цепочка кругов: основание, нос, основание, нос... Знак — сторона обхвата.
+function beltCircles() {
+  const o = beltOrigin();
+  const spread = S * Number(getTool('spread'));
+  const list = [];
+  for (const lobe of lobes) {
+    list.push({
+      x: o.x + Math.cos(lobe.rootAng) * spread,
+      y: o.y + Math.sin(lobe.rootAng) * spread,
+      r: lobe.rootR,
+      s: 1,
+      lobe,
+      root: true,
+    });
+    list.push({
+      x: o.x + Math.cos(lobe.ang) * lobe.len,
+      y: o.y + Math.sin(lobe.ang) * lobe.len,
+      r: lobe.tipR,
+      s: -1,
+      lobe,
+    });
+  }
+  return list;
+}
+
+// Общая касательная двух шкивов с учётом стороны обхвата.
+function tangent(a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const D = Math.hypot(dx, dy);
+  const k = a.s * a.r - b.s * b.r;
+  const disc = D * D - k * k;
+  if (D < 1e-6 || disc < 0) return null;
+  const root = Math.sqrt(disc);
+  const nx = (k * dx - root * dy) / (D * D);
+  const ny = (k * dy + root * dx) / (D * D);
+  return {
+    from: { x: a.x + a.s * a.r * nx, y: a.y + a.s * a.r * ny },
+    to: { x: b.x + b.s * b.r * nx, y: b.y + b.s * b.r * ny },
+  };
+}
+
+function beltPath(ox, oy) {
+  const circles = beltCircles();
+  const legs = [];
+  for (let i = 0; i < circles.length - 1; i += 1) {
+    const leg = tangent(circles[i], circles[i + 1]);
+    if (!leg) return null;
+    legs.push(leg);
+  }
+
+  ctx.beginPath();
+  const tail = S * 0.14;
+  const first = legs[0].from;
+  ctx.moveTo(first.x - tail + ox, first.y + tail * 0.35 + oy);
+  ctx.lineTo(first.x + ox, first.y + oy);
+
+  for (let i = 0; i < legs.length; i += 1) {
+    const leg = legs[i];
+    ctx.lineTo(leg.to.x + ox, leg.to.y + oy);
+    const next = legs[i + 1];
+    if (!next) break;
+    const c = circles[i + 1];
+    const a1 = Math.atan2(leg.to.y - c.y, leg.to.x - c.x);
+    const a2 = Math.atan2(next.from.y - c.y, next.from.x - c.x);
+    ctx.arc(c.x + ox, c.y + oy, c.r, a1, a2, c.s > 0);
+  }
+
+  const last = legs[legs.length - 1].to;
+  ctx.lineTo(last.x + tail * 0.2 + ox, last.y + tail * 0.5 + oy);
+  return true;
+}
+
+function stepBelt() {
+  const spring = Number(getTool('spring'));
+  for (const lobe of lobes) {
+    if (lobe === beltDrag) continue;
+    lobe.vLen += (lobe.restLen - lobe.len) * spring;
+    lobe.vLen *= 0.86;
+    lobe.len += lobe.vLen;
+    lobe.vAng += (lobe.restAng - lobe.ang) * spring;
+    lobe.vAng *= 0.86;
+    lobe.ang += lobe.vAng;
+  }
+}
+
+function drawBelt() {
+  ctx.clearRect(0, 0, S, S);
+
+  const depth = Number(getTool('depth')) * S;
+  const steps = Math.max(1, Math.round(Number(getTool('steps'))));
+  const dx = Math.cos(-2.3);
+  const dy = Math.sin(-2.3);
+
+  ctx.fillStyle = '#1c0503';
+  for (let k = steps; k >= 1; k -= 1) {
+    const t = (k / steps) * depth;
+    if (beltPath(dx * t, dy * t)) ctx.fill('nonzero');
+  }
+
+  if (beltPath(0, 0)) {
+    if (getTool('outline')) {
+      ctx.strokeStyle = '#161616';
+      ctx.lineWidth = S * 0.008;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = `rgb(${RED.join(',')})`;
+      ctx.fill('nonzero');
+    }
+  }
+
+  if (getTool('frame')) {
+    ctx.strokeStyle = 'rgba(0,150,230,.9)';
+    ctx.lineWidth = 1;
+    for (const c of beltCircles()) {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+}
+
+const BELT_POINTER = {
+  down(p) {
+    const o = beltOrigin();
+    beltDrag = null;
+    let bestDist = Infinity;
+    for (const lobe of lobes) {
+      const cx = o.x + Math.cos(lobe.ang) * lobe.len;
+      const cy = o.y + Math.sin(lobe.ang) * lobe.len;
+      const d = Math.hypot(p.x - cx, p.y - cy);
+      if (d < Math.max(lobe.tipR, S * 0.05) && d < bestDist) { bestDist = d; beltDrag = lobe; }
+    }
+    return Boolean(beltDrag);
+  },
+  move(p) {
+    if (!beltDrag) return;
+    const o = beltOrigin();
+    beltDrag.ang = Math.atan2(p.y - o.y, p.x - o.x);
+    beltDrag.len = Math.max(beltDrag.tipR * 1.4, Math.hypot(p.x - o.x, p.y - o.y));
+    beltDrag.vAng = 0;
+    beltDrag.vLen = 0;
+  },
+  up() { beltDrag = null; },
+};
+
 /* ---------- режимы ---------- */
 
 const MODES = {
+  belt: {
+    label: 'ремень',
+    note: 'одна непрерывная лента по цепочке окружностей: крупная на носу капли, маленькая внутри основания',
+    build: buildBelt,
+    step: stepBelt,
+    draw: drawBelt,
+    pointer: BELT_POINTER,
+    tools: [
+      { key: 'lobes', label: 'капель', min: 2, max: 9, step: 1, value: 5, rebuild: true },
+      { key: 'nose', label: 'нос', min: 0.03, max: 0.2, step: 0.005, value: 0.11, rebuild: true },
+      { key: 'root', label: 'основание', min: 0.004, max: 0.06, step: 0.002, value: 0.022, rebuild: true },
+      { key: 'spread', label: 'разброс оснований', min: 0, max: 0.12, step: 0.002, value: 0.03 },
+      { key: 'spring', label: 'упругость', min: 0.02, max: 0.4, step: 0.01, value: 0.12 },
+      { key: 'depth', label: 'глубина', min: 0, max: 0.6, step: 0.01, value: 0.18 },
+      { key: 'steps', label: 'слоёв', min: 4, max: 160, step: 1, value: 80 },
+      { type: 'toggle', key: 'outline', label: 'только контур', value: false },
+    ],
+  },
+
   folds: {
     label: 'складки',
     note: 'складка — касательная оболочка вокруг спрятанной окружности; тяни за нос складки, длина перетекает между соседями',
@@ -654,5 +858,5 @@ function frame() {
 
 new ResizeObserver(resize).observe(canvas);
 resize();
-setMode('folds');
+setMode('belt');
 requestAnimationFrame(frame);
