@@ -1,3 +1,11 @@
+const CONTROLS = [
+  { key: 'rate', label: 'темп', min: 60, max: 900, step: 10 },
+  { key: 'bigScale', label: 'крупные формы', min: 0.7, max: 1.6, step: 0.02, refill: true },
+  { key: 'crumbScale', label: 'калибр мелочи', min: 0.5, max: 2, step: 0.02, refill: true },
+  { key: 'crumbs', label: 'сколько мелочи', min: 8, max: 70, step: 1, refill: true },
+  { key: 'contrast', label: 'контраст масс', min: 0, max: 1, step: 0.02 },
+];
+
 const PARAMS = {
   rate: 220,        // пауза между падениями, мс
   bigScale: 1.15,   // калибр крупных форм
@@ -31,6 +39,8 @@ export function mountB(workspace) {
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   workspace.dataset.ground = 'paper';
+  // Своя копия: покрутил ползунки, закрыл букву — при следующем открытии всё заново.
+  const params = { ...PARAMS };
 
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
@@ -93,7 +103,7 @@ export function mountB(workspace) {
         // Нечётная фигура повторяет предыдущую — близнец для другой стороны.
         const sample = i % 2 === 1 && prev
           ? prev
-          : { size: S * (0.024 + Math.random() * 0.036) * PARAMS.crumbScale, kind: Math.random() };
+          : { size: S * (0.024 + Math.random() * 0.036) * params.crumbScale, kind: Math.random() };
         prev = sample;
         const { size, kind } = sample;
         const body = kind < 0.45
@@ -111,12 +121,12 @@ export function mountB(workspace) {
       Composite.add(world, [...buildWalls(), mouseConstraint]);
       bodies = [];
 
-      const g = PARAMS.bigScale;
+      const g = params.bigScale;
       const bar = Bodies.rectangle(S * 0.5, S * 0.29, S * 0.58 * g, S * 0.17 * g, { ...MATERIAL, label: 'bar' });
       const belly = Bodies.circle(S * 0.5, S * 0.66, S * 0.27 * g, { ...MATERIAL, label: 'belly' }, 40);
 
-      const crumbs = makeCrumbs(PARAMS.crumbs);
-      const bed = Math.round(PARAMS.crumbs * 0.3);
+      const crumbs = makeCrumbs(params.crumbs);
+      const bed = Math.round(params.crumbs * 0.3);
       // Мелочь падает зеркальными парами: кучки растут одной высоты,
       // а лунка между ними ловит живот ровно по центру.
       const spread = (list, near, far) => {
@@ -150,7 +160,7 @@ export function mountB(workspace) {
 
     // Мелочь тем бледнее, чем мельче; обе формы буквы всегда в полную силу.
     function tone(t) {
-      const mix = (1 - t) * PARAMS.contrast * 0.8;
+      const mix = (1 - t) * params.contrast * 0.8;
       const channel = (i) => Math.round(RED[i] + (PAPER[i] - RED[i]) * mix);
       return `rgb(${channel(0)},${channel(1)},${channel(2)})`;
     }
@@ -195,7 +205,7 @@ export function mountB(workspace) {
         timer -= dt;
         if (timer <= 0) {
           spawn();
-          timer = PARAMS.rate;
+          timer = params.rate;
         }
       }
       Engine.update(engine, dt);
@@ -212,6 +222,51 @@ export function mountB(workspace) {
     const onDoubleClick = () => fill();
     canvas.addEventListener('dblclick', onDoubleClick);
 
+    const panel = document.createElement('div');
+    panel.className = 'sketch-panel';
+    panel.dataset.letterLayer = '';
+    panel.hidden = true;
+    for (const control of CONTROLS) {
+      const label = document.createElement('label');
+      label.textContent = control.label;
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = control.min;
+      input.max = control.max;
+      input.step = control.step;
+      input.value = params[control.key];
+      input.addEventListener('input', () => { params[control.key] = Number(input.value); });
+      // Калибр и количество меняют состав сцены, поэтому насыпаем заново.
+      if (control.refill) input.addEventListener('change', () => fill());
+      label.append(input);
+      panel.append(label);
+    }
+    const again = document.createElement('button');
+    again.type = 'button';
+    again.className = 'sketch-action';
+    again.textContent = 'насыпать заново';
+    again.addEventListener('click', () => fill());
+    panel.append(again);
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'sketch-toggle';
+    toggle.dataset.letterLayer = '';
+    toggle.textContent = 'параметры';
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.addEventListener('click', () => {
+      panel.hidden = !panel.hidden;
+      toggle.setAttribute('aria-expanded', String(!panel.hidden));
+    });
+    workspace.append(panel, toggle);
+
+    const onKeyDown = (event) => {
+      if (event.key !== 'p' && event.key !== 'з') return;
+      if (event.target.closest('input, textarea')) return;
+      toggle.click();
+    };
+    document.addEventListener('keydown', onKeyDown);
+
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(workspace);
     resize();
@@ -221,6 +276,9 @@ export function mountB(workspace) {
       cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
       canvas.removeEventListener('dblclick', onDoubleClick);
+      document.removeEventListener('keydown', onKeyDown);
+      panel.remove();
+      toggle.remove();
       Composite.clear(world, false);
       Engine.clear(engine);
     };

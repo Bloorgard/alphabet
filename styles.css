@@ -68,6 +68,15 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .letter-workspace[data-ground="paper"] .workspace-hint { color: rgba(22, 22, 22, .38); }
 .letter-workspace[data-ground="paper"] .dialog-close { color: rgba(22, 22, 22, .5); }
 .letter-workspace[data-ground="paper"] .dialog-close:hover { color: var(--ink); }
+.letter-workspace[data-ground="paper"] .sketch-toggle { color: rgba(22, 22, 22, .38); }
+.letter-workspace[data-ground="paper"] .sketch-toggle:hover,
+.letter-workspace[data-ground="paper"] .sketch-toggle[aria-expanded="true"] { color: var(--ink); }
+.letter-workspace[data-ground="paper"] .sketch-panel { background: rgba(241, 237, 229, .86); color: rgba(22, 22, 22, .6); }
+/* Вендорные псевдоэлементы нельзя объединять в один селектор: правило умирает целиком. */
+.letter-workspace[data-ground="paper"] .sketch-panel input::-webkit-slider-runnable-track { background: rgba(22, 22, 22, .28); }
+.letter-workspace[data-ground="paper"] .sketch-panel input::-moz-range-track { background: rgba(22, 22, 22, .28); }
+.letter-workspace[data-ground="paper"] .sketch-panel input::-webkit-slider-thumb { background: var(--ink); }
+.letter-workspace[data-ground="paper"] .sketch-panel input::-moz-range-thumb { background: var(--ink); }
 .workspace-hint { position: absolute; right: 14px; bottom: 14px; font-family: var(--mono); font-size: 10px; letter-spacing: .03em; color: rgba(241, 237, 229, .35); pointer-events: none; }
 .dialog-close { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 32px; height: 32px; border: 0; background: none; color: rgba(241, 237, 229, .55); font-size: 20px; line-height: 1; }
 .dialog-close:hover { color: var(--paper); }
@@ -75,10 +84,11 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 /* Панель параметров скрыта по умолчанию: кадр остаётся картинкой, пока её не позовут. */
 .sketch-toggle { position: absolute; left: 14px; bottom: 14px; border: 0; padding: 0; background: none; color: rgba(241, 237, 229, .35); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 .sketch-toggle:hover, .sketch-toggle[aria-expanded="true"] { color: rgba(241, 237, 229, .8); }
-.sketch-panel { position: absolute; left: 14px; bottom: 36px; display: grid; gap: 8px; color: rgba(241, 237, 229, .5); text-transform: none; letter-spacing: .02em; }
+.sketch-panel { position: absolute; left: 14px; bottom: 34px; display: grid; gap: 8px; padding: 12px 14px; background: rgba(22, 22, 22, .8); backdrop-filter: blur(2px); color: rgba(241, 237, 229, .5); text-transform: none; letter-spacing: .02em; }
 .sketch-panel[hidden] { display: none; }
 .sketch-panel label { display: grid; gap: 3px; }
 .sketch-panel p { color: rgba(241, 237, 229, .3); }
+.sketch-action { justify-self: start; margin-top: 2px; border: 0; padding: 0; background: none; color: inherit; font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
 .sketch-panel input { appearance: none; width: 150px; height: 12px; background: none; cursor: pointer; }
 .sketch-panel input::-webkit-slider-runnable-track { height: 1px; background: rgba(241, 237, 229, .25); }
 .sketch-panel input::-webkit-slider-thumb { appearance: none; width: 9px; height: 9px; margin-top: -4px; border-radius: 50%; background: rgba(241, 237, 229, .8); }
