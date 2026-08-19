@@ -1,5 +1,6 @@
 import { mountA } from './letters/a.js';
 import { mountB } from './letters/b.js';
+import { mountV } from './letters/v.js';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',
@@ -14,7 +15,8 @@ const DAY = 86400000;
 // Буква считается готовой, когда у неё есть mount-модуль.
 const READY = new Map([
   ['А', mountA],
-  ['Б', mountB]
+  ['Б', mountB],
+  ['В', mountV]
 ]);
 
 const grid = document.querySelector('#letter-grid');
