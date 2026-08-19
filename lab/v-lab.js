@@ -943,10 +943,22 @@ function removePeg(peg) {
   saveScene(true);
 }
 
+function snapRadius(value) {
+  const step = S * Number(getTool('grid'));
+  if (!(step > 0)) return value;
+  return Math.max(step, Math.round(value / step) * step);
+}
+
 function applyRadius() {
   if (!selectedPeg) return;
-  selectedPeg.target = S * Number(getTool('radius'));
+  // Цель кратна шагу сетки, а сам радиус подтягивается к ней плавно.
+  selectedPeg.target = snapRadius(S * Number(getTool('radius')));
   saveScene(true);
+}
+
+// Отпустили ползунок — показываем то значение, к которому окружность едет.
+function commitRadius() {
+  if (selectedPeg) setTool('radius', Number((selectedPeg.target / S).toFixed(4)));
 }
 
 // Невидимая сетка: шаг задаётся ползунком и по умолчанию равен радиусу малого круга.
@@ -1006,7 +1018,7 @@ const THREAD_POINTER = {
   double(p) {
     const peg = pegAt(p);
     if (peg) { removePeg(peg); return; }
-    const size = S * Number(getTool('radius'));
+    const size = snapRadius(S * Number(getTool('radius')));
     const fresh = { x: snap(p.x), y: snap(p.y), tx: snap(p.x), ty: snap(p.y), r: size * 0.2, target: size };
     pegs.push(fresh);
     selectPeg(fresh);
@@ -1027,7 +1039,7 @@ const MODES = {
     tools: [
       { key: 'tension', label: 'натяжение', min: 0.05, max: 1.5, step: 0.05, value: 0.5 },
       { key: 'grid', label: 'шаг сетки', min: 0, max: 0.08, step: 0.002, value: 0.02 },
-      { key: 'radius', label: 'радиус выделенной', min: 0.02, max: 0.3, step: 0.005, value: 0.13, live: applyRadius },
+      { key: 'radius', label: 'радиус выделенной', min: 0.02, max: 0.3, step: 0.005, value: 0.13, live: applyRadius, commit: commitRadius },
       { type: 'button', label: 'удалить выделенную', action: () => removePeg(selectedPeg) },
       { key: 'weight', label: 'тяжесть', min: 0, max: 2, step: 0.05, value: 0 },
       { key: 'nodes', label: 'узлов', min: 120, max: 900, step: 20, value: 300, rebuild: true },
@@ -1173,6 +1185,7 @@ function renderTools(mode) {
       toolValues[tool.key] = Number(input.value);
       if (tool.live) tool.live();
     });
+    if (tool.commit) input.addEventListener('change', () => tool.commit());
     if (tool.rebuild) {
       input.addEventListener('change', () => {
         const m = MODES[current];
@@ -1292,10 +1305,11 @@ window.addEventListener('keydown', (event) => {
   if (event.target.closest('input')) return;
   if (event.key === 'Delete' || event.key === 'Backspace') removePeg(selectedPeg);
   if (!selectedPeg) return;
-  const stepSize = S * 0.008;
+  const grid = S * Number(getTool('grid'));
+  const stepSize = grid > 0 ? grid : S * 0.008;
   const target = selectedPeg.target ?? selectedPeg.r;
-  if (event.key === '[' || event.key === 'х') selectPeg(Object.assign(selectedPeg, { target: Math.max(S * 0.02, target - stepSize) }));
-  if (event.key === ']' || event.key === 'ъ') selectPeg(Object.assign(selectedPeg, { target: Math.min(S * 0.3, target + stepSize) }));
+  if (event.key === '[' || event.key === 'х') selectPeg(Object.assign(selectedPeg, { target: snapRadius(Math.max(stepSize, target - stepSize)) }));
+  if (event.key === ']' || event.key === 'ъ') selectPeg(Object.assign(selectedPeg, { target: snapRadius(Math.min(S * 0.3, target + stepSize)) }));
 });
 
 function frame() {
