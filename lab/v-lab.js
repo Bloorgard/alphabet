@@ -640,6 +640,7 @@ const ring = [];
 const pegs = [];
 let ringDrag = null;
 let selectedPeg = null;
+let freshRing = false;
 
 const SCENE_KEY = 'alphabet-v-scene';
 
@@ -697,9 +698,12 @@ function saveScene(quiet) {
   note.textContent = 'сцена сохранена: она подхватится при следующем запуске, а JSON лежит в буфере и в консоли';
 }
 
+// «Забыть сцену» — стереть сохранение и вернуться к пустой заготовке.
 function forgetScene() {
   localStorage.removeItem(SCENE_KEY);
   pegs.length = 0;
+  selectPeg(null);
+  freshRing = true;
   setMode(current);
 }
 
@@ -716,7 +720,10 @@ function loadScene() {
 function buildThread() {
   if (toolInputs.radius) toolInputs.radius.disabled = !selectedPeg;
   ring.length = 0;
-  const saved = loadScene();
+  // «Заново» перезапускает нитку вокруг текущих кругов, поэтому сохранённый
+  // контур в этот раз не берём — иначе картинка восстановится как была.
+  const saved = freshRing ? null : loadScene();
+  freshRing = false;
 
   if (saved) {
     pegs.length = 0;
@@ -747,6 +754,20 @@ function buildThread() {
   if (!pegs.length) {
     pegs.push({ x: S * 0.44, y: S * 0.34, r: S * 0.13, target: S * 0.13 });
     pegs.push({ x: S * 0.56, y: S * 0.66, r: S * 0.13, target: S * 0.13 });
+  }
+  // Стартовая петля должна охватывать все круги, иначе часть окажется снаружи.
+  let reach = 0;
+  for (const peg of pegs) {
+    reach = Math.max(reach, Math.hypot(peg.x - S / 2, peg.y - S / 2) + peg.r);
+  }
+  if (reach > r) {
+    const grow = (reach * 1.15) / r;
+    for (const p of ring) {
+      p.x = S / 2 + (p.x - S / 2) * grow;
+      p.y = S / 2 + (p.y - S / 2) * grow;
+      p.px = p.x;
+      p.py = p.y;
+    }
   }
 }
 
@@ -1199,9 +1220,11 @@ function renderTools(mode) {
 }
 
 // Перезапуск не должен стирать расстановку: она сохраняется и подхватывается заново.
+// «Заново» — перезапуск нитки вокруг текущих кругов; круги остаются на местах.
 function restartMode() {
-  if (current === 'thread') saveScene(true);
+  freshRing = current === 'thread';
   setMode(current);
+  if (current === 'thread') saveScene(true);
 }
 
 function setMode(name) {
