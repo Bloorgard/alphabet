@@ -76,34 +76,20 @@ export function mountV(workspace) {
   let radiusInput = null;
   let removeButton = null;
 
-  function build(fresh) {
-    const source = fresh ? null : SCENE;
-    pegs = (source ? source.pegs : SCENE.pegs).map(([x, y, r]) => ({
+  function build() {
+    pegs = SCENE.pegs.map(([x, y, r]) => ({
       x: x * S, y: y * S, tx: x * S, ty: y * S, r: r * S, target: r * S,
     }));
 
+    // Нитка восстанавливается по сохранённому контуру и лишь дотягивается.
     ring = [];
-    if (source) {
-      // Нитка восстанавливается по сохранённому контуру и лишь дотягивается.
-      for (let i = 0; i < NODES; i += 1) {
-        const t = (i / NODES) * source.ring.length;
-        const a = source.ring[Math.floor(t) % source.ring.length];
-        const b = source.ring[(Math.floor(t) + 1) % source.ring.length];
-        const k = t - Math.floor(t);
-        const x = (a[0] + (b[0] - a[0]) * k) * S;
-        const y = (a[1] + (b[1] - a[1]) * k) * S;
-        ring.push({ x, y, px: x, py: y });
-      }
-      return;
-    }
-
-    // Перезапуск: петля начинается кругом, охватывающим все окружности.
-    let reach = S * 0.36;
-    for (const peg of pegs) reach = Math.max(reach, Math.hypot(peg.x - S / 2, peg.y - S / 2) + peg.r);
     for (let i = 0; i < NODES; i += 1) {
-      const a = (i / NODES) * Math.PI * 2;
-      const x = S / 2 + Math.cos(a) * reach * 1.15;
-      const y = S / 2 + Math.sin(a) * reach * 1.15;
+      const t = (i / NODES) * SCENE.ring.length;
+      const a = SCENE.ring[Math.floor(t) % SCENE.ring.length];
+      const b = SCENE.ring[(Math.floor(t) + 1) % SCENE.ring.length];
+      const k = t - Math.floor(t);
+      const x = (a[0] + (b[0] - a[0]) * k) * S;
+      const y = (a[1] + (b[1] - a[1]) * k) * S;
       ring.push({ x, y, px: x, py: y });
     }
   }
@@ -417,7 +403,9 @@ export function mountV(workspace) {
     again.className = 'sketch-action';
     again.textContent = 'заново';
     again.addEventListener('click', () => {
-      build(true);
+      // Возвращаем зашитую сцену целиком: топологию несёт контур нитки,
+      // и петля, построенная заново, собрала бы все окружности внутрь.
+      build();
       selectPeg(null);
     });
 
@@ -472,7 +460,7 @@ export function mountV(workspace) {
     canvas.height = Math.round(S * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (changed) {
-      build(false);
+      build();
       selectPeg(null);
     }
   }
