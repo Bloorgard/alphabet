@@ -50,13 +50,29 @@ function bezier(p0, p1, p2, p3, steps) {
   return out;
 }
 
-// Рукописная г: подъём, загиб вправо, спуск с хвостом — одно движение.
+// Рукописная г — два наплыва: верхний уходит влево, нижний возвращает вправо.
+// Русло получается излучиной, а не крючком.
 function cursiveAxis() {
   return [
-    ...bezier([0.30, 0.80], [0.34, 0.64], [0.40, 0.46], [0.45, 0.30], 36),
-    ...bezier([0.45, 0.30], [0.50, 0.20], [0.62, 0.24], [0.61, 0.38], 28).slice(1),
-    ...bezier([0.61, 0.38], [0.60, 0.54], [0.56, 0.66], [0.68, 0.70], 28).slice(1),
+    ...bezier([0.72, 0.26], [0.58, 0.17], [0.34, 0.20], [0.28, 0.34], 32),
+    ...bezier([0.28, 0.34], [0.24, 0.46], [0.44, 0.50], [0.55, 0.56], 30).slice(1),
+    ...bezier([0.55, 0.56], [0.66, 0.63], [0.52, 0.75], [0.34, 0.72], 30).slice(1),
+    ...bezier([0.34, 0.72], [0.30, 0.80], [0.52, 0.84], [0.74, 0.78], 30).slice(1),
   ];
+}
+
+// Угол в углу в углу: каждая следующая Г стоит на том же полу внутри предыдущей.
+function nestedAxes(count, gap) {
+  const out = [];
+  for (let i = 0; i < count; i += 1) {
+    const left = 0.2 + i * gap;
+    const top = 0.12 + i * gap;
+    const right = 0.86 - i * gap;
+    const bottom = 0.88 - i * gap;
+    if (right - left < gap || bottom - top < gap) break;
+    out.push([[left, bottom], [left, top], [right, top]]);
+  }
+  return out;
 }
 
 function resample(points, count) {
@@ -213,7 +229,8 @@ function stepRod(rod, opts) {
   plasticFlow(rod, opts);
   const target = buildTarget(rod);
   // Возврат к форме мягкий: прогиб под грузом должен быть виден глазом.
-  pullToTarget(rod, target, opts.stiffness * 0.06);
+  // Коэффициент возврата держим ниже единицы: выше — перелёт и разнос.
+  pullToTarget(rod, target, clamp(opts.stiffness * 0.06, 0, 0.5));
   // Без сглаживания цепочка идёт мелкой пилой, и пила сама запускает течь.
   smooth(rod, target, 0.3);
   for (let k = 0; k < 3; k += 1) solveLengths(rod);
@@ -269,343 +286,73 @@ const RESTART = { type: 'button', label: 'заново', action: () => setMode(c
 
 MODES.beam = {
   label: 'консоль',
-  note: 'заглавная Г — балка с вылетом: груз тянет перекладину вниз, металл течёт у самого угла',
+  note: 'балка с вылетом: груз тянет перекладину вниз, металл течёт у угла. «вложенные углы» — та же физика для Г внутри Г',
   tools: [
     RESTART,
+    { type: 'toggle', label: 'вложенные углы', key: 'nested', value: false, rebuild: true },
     { type: 'range', label: 'вылет', key: 'reach', min: 0.16, max: 0.5, step: 0.01, value: 0.36, rebuild: true },
+    { type: 'range', label: 'сколько Г', key: 'turns', min: 2, max: 8, step: 1, value: 5, rebuild: true },
     { type: 'range', label: 'жёсткость', key: 'stiff', min: 0.2, max: 2, step: 0.05, value: 1 },
     { type: 'range', label: 'груз', key: 'load', min: 0, max: 14, step: 0.2, value: 4 },
     { type: 'range', label: 'предел', key: 'yield', min: 0, max: 0.3, step: 0.005, value: 0.1 },
     { type: 'range', label: 'вязкость', key: 'damp', min: 0.9, max: 0.999, step: 0.001, value: 0.99 },
   ],
   setup() {
-    // Стойка заделана в пол, свободен только вылет.
-    modeState.rod = makeRod(capitalAxis(num('reach')).reverse(), 40, 4);
+    // Стойка заделана в пол, свободен только вылет: у каждой Г своя заделка.
+    modeState.axes = on('nested')
+      ? nestedAxes(num('turns'), 0.06)
+      : [capitalAxis(num('reach')).reverse()];
+    const spans = modeState.axes.map((axis) => axis.reduce((sum, p, i) => (
+      i === 0 ? 0 : sum + Math.hypot(p[0] - axis[i - 1][0], p[1] - axis[i - 1][1])
+    ), 0));
+    const longest = Math.max(...spans);
+    // Узлы кладём по длине: на короткой Г их столько же — и сегменты вырождаются.
+    modeState.rods = modeState.axes.map((axis, i) => makeRod(axis, Math.max(14, Math.round(40 * (spans[i] / longest))), 4));
+    modeState.rods.forEach((rod, i) => { rod.share = spans[i] / longest; });
   },
   step() {
-    const rod = modeState.rod;
-    rod.nodes[rod.nodes.length - 1].load = num('load');
-    stepRod(rod, {
-      gravity: 1, damp: num('damp'), stiffness: num('stiff'),
-      yield: num('yield'), flow: 0.03,
-    });
+    for (const rod of modeState.rods) {
+      rod.nodes[rod.nodes.length - 1].load = num('load') * rod.share;
+      stepRod(rod, {
+        // Короткая Г должна гнуться не сильнее длинной, отсюда поправка на размер.
+        gravity: 1, damp: num('damp'), stiffness: num('stiff') / (rod.share * rod.share),
+        yield: num('yield'), flow: 0.03,
+      });
+    }
   },
   draw() {
-    const rod = modeState.rod;
-    strokeAxis(capitalAxis(num('reach')), S * 0.085, FAINT);
-    drawRod(rod, S * 0.085);
-    const tip = rod.nodes[rod.nodes.length - 1];
+    const thick = on('nested') ? S * 0.028 : S * 0.085;
     const weight = num('load');
-    if (weight <= 0) return;
-    const r = S * 0.012 * Math.sqrt(weight) + S * 0.012;
-    ctx.strokeStyle = INK;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(tip.x, tip.y);
-    ctx.lineTo(tip.x, tip.y + S * 0.06);
-    ctx.stroke();
-    ctx.fillStyle = INK;
-    ctx.beginPath();
-    ctx.arc(tip.x, tip.y + S * 0.06 + r, r, 0, Math.PI * 2);
-    ctx.fill();
-  },
-  onDown() { grabRod(modeState.rod); },
-  onMove() { dragRod(); },
-  onUp() { releaseRod(); },
-};
-
-MODES.hook = {
-  label: 'крюк',
-  note: 'строчная г держит груз коротким плечом: клик добавляет вес, на разгибе крюк роняет всё',
-  tools: [
-    RESTART,
-    { type: 'range', label: 'плечо', key: 'reach', min: 0.1, max: 0.32, step: 0.01, value: 0.2, rebuild: true },
-    { type: 'range', label: 'жёсткость', key: 'stiff', min: 0.2, max: 2, step: 0.05, value: 1.2 },
-    { type: 'range', label: 'вес гири', key: 'unit', min: 0.5, max: 6, step: 0.5, value: 2 },
-    { type: 'range', label: 'предел', key: 'yield', min: 0, max: 0.3, step: 0.005, value: 0.08 },
-    { type: 'range', label: 'угол срыва', key: 'slip', min: 5, max: 80, step: 1, value: 28 },
-    { type: 'button', label: 'снять груз', action: () => { modeState.hung = 0; } },
-  ],
-  setup() {
-    modeState.rod = makeRod(smallAxis(num('reach')).reverse(), 32, 4);
-    modeState.hung = 0;
-    modeState.falling = [];
-  },
-  step() {
-    const rod = modeState.rod;
-    const tip = rod.nodes[rod.nodes.length - 1];
-    tip.load = modeState.hung * num('unit');
-    stepRod(rod, {
-      gravity: 1, damp: 0.99, stiffness: num('stiff'),
-      yield: num('yield'), flow: 0.04,
-    });
-    // Плечо разогнулось вниз — держать больше нечем.
-    const corner = rod.nodes[rod.corner];
-    const droop = Math.atan2(tip.y - corner.y, Math.abs(tip.x - corner.x) || 1e-6);
-    if (modeState.hung > 0 && droop > (num('slip') * Math.PI) / 180) {
-      for (let i = 0; i < modeState.hung; i += 1) {
-        modeState.falling.push({ x: tip.x + (Math.random() - 0.5) * S * 0.02, y: tip.y, vx: (Math.random() - 0.5) * S * 0.004, vy: 0 });
-      }
-      modeState.hung = 0;
-    }
-    for (const g of modeState.falling) {
-      g.vy += 1.6 * S * STEP * STEP;
-      g.x += g.vx;
-      g.y += g.vy;
-    }
-    modeState.falling = modeState.falling.filter((g) => g.y < S * 1.2);
-  },
-  draw() {
-    const rod = modeState.rod;
-    strokeAxis(smallAxis(num('reach')), S * 0.07, FAINT);
-    drawRod(rod, S * 0.07);
-    const tip = rod.nodes[rod.nodes.length - 1];
-    const r = S * 0.016;
-    ctx.fillStyle = INK;
-    for (let i = 0; i < modeState.hung; i += 1) {
-      const row = Math.floor(i / 3);
-      const col = (i % 3) - 1;
+    modeState.axes.forEach((axis, i) => {
+      strokeAxis(axis, thick, FAINT);
+      const rod = modeState.rods[i];
+      drawRod(rod, thick);
+      if (weight <= 0) return;
+      const tip = rod.nodes[rod.nodes.length - 1];
+      const r = (S * 0.012 * Math.sqrt(weight * rod.share) + S * 0.012) * (on('nested') ? 0.5 : 1);
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(tip.x + col * r * 2.2, tip.y + S * 0.05 + row * r * 2.2, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.fillStyle = 'rgba(22,22,22,.45)';
-    for (const g of modeState.falling) {
-      ctx.beginPath();
-      ctx.arc(g.x, g.y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  },
-  onDown() {
-    const rod = modeState.rod;
-    const tip = rod.nodes[rod.nodes.length - 1];
-    // Рядом с крюком — вешаем гирю, дальше — тащим букву за узел.
-    if (Math.hypot(pointer.x - tip.x, pointer.y - tip.y) < S * 0.12) modeState.hung += 1;
-    else grabRod(rod);
-  },
-  onMove() { dragRod(); },
-  onUp() { releaseRod(); },
-};
-
-MODES.stroke = {
-  label: 'росчерк',
-  note: 'перо с инерцией: рукописная г идёт одним движением, скорость съедает толщину',
-  tools: [
-    { type: 'button', label: 'стереть', action: () => { modeState.strokes = []; modeState.active = null; } },
-    { type: 'range', label: 'инерция', key: 'pull', min: 0.04, max: 0.6, step: 0.02, value: 0.18 },
-    { type: 'range', label: 'вязкость', key: 'drag', min: 0.5, max: 0.95, step: 0.01, value: 0.78 },
-    { type: 'range', label: 'нажим', key: 'nib', min: 0.01, max: 0.06, step: 0.002, value: 0.026 },
-    { type: 'range', label: 'сухость', key: 'dry', min: 0, max: 1, step: 0.05, value: 0.7 },
-    { type: 'toggle', label: 'трафарет', key: 'ghost', value: true },
-  ],
-  setup() {
-    modeState.pen = { x: S * 0.3, y: S * 0.8, vx: 0, vy: 0 };
-    modeState.strokes = [];
-    modeState.active = null;
-  },
-  step() {
-    const pen = modeState.pen;
-    if (pointer.down) {
-      pen.vx = (pen.vx + (pointer.x - pen.x) * num('pull')) * num('drag');
-      pen.vy = (pen.vy + (pointer.y - pen.y) * num('pull')) * num('drag');
-    } else {
-      pen.vx *= num('drag');
-      pen.vy *= num('drag');
-    }
-    pen.x += pen.vx;
-    pen.y += pen.vy;
-    if (!modeState.active) return;
-    const speed = Math.hypot(pen.vx, pen.vy);
-    const base = num('nib') * S;
-    const w = base * (1 - num('dry') * clamp(speed / (S * 0.03), 0, 1));
-    modeState.active.push({ x: pen.x, y: pen.y, w: Math.max(base * 0.12, w) });
-  },
-  draw() {
-    if (on('ghost')) strokeAxis(cursiveAxis(), S * 0.02, FAINT);
-    ctx.strokeStyle = INK;
-    ctx.lineCap = 'round';
-    for (const stroke of modeState.strokes) {
-      for (let i = 1; i < stroke.length; i += 1) {
-        ctx.lineWidth = (stroke[i - 1].w + stroke[i].w) * 0.5;
-        ctx.beginPath();
-        ctx.moveTo(stroke[i - 1].x, stroke[i - 1].y);
-        ctx.lineTo(stroke[i].x, stroke[i].y);
-        ctx.stroke();
-      }
-    }
-    const pen = modeState.pen;
-    ctx.strokeStyle = pointer.down ? INK : FAINT;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(pen.x, pen.y, S * 0.012, 0, Math.PI * 2);
-    ctx.stroke();
-  },
-  onDown() {
-    modeState.active = [];
-    modeState.strokes.push(modeState.active);
-  },
-  onUp() { modeState.active = null; },
-};
-
-MODES.morph = {
-  label: 'морфинг',
-  note: 'одна кривая с двумя состояниями: печатная Г перетекает в рукописную г',
-  tools: [
-    { type: 'range', label: 'переход', key: 't', min: 0, max: 1, step: 0.01, value: 0 },
-    { type: 'toggle', label: 'качели', key: 'auto', value: false },
-    { type: 'range', label: 'перо', key: 'nib', min: 0.02, max: 0.12, step: 0.005, value: 0.075 },
-    { type: 'toggle', label: 'обе формы', key: 'both', value: true },
-  ],
-  setup() {
-    modeState.from = resample(capitalAxis(0.36).reverse(), 180);
-    modeState.to = resample(cursiveAxis(), 180);
-    modeState.phase = 0;
-  },
-  step() {
-    modeState.phase += STEP;
-  },
-  draw() {
-    const t = on('auto') ? 0.5 - 0.5 * Math.cos(modeState.phase * 0.9) : num('t');
-    if (on('both')) {
-      strokeAxis(modeState.from, S * 0.012, FAINT);
-      strokeAxis(modeState.to, S * 0.012, FAINT);
-    }
-    const nodes = modeState.from.map(([x, y], i) => ({
-      x: (x + (modeState.to[i][0] - x) * t) * S,
-      y: (y + (modeState.to[i][1] - y) * t) * S,
-    }));
-    strokeNodes(nodes, num('nib') * S, INK);
-  },
-};
-
-MODES.etch = {
-  label: 'гравюра',
-  note: 'бумага пуста, буква проступает под резцом: внутри контура штрих ложится чёрным, снаружи еле царапает',
-  tools: [
-    { type: 'button', label: 'стереть', action: () => { modeState.marks = []; } },
-    { type: 'range', label: 'наклон', key: 'tilt', min: -80, max: 80, step: 1, value: -35 },
-    { type: 'range', label: 'штрих', key: 'len', min: 0.01, max: 0.12, step: 0.005, value: 0.05 },
-    { type: 'range', label: 'плотность', key: 'dense', min: 0.004, max: 0.05, step: 0.002, value: 0.014 },
-    { type: 'range', label: 'резец', key: 'width', min: 0.01, max: 0.14, step: 0.005, value: 0.05 },
-    { type: 'toggle', label: 'след снаружи', key: 'outside', value: true },
-  ],
-  setup() {
-    modeState.marks = [];
-    modeState.mask = buildMask(capitalAxis(0.36), 0.11);
-  },
-  step() {
-    if (!pointer.down) return;
-    const step = num('dense') * S;
-    const dist = Math.hypot(pointer.x - pointer.px, pointer.y - pointer.py);
-    const count = Math.max(1, Math.round(dist / step));
-    for (let i = 0; i < count; i += 1) {
-      const t = count === 1 ? 1 : i / (count - 1);
-      const cx = pointer.px + (pointer.x - pointer.px) * t;
-      const cy = pointer.py + (pointer.y - pointer.py) * t;
-      const spread = num('width') * S;
-      const x = cx + (Math.random() - 0.5) * spread;
-      const y = cy + (Math.random() - 0.5) * spread;
-      const inside = readMask(modeState.mask, x, y);
-      if (!inside && !on('outside')) continue;
-      modeState.marks.push({ x, y, inside, len: num('len') * S * (0.6 + Math.random() * 0.8) });
-    }
-    if (modeState.marks.length > 6000) modeState.marks.splice(0, modeState.marks.length - 6000);
-  },
-  draw() {
-    const angle = (num('tilt') * Math.PI) / 180;
-    const dx = Math.cos(angle);
-    const dy = Math.sin(angle);
-    ctx.lineWidth = Math.max(1, S * 0.0022);
-    ctx.lineCap = 'round';
-    for (const mark of modeState.marks) {
-      // Снаружи резец идёт по пустой бумаге — след почти сухой.
-      ctx.strokeStyle = mark.inside ? 'rgba(22,22,22,.82)' : 'rgba(22,22,22,.07)';
-      ctx.beginPath();
-      ctx.moveTo(mark.x - dx * mark.len * 0.5, mark.y - dy * mark.len * 0.5);
-      ctx.lineTo(mark.x + dx * mark.len * 0.5, mark.y + dy * mark.len * 0.5);
+      ctx.moveTo(tip.x, tip.y);
+      ctx.lineTo(tip.x, tip.y + S * 0.04);
       ctx.stroke();
-    }
-    ctx.strokeStyle = FAINT;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(pointer.x, pointer.y, num('width') * S * 0.5, 0, Math.PI * 2);
-    ctx.stroke();
+      ctx.fillStyle = INK;
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y + S * 0.04 + r, r, 0, Math.PI * 2);
+      ctx.fill();
+    });
   },
+  onDown() { for (const rod of modeState.rods) grabRod(rod); },
+  onMove() { dragRod(); },
+  onUp() { releaseRod(); },
 };
 
-// Маска буквы держится отдельным холстом: резцу нужно знать, где чернила.
-function buildMask(axis, width) {
-  const size = Math.max(1, Math.round(S));
-  const mask = document.createElement('canvas');
-  mask.width = size;
-  mask.height = size;
-  const mc = mask.getContext('2d');
-  mc.lineWidth = width * size;
-  mc.lineJoin = 'round';
-  mc.lineCap = 'round';
-  mc.strokeStyle = '#000';
-  mc.beginPath();
-  mc.moveTo(axis[0][0] * size, axis[0][1] * size);
-  for (let i = 1; i < axis.length; i += 1) mc.lineTo(axis[i][0] * size, axis[i][1] * size);
-  mc.stroke();
-  return { size, data: mc.getImageData(0, 0, size, size).data };
-}
-
-function readMask(mask, x, y) {
-  const ix = Math.round((x / S) * mask.size);
-  const iy = Math.round((y / S) * mask.size);
-  if (ix < 0 || iy < 0 || ix >= mask.size || iy >= mask.size) return false;
-  return mask.data[(iy * mask.size + ix) * 4 + 3] > 40;
-}
-
-MODES.tree = {
-  label: 'рекурсия',
-  note: 'на концах Г вырастают Г поменьше: буква, собранная из самой себя',
-  tools: [
-    { type: 'range', label: 'глубина', key: 'depth', min: 1, max: 7, step: 1, value: 4 },
-    { type: 'range', label: 'масштаб', key: 'scale', min: 0.25, max: 0.8, step: 0.01, value: 0.58 },
-    { type: 'range', label: 'разворот', key: 'spread', min: -180, max: 180, step: 1, value: 42 },
-    { type: 'range', label: 'плечо', key: 'arm', min: 0.3, max: 1, step: 0.02, value: 0.56 },
-    { type: 'toggle', label: 'ветвить угол', key: 'corner', value: false },
-  ],
-  setup() {},
-  draw() {
-    const depth = num('depth');
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    growG(S * 0.34, S * 0.22, S * 0.5, 0, depth);
-  },
-};
-
-// Г рисуется от угла: плечо вправо по углу, стойка вниз поперёк.
-function growG(x, y, size, angle, depth) {
-  const total = num('depth');
-  const arm = size * num('arm');
-  const ax = x + Math.cos(angle) * arm;
-  const ay = y + Math.sin(angle) * arm;
-  const dx = x + Math.cos(angle + Math.PI / 2) * size;
-  const dy = y + Math.sin(angle + Math.PI / 2) * size;
-  const shade = 0.25 + 0.75 * (depth / total);
-  ctx.strokeStyle = `rgba(22,22,22,${shade.toFixed(3)})`;
-  ctx.lineWidth = Math.max(1, size * 0.16);
-  ctx.beginPath();
-  ctx.moveTo(ax, ay);
-  ctx.lineTo(x, y);
-  ctx.lineTo(dx, dy);
-  ctx.stroke();
-  if (depth <= 1) return;
-  const spread = (num('spread') * Math.PI) / 180;
-  const next = size * num('scale');
-  growG(ax, ay, next, angle + spread, depth - 1);
-  growG(dx, dy, next, angle - spread, depth - 1);
-  if (on('corner')) growG(x, y, next * 0.6, angle + Math.PI, depth - 1);
-}
-
-MODES.pipe = {
-  label: 'колено',
-  note: 'поток входит в перекладину, доходит до угла и падает по стойке: Г как единственный поворот',
+MODES.river = {
+  label: 'река',
+  note: 'русло буквы: по излучинам рукописной г идёт поток, у печатной Г остаётся один поворот',
   tools: [
     { type: 'button', label: 'слить', action: () => { modeState.drops = []; } },
+    { type: 'toggle', label: 'печатная Г', key: 'block', value: false, rebuild: true },
     { type: 'range', label: 'напор', key: 'flow', min: 0, max: 6, step: 0.2, value: 2.4 },
     { type: 'range', label: 'тяга', key: 'push', min: 0, max: 4, step: 0.1, value: 1.4 },
     { type: 'range', label: 'труба', key: 'bore', min: 0.03, max: 0.14, step: 0.005, value: 0.07 },
@@ -614,7 +361,8 @@ MODES.pipe = {
     { type: 'toggle', label: 'палец в струе', key: 'finger', value: true },
   ],
   setup() {
-    modeState.axis = resample(capitalAxis(0.4), 140).map(([x, y]) => ({ x: x * S, y: y * S }));
+    const axis = on('block') ? capitalAxis(0.4) : cursiveAxis();
+    modeState.axis = resample(axis, 160).map(([x, y]) => ({ x: x * S, y: y * S }));
     modeState.drops = [];
     modeState.spawn = 0;
   },
@@ -714,6 +462,7 @@ function renderTools(mode) {
       button.addEventListener('click', () => {
         toolValues[key] = !toolValues[key];
         button.setAttribute('aria-pressed', String(toolValues[key]));
+        if (tool.rebuild) setMode(current);
       });
       toolsBar.append(button);
       continue;
