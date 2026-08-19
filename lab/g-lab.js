@@ -444,34 +444,34 @@ MODES.corners = {
   },
 };
 
-// Тушь: размытые пятна прогоняются через контраст и слипаются в массу.
+// Тушь: пятна собираются чёткими, а размытие с контрастом накладывается
+// один раз на весь слой. Фильтр на каждой капле — отдельный проход размытия,
+// и на тысяче капель это вешает машину.
+const INK_SCALE = 0.5;
 let inkCanvas = null;
 function drawInk(drops, r) {
-  const size = Math.max(1, Math.round(S));
+  const size = Math.max(1, Math.round(S * INK_SCALE));
   if (!inkCanvas || inkCanvas.width !== size) {
     inkCanvas = document.createElement('canvas');
     inkCanvas.width = size;
     inkCanvas.height = size;
   }
   const oc = inkCanvas.getContext('2d');
-  oc.filter = 'none';
   oc.fillStyle = '#fff';
   oc.fillRect(0, 0, size, size);
-  oc.filter = `blur(${Math.max(1, r * 1.6).toFixed(1)}px)`;
   oc.fillStyle = '#000';
+  const rr = r * 1.4 * INK_SCALE;
   for (const d of drops) {
     oc.beginPath();
-    oc.arc(d.x, d.y, r * 1.5, 0, Math.PI * 2);
+    oc.arc(d.x * INK_SCALE, d.y * INK_SCALE, rr, 0, Math.PI * 2);
     oc.fill();
   }
-  oc.filter = 'none';
   ctx.save();
   // Белый фон подложки при умножении не мешает бумаге, а контраст режет края.
   ctx.globalCompositeOperation = 'multiply';
-  ctx.filter = 'contrast(12)';
+  ctx.filter = `blur(${Math.max(1, r * 1.2).toFixed(1)}px) contrast(14)`;
   ctx.drawImage(inkCanvas, 0, 0, S, S);
   ctx.restore();
-  ctx.filter = 'none';
 }
 
 MODES.river = {
@@ -480,7 +480,7 @@ MODES.river = {
   tools: [
     { type: 'button', label: 'слить', action: () => { modeState.drops = []; } },
     { type: 'toggle', label: 'печатная Г', key: 'block', value: false, rebuild: true },
-    { type: 'range', label: 'напор', key: 'flow', min: 0, max: 6, step: 0.2, value: 2.4 },
+    { type: 'range', label: 'напор', key: 'flow', min: 0, max: 24, step: 0.2, value: 6 },
     { type: 'range', label: 'тяга', key: 'push', min: 0, max: 4, step: 0.1, value: 1.4 },
     { type: 'range', label: 'русло', key: 'bore', min: 0.04, max: 0.26, step: 0.005, value: 0.18 },
     { type: 'range', label: 'капля', key: 'drop', min: 0.002, max: 0.03, step: 0.001, value: 0.006 },
@@ -511,10 +511,9 @@ MODES.river = {
     const cap = num('cap');
     // Подача догоняет расход: на большой тяге река успевает вытечь,
     // и без добора кадр пустеет, сколько ни держи напор.
-    const room = Math.max(0, cap - modeState.drops.length);
-    // Чем больше вытекло, тем сильнее устье добирает: иначе на высокой тяге
-    // расход обгоняет подачу и русло пустеет само собой.
-    modeState.spawn += Math.min(num('flow') * (1 + (8 * room) / cap), room);
+    // Подача ровная: добор «по нехватке» гнал воду волнами, и поток
+    // было не настроить. Напор — просто капель в кадр, лишнее не входит.
+    modeState.spawn += num('flow');
     while (modeState.spawn >= 1 && modeState.drops.length < cap) {
       modeState.spawn -= 1;
       const across = (Math.random() - 0.5) * num('jet') * r * 2;
