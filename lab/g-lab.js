@@ -61,6 +61,28 @@ function cursiveAxis() {
   ];
 }
 
+// Рукописная г как форма балки: от нижней пятки, через талию, к верхнему наплыву.
+// Прямого угла тут нет, зато есть тонкое место посередине — там она и потечёт.
+function beamAxis() {
+  return [
+    ...bezier([0.78, 0.56], [0.72, 0.72], [0.58, 0.84], [0.45, 0.83], 26),
+    ...bezier([0.45, 0.83], [0.33, 0.82], [0.28, 0.75], [0.31, 0.68], 18).slice(1),
+    ...bezier([0.31, 0.68], [0.38, 0.53], [0.52, 0.38], [0.6, 0.28], 30).slice(1),
+    ...bezier([0.6, 0.28], [0.66, 0.21], [0.62, 0.15], [0.52, 0.14], 18).slice(1),
+    ...bezier([0.52, 0.14], [0.4, 0.14], [0.3, 0.24], [0.24, 0.37], 26).slice(1),
+  ];
+}
+
+// Наплывы толстые, талия и срезы тонкие — толщина живёт вдоль оси.
+function beamWidths(count, base) {
+  const out = [];
+  for (let i = 0; i < count; i += 1) {
+    const t = i / (count - 1);
+    out.push(base * (0.3 + 0.7 * Math.abs(Math.sin(Math.PI * 2 * t))));
+  }
+  return out;
+}
+
 // Угол в углу в углу: каждая следующая Г стоит на том же полу внутри предыдущей.
 function nestedAxes(count, gap) {
   const out = [];
@@ -132,7 +154,7 @@ function makeRod(axis, count, pinned) {
   for (let i = 1; i < nodes.length - 1; i += 1) rest.push(turn(nodes[i - 1], nodes[i], nodes[i + 1]));
   const corner = rest.reduce((best, angle, i) => (Math.abs(angle) > Math.abs(rest[best]) ? i : best), 0) + 1;
   const home = nodes.map((n) => ({ x: n.x, y: n.y }));
-  return { nodes, lens, rest, pinned, corner, home, damage: nodes.map(() => 0) };
+  return { nodes, lens, rest, pinned, corner, home, damage: nodes.map(() => 0), drift: nodes.map(() => 0) };
 }
 
 function fixed(rod, i) {
@@ -181,15 +203,20 @@ function buildTarget(rod) {
   return pts;
 }
 
-// Металл течёт там, где узел перегнуло сильнее предела.
+// Металл течёт там, где узел перегнуло сильнее предела. Утёкшее место
+// наклёпывается: следующий раз ему нужен перегиб больше, иначе под любой
+// нагрузкой выше предела буква оплывала бы бесконечно.
 function plasticFlow(rod, opts) {
   if (opts.yield <= 0) return;
   for (let i = 1; i < rod.nodes.length - 1; i += 1) {
     const cur = turn(rod.nodes[i - 1], rod.nodes[i], rod.nodes[i + 1]);
     const diff = wrap(cur - rod.rest[i - 1]);
-    if (Math.abs(diff) <= opts.yield) continue;
-    const excess = Math.abs(diff) - opts.yield;
-    rod.rest[i - 1] += Math.sign(diff) * excess * opts.flow;
+    const limit = opts.yield + rod.drift[i] * opts.harden;
+    if (Math.abs(diff) <= limit) continue;
+    const excess = Math.abs(diff) - limit;
+    const shift = Math.sign(diff) * excess * opts.flow;
+    rod.rest[i - 1] += shift;
+    rod.drift[i] += Math.abs(shift);
     rod.damage[i] = Math.min(1, rod.damage[i] + excess * 0.04);
   }
 }
@@ -237,7 +264,20 @@ function stepRod(rod, opts) {
 }
 
 function drawRod(rod, width) {
-  strokeNodes(rod.nodes, width, INK);
+  if (rod.widths) {
+    ctx.strokeStyle = INK;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let i = 1; i < rod.nodes.length; i += 1) {
+      ctx.lineWidth = (rod.widths[i - 1] + rod.widths[i]) * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(rod.nodes[i - 1].x, rod.nodes[i - 1].y);
+      ctx.lineTo(rod.nodes[i].x, rod.nodes[i].y);
+      ctx.stroke();
+    }
+  } else {
+    strokeNodes(rod.nodes, width, INK);
+  }
   for (let i = 0; i < rod.nodes.length; i += 1) {
     if (rod.damage[i] < 0.04) continue;
     const n = rod.nodes[i];
@@ -286,29 +326,25 @@ const RESTART = { type: 'button', label: 'заново', action: () => setMode(c
 
 MODES.beam = {
   label: 'консоль',
-  note: 'балка с вылетом: груз тянет перекладину вниз, металл течёт у угла. «вложенные углы» — та же физика для Г внутри Г',
+  note: 'рукописная г стоит на нижней пятке: верхний наплыв свисает, металл течёт в талии',
   tools: [
     RESTART,
-    { type: 'toggle', label: 'вложенные углы', key: 'nested', value: false, rebuild: true },
-    { type: 'range', label: 'вылет', key: 'reach', min: 0.16, max: 0.5, step: 0.01, value: 0.36, rebuild: true },
-    { type: 'range', label: 'сколько Г', key: 'turns', min: 2, max: 8, step: 1, value: 5, rebuild: true },
+    { type: 'toggle', label: 'печатная Г', key: 'block', value: false, rebuild: true },
+    { type: 'range', label: 'толщина', key: 'thick', min: 0.03, max: 0.14, step: 0.005, value: 0.075 },
     { type: 'range', label: 'жёсткость', key: 'stiff', min: 0.2, max: 2, step: 0.05, value: 1 },
-    { type: 'range', label: 'груз', key: 'load', min: 0, max: 14, step: 0.2, value: 4 },
-    { type: 'range', label: 'предел', key: 'yield', min: 0, max: 0.3, step: 0.005, value: 0.1 },
+    { type: 'range', label: 'груз', key: 'load', min: 0, max: 14, step: 0.2, value: 3 },
+    { type: 'range', label: 'предел', key: 'yield', min: 0, max: 0.3, step: 0.005, value: 0.05 },
+    { type: 'range', label: 'наклёп', key: 'harden', min: 0, max: 12, step: 0.1, value: 6 },
     { type: 'range', label: 'вязкость', key: 'damp', min: 0.9, max: 0.999, step: 0.001, value: 0.99 },
   ],
   setup() {
-    // Стойка заделана в пол, свободен только вылет: у каждой Г своя заделка.
-    modeState.axes = on('nested')
-      ? nestedAxes(num('turns'), 0.06)
-      : [capitalAxis(num('reach')).reverse()];
-    const spans = modeState.axes.map((axis) => axis.reduce((sum, p, i) => (
-      i === 0 ? 0 : sum + Math.hypot(p[0] - axis[i - 1][0], p[1] - axis[i - 1][1])
-    ), 0));
-    const longest = Math.max(...spans);
-    // Узлы кладём по длине: на короткой Г их столько же — и сегменты вырождаются.
-    modeState.rods = modeState.axes.map((axis, i) => makeRod(axis, Math.max(14, Math.round(40 * (spans[i] / longest))), 4));
-    modeState.rods.forEach((rod, i) => { rod.share = spans[i] / longest; });
+    // Опора — нижняя пятка, свободен весь остальной росчерк.
+    modeState.axis = on('block') ? capitalAxis(0.36).reverse() : beamAxis();
+    const rod = makeRod(modeState.axis, 54, 5);
+    rod.share = 1;
+    rod.widths = on('block') ? null : beamWidths(rod.nodes.length, num('thick') * S);
+    modeState.rods = [rod];
+    modeState.axes = [modeState.axis];
   },
   step() {
     for (const rod of modeState.rods) {
@@ -316,20 +352,21 @@ MODES.beam = {
       stepRod(rod, {
         // Короткая Г должна гнуться не сильнее длинной, отсюда поправка на размер.
         gravity: 1, damp: num('damp'), stiffness: num('stiff') / (rod.share * rod.share),
-        yield: num('yield'), flow: 0.03,
+        yield: num('yield'), flow: 0.03, harden: num('harden'),
       });
     }
   },
   draw() {
-    const thick = on('nested') ? S * 0.028 : S * 0.085;
+    const thick = num('thick') * S;
     const weight = num('load');
     modeState.axes.forEach((axis, i) => {
       strokeAxis(axis, thick, FAINT);
       const rod = modeState.rods[i];
+      if (rod.widths) rod.widths = beamWidths(rod.nodes.length, thick);
       drawRod(rod, thick);
       if (weight <= 0) return;
       const tip = rod.nodes[rod.nodes.length - 1];
-      const r = (S * 0.012 * Math.sqrt(weight * rod.share) + S * 0.012) * (on('nested') ? 0.5 : 1);
+      const r = S * 0.012 * Math.sqrt(weight) + S * 0.012;
       ctx.strokeStyle = INK;
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -345,6 +382,46 @@ MODES.beam = {
   onDown() { for (const rod of modeState.rods) grabRod(rod); },
   onMove() { dragRod(); },
   onUp() { releaseRod(); },
+};
+
+MODES.corners = {
+  label: 'углы',
+  note: 'квадрат в квадрате в квадрате, кропнутый: угол сам по себе уже Г. зум идёт из правого нижнего края, курсор растаскивает плоскости',
+  tools: [
+    { type: 'range', label: 'зум', key: 'zoom', min: -1.5, max: 1.5, step: 0.05, value: 0.35 },
+    { type: 'range', label: 'шаг', key: 'ratio', min: 1.15, max: 2.4, step: 0.05, value: 1.5 },
+    { type: 'range', label: 'слоёв', key: 'layers', min: 3, max: 16, step: 1, value: 11 },
+    { type: 'range', label: 'сдвиг', key: 'shift', min: 0, max: 0.5, step: 0.01, value: 0.12 },
+    { type: 'toggle', label: 'кислота', key: 'acid', value: true },
+  ],
+  setup() {
+    modeState.phase = 0;
+    modeState.drift = { x: 0, y: 0 };
+  },
+  step() {
+    modeState.phase += num('zoom') * STEP;
+    // Курсор ведёт плоскости не рывком: цель догоняется мягко.
+    const goal = { x: pointer.x / S - 0.5, y: pointer.y / S - 0.5 };
+    modeState.drift.x += (goal.x - modeState.drift.x) * 0.06;
+    modeState.drift.y += (goal.y - modeState.drift.y) * 0.06;
+  },
+  draw() {
+    const layers = num('layers');
+    const k = num('ratio');
+    const phase = modeState.phase;
+    const whole = Math.floor(phase);
+    const frac = phase - whole;
+    const pair = on('acid') ? ['#ff00cc', '#00e64d'] : [INK, '#f1ede5'];
+    // Точка схода — правый нижний угол кадра, там же рождаются новые углы.
+    for (let i = layers - 1; i >= 0; i -= 1) {
+      const size = S * 0.16 * Math.pow(k, i + frac);
+      const depth = i / layers;
+      const dx = modeState.drift.x * num('shift') * S * depth;
+      const dy = modeState.drift.y * num('shift') * S * depth;
+      ctx.fillStyle = pair[(((i + whole) % 2) + 2) % 2];
+      ctx.fillRect(S - size + dx, S - size + dy, size + Math.abs(dx) + 1, size + Math.abs(dy) + 1);
+    }
+  },
 };
 
 MODES.river = {
