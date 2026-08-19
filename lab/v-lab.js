@@ -889,6 +889,18 @@ function drawThread() {
   }
 
   if (getTool('frame')) {
+    // Сетка показывается точками в узлах — видно, к чему прилипают окружности.
+    const step = S * Number(getTool('grid'));
+    if (step >= 4) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'difference';
+      ctx.fillStyle = 'rgba(255,255,255,.3)';
+      for (let x = step; x < S; x += step) {
+        for (let y = step; y < S; y += step) ctx.fillRect(x - 0.5, y - 0.5, 1, 1);
+      }
+      ctx.restore();
+    }
+
     ctx.save();
     ctx.globalCompositeOperation = 'difference';
     ctx.strokeStyle = 'rgba(255,255,255,.55)';
