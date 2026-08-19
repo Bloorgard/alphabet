@@ -74,6 +74,7 @@ export function mountV(workspace) {
   let dragNode = null;
   let frameId = 0;
   let radiusInput = null;
+  let removeButton = null;
 
   function build(fresh) {
     const source = fresh ? null : SCENE;
@@ -274,10 +275,12 @@ export function mountV(workspace) {
     }
   }
 
+  // Без выделенной окружности радиус и удаление ни к чему не относятся.
   function selectPeg(peg) {
     selected = peg;
     if (peg && radiusInput) radiusInput.value = Number((peg.target / S).toFixed(4));
     if (radiusInput) radiusInput.disabled = !peg;
+    if (removeButton) removeButton.disabled = !peg;
   }
 
   function pegAt(x, y) {
@@ -400,7 +403,9 @@ export function mountV(workspace) {
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'sketch-action';
-    remove.textContent = 'удалить выделенную';
+    remove.textContent = 'удалить окружность';
+    remove.disabled = true;
+    removeButton = remove;
     remove.addEventListener('click', () => {
       if (!selected) return;
       pegs.splice(pegs.indexOf(selected), 1);

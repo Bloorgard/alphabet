@@ -90,6 +90,7 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .sketch-panel p { color: rgba(241, 237, 229, .3); }
 .sketch-switch { justify-self: start; border: 0; padding: 0; background: none; color: inherit; font: inherit; text-transform: uppercase; letter-spacing: .08em; opacity: .55; }
 .sketch-switch[aria-pressed="true"] { opacity: 1; text-decoration: underline; text-underline-offset: 3px; }
+.sketch-panel :disabled { opacity: .35; cursor: default; }
 .sketch-action { justify-self: start; margin-top: 2px; border: 0; padding: 0; background: none; color: inherit; font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
 .sketch-panel input { appearance: none; width: 150px; height: 12px; background: none; cursor: pointer; }
 .sketch-panel input::-webkit-slider-runnable-track { height: 1px; background: rgba(241, 237, 229, .25); }
