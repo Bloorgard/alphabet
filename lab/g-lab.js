@@ -395,13 +395,14 @@ MODES.corners = {
   tools: [
     { type: 'range', label: 'зум', key: 'zoom', min: -1.5, max: 1.5, step: 0.05, value: 0.35 },
     { type: 'range', label: 'шаг', key: 'ratio', min: 1.15, max: 2.4, step: 0.05, value: 1.5 },
-    { type: 'range', label: 'слоёв', key: 'layers', min: 3, max: 16, step: 1, value: 11 },
-    { type: 'range', label: 'сдвиг', key: 'shift', min: 0, max: 0.5, step: 0.01, value: 0.12 },
+    { type: 'range', label: 'сдвиг', key: 'shift', min: 0, max: 0.6, step: 0.01, value: 0.3 },
+    { type: 'toggle', label: 'схождение за курсором', key: 'follow', value: false },
     { type: 'toggle', label: 'кислота', key: 'acid', value: true },
   ],
   setup() {
     modeState.phase = 0;
     modeState.drift = { x: 0, y: 0 };
+    modeState.origin = { x: S, y: S };
   },
   step() {
     modeState.phase += num('zoom') * STEP;
@@ -409,22 +410,34 @@ MODES.corners = {
     const goal = { x: pointer.x / S - 0.5, y: pointer.y / S - 0.5 };
     modeState.drift.x += (goal.x - modeState.drift.x) * 0.06;
     modeState.drift.y += (goal.y - modeState.drift.y) * 0.06;
+    const target = on('follow') ? pointer : { x: S, y: S };
+    modeState.origin.x += (target.x - modeState.origin.x) * 0.08;
+    modeState.origin.y += (target.y - modeState.origin.y) * 0.08;
   },
   draw() {
-    const layers = num('layers');
     const k = num('ratio');
     const phase = modeState.phase;
     const whole = Math.floor(phase);
     const frac = phase - whole;
     const pair = on('acid') ? ['#ff00cc', '#00e64d'] : [INK, '#f1ede5'];
-    // Точка схода — правый нижний угол кадра, там же рождаются новые углы.
-    for (let i = layers - 1; i >= 0; i -= 1) {
-      const size = S * 0.16 * Math.pow(k, i + frac);
-      const depth = i / layers;
+    const origin = modeState.origin;
+    // Новый угол рождается из точки схода: мельчайший слой меньше пикселя,
+    // иначе на возврате фазы он появляется щелчком уже заметного размера.
+    const seed = 0.5;
+    const count = Math.ceil(Math.log((S * 3) / seed) / Math.log(k));
+    for (let i = count - 1; i >= 0; i -= 1) {
+      const size = seed * Math.pow(k, i + frac);
+      const depth = i / count;
       const dx = modeState.drift.x * num('shift') * S * depth;
       const dy = modeState.drift.y * num('shift') * S * depth;
       ctx.fillStyle = pair[(((i + whole) % 2) + 2) % 2];
-      ctx.fillRect(S - size + dx, S - size + dy, size + Math.abs(dx) + 1, size + Math.abs(dy) + 1);
+      // Хвост вправо-вниз закрывает всё, что осталось за точкой схода.
+      ctx.fillRect(
+        origin.x - size + dx,
+        origin.y - size + dy,
+        size + Math.max(0, S - origin.x) + Math.abs(dx) + 1,
+        size + Math.max(0, S - origin.y) + Math.abs(dy) + 1,
+      );
     }
   },
 };
@@ -438,6 +451,8 @@ MODES.river = {
     { type: 'range', label: 'напор', key: 'flow', min: 0, max: 6, step: 0.2, value: 2.4 },
     { type: 'range', label: 'тяга', key: 'push', min: 0, max: 4, step: 0.1, value: 1.4 },
     { type: 'range', label: 'русло', key: 'bore', min: 0.04, max: 0.26, step: 0.005, value: 0.18 },
+    { type: 'range', label: 'капля', key: 'drop', min: 0.002, max: 0.03, step: 0.001, value: 0.006 },
+    { type: 'range', label: 'сколько воды', key: 'cap', min: 100, max: 3000, step: 50, value: 1200 },
     { type: 'range', label: 'вязкость', key: 'visc', min: 0.8, max: 1, step: 0.005, value: 0.985 },
     { type: 'range', label: 'тяжесть', key: 'grav', min: 0, max: 3, step: 0.1, value: 1.4 },
     { type: 'toggle', label: 'палец в струе', key: 'finger', value: true },
@@ -505,12 +520,13 @@ MODES.river = {
       }
     }
     modeState.drops = modeState.drops.filter((d) => d.y < S * 1.1);
-    if (modeState.drops.length > 1200) modeState.drops.splice(0, modeState.drops.length - 1200);
+    const cap = num('cap');
+    if (modeState.drops.length > cap) modeState.drops.splice(0, modeState.drops.length - cap);
   },
   draw() {
     strokeNodes(modeState.axis, num('bore') * S, 'rgba(22,22,22,.08)');
     ctx.fillStyle = INK;
-    const r = Math.max(1, S * 0.006);
+    const r = Math.max(0.5, num('drop') * S);
     for (const d of modeState.drops) {
       ctx.beginPath();
       ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
