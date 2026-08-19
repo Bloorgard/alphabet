@@ -453,6 +453,7 @@ MODES.river = {
     { type: 'range', label: 'русло', key: 'bore', min: 0.04, max: 0.26, step: 0.005, value: 0.18 },
     { type: 'range', label: 'капля', key: 'drop', min: 0.002, max: 0.03, step: 0.001, value: 0.006 },
     { type: 'range', label: 'сколько воды', key: 'cap', min: 100, max: 3000, step: 50, value: 1200 },
+    { type: 'range', label: 'струя', key: 'jet', min: 0.05, max: 1, step: 0.05, value: 0.7 },
     { type: 'range', label: 'вязкость', key: 'visc', min: 0.8, max: 1, step: 0.005, value: 0.985 },
     { type: 'range', label: 'тяжесть', key: 'grav', min: 0, max: 3, step: 0.1, value: 1.4 },
     { type: 'toggle', label: 'палец в струе', key: 'finger', value: true },
@@ -466,16 +467,28 @@ MODES.river = {
   step() {
     const axis = modeState.axis;
     const r = num('bore') * S * 0.5;
-    modeState.spawn += num('flow');
-    while (modeState.spawn >= 1) {
+    // Устье подаёт поперёк русла, а не по осям кадра.
+    const mouth = Math.atan2(axis[1].y - axis[0].y, axis[1].x - axis[0].x);
+    const nx = -Math.sin(mouth);
+    const ny = Math.cos(mouth);
+    const cap = num('cap');
+    // Подача догоняет расход: на большой тяге река успевает вытечь,
+    // и без добора кадр пустеет, сколько ни держи напор.
+    const room = Math.max(0, cap - modeState.drops.length);
+    // Чем больше вытекло, тем сильнее устье добирает: иначе на высокой тяге
+    // расход обгоняет подачу и русло пустеет само собой.
+    modeState.spawn += Math.min(num('flow') * (1 + (8 * room) / cap), room);
+    while (modeState.spawn >= 1 && modeState.drops.length < cap) {
       modeState.spawn -= 1;
+      const across = (Math.random() - 0.5) * num('jet') * r * 2;
       modeState.drops.push({
-        x: axis[0].x + (Math.random() - 0.5) * r,
-        y: axis[0].y + (Math.random() - 0.5) * r,
-        vx: -S * 0.004,
-        vy: 0,
+        x: axis[0].x + nx * across,
+        y: axis[0].y + ny * across,
+        vx: Math.cos(mouth) * S * 0.004,
+        vy: Math.sin(mouth) * S * 0.004,
       });
     }
+    if (modeState.drops.length >= cap) modeState.spawn = 0;
     const g = num('grav') * S * STEP * STEP;
     const visc = num('visc');
     for (const d of modeState.drops) {
@@ -519,8 +532,7 @@ MODES.river = {
         d.vy -= ny * push * 1.4;
       }
     }
-    modeState.drops = modeState.drops.filter((d) => d.y < S * 1.1);
-    const cap = num('cap');
+    modeState.drops = modeState.drops.filter((d) => d.y < S * 1.15 && d.x < S * 1.2);
     if (modeState.drops.length > cap) modeState.drops.splice(0, modeState.drops.length - cap);
   },
   draw() {
