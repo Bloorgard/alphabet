@@ -50,14 +50,19 @@ function bezier(p0, p1, p2, p3, steps) {
   return out;
 }
 
-// Рукописная г — два наплыва: верхний уходит влево, нижний возвращает вправо.
-// Русло получается излучиной, а не крючком.
-function cursiveAxis() {
+// Русло реки снято с присланного контура (121×121 → доли кадра): два разворота,
+// вход и выход уходят за кадр — река не начинается и не кончается в букве.
+function riverAxis() {
   return [
-    ...bezier([0.72, 0.26], [0.58, 0.17], [0.34, 0.20], [0.28, 0.34], 32),
-    ...bezier([0.28, 0.34], [0.24, 0.46], [0.44, 0.50], [0.55, 0.56], 30).slice(1),
-    ...bezier([0.55, 0.56], [0.66, 0.63], [0.52, 0.75], [0.34, 0.72], 30).slice(1),
-    ...bezier([0.34, 0.72], [0.30, 0.80], [0.52, 0.84], [0.74, 0.78], 30).slice(1),
+    [-0.0952, 0.0127], [0.0099, 0.1946],
+    ...bezier([0.0099, 0.1946], [0.0594, 0.2805], [0.1631, 0.3191], [0.2567, 0.2866], 20).slice(1),
+    [0.5695, 0.1779],
+    ...bezier([0.5695, 0.1779], [0.6977, 0.1333], [0.7844, 0.3081], [0.6714, 0.3833], 22).slice(1),
+    [0.2831, 0.6075],
+    ...bezier([0.2831, 0.6075], [0.1635, 0.6822], [0.2507, 0.8659], [0.3842, 0.8204], 22).slice(1),
+    [0.7364, 0.7005],
+    ...bezier([0.7364, 0.7005], [0.8322, 0.6679], [0.9377, 0.7076], [0.9883, 0.7952], 18).slice(1),
+    [1.0873, 0.9666],
   ];
 }
 
@@ -426,19 +431,19 @@ MODES.corners = {
 
 MODES.river = {
   label: 'река',
-  note: 'русло буквы: по излучинам рукописной г идёт поток, у печатной Г остаётся один поворот',
+  note: 'река входит в кадр сверху слева, разворачивается дважды и уходит вниз справа — русло держит форму г',
   tools: [
     { type: 'button', label: 'слить', action: () => { modeState.drops = []; } },
     { type: 'toggle', label: 'печатная Г', key: 'block', value: false, rebuild: true },
     { type: 'range', label: 'напор', key: 'flow', min: 0, max: 6, step: 0.2, value: 2.4 },
     { type: 'range', label: 'тяга', key: 'push', min: 0, max: 4, step: 0.1, value: 1.4 },
-    { type: 'range', label: 'труба', key: 'bore', min: 0.03, max: 0.14, step: 0.005, value: 0.07 },
+    { type: 'range', label: 'русло', key: 'bore', min: 0.04, max: 0.26, step: 0.005, value: 0.18 },
     { type: 'range', label: 'вязкость', key: 'visc', min: 0.8, max: 1, step: 0.005, value: 0.985 },
     { type: 'range', label: 'тяжесть', key: 'grav', min: 0, max: 3, step: 0.1, value: 1.4 },
     { type: 'toggle', label: 'палец в струе', key: 'finger', value: true },
   ],
   setup() {
-    const axis = on('block') ? capitalAxis(0.4) : cursiveAxis();
+    const axis = on('block') ? capitalAxis(0.4) : riverAxis();
     modeState.axis = resample(axis, 160).map(([x, y]) => ({ x: x * S, y: y * S }));
     modeState.drops = [];
     modeState.spawn = 0;
