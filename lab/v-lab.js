@@ -784,6 +784,9 @@ function stepThread() {
   }
 
   // Нитка стремится укоротиться: длина звена всегда чуть меньше текущей.
+  // Сокращение нормировано по плотности узлов — иначе при частых узлах
+  // звено короткое, и в пикселях натяжение слабеет обратно пропорционально.
+  const pull = tension * 0.06 * (ring.length / 260);
   for (let iter = 0; iter < 14; iter += 1) {
     for (let i = 0; i < ring.length; i += 1) {
       const a = ring[i];
@@ -791,7 +794,7 @@ function stepThread() {
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const dist = Math.hypot(dx, dy) || 1e-6;
-      const rest = dist * (1 - tension * 0.06);
+      const rest = dist * (1 - pull);
       const diff = ((dist - rest) / dist) * 0.5;
       const aFree = a === ringDrag ? 0 : 1;
       const bFree = b === ringDrag ? 0 : 1;
@@ -1015,7 +1018,7 @@ const MODES = {
       { key: 'radius', label: 'радиус выделенной', min: 0.02, max: 0.3, step: 0.005, value: 0.13, live: applyRadius },
       { type: 'button', label: 'удалить выделенную', action: () => removePeg(selectedPeg) },
       { key: 'weight', label: 'тяжесть', min: 0, max: 2, step: 0.05, value: 0 },
-      { key: 'nodes', label: 'узлов', min: 120, max: 900, step: 20, value: 420, rebuild: true },
+      { key: 'nodes', label: 'узлов', min: 120, max: 900, step: 20, value: 300, rebuild: true },
       { type: 'toggle', key: 'fill', label: 'залить форму', value: true },
       { type: 'toggle', key: 'stroke', label: 'контур', value: false },
       { type: 'button', label: 'выровнять слева', action: () => alignLeft() },
