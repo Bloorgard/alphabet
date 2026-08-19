@@ -10,6 +10,7 @@ const note = document.getElementById('note');
 const INK = '#161616';
 const RED = '#e0210f';
 const FAINT = 'rgba(22,22,22,.16)';
+const PAPER = '#f1ede5';
 const STEP = 1 / 60;   // физика идёт фиксированным шагом
 
 let S = 0;
@@ -22,6 +23,7 @@ const pointer = { x: 0, y: 0, px: 0, py: 0, down: false };
 // Ползунки живут раздельно по режимам: «вылет» у консоли и «плечо» у крюка — разные вещи.
 function slot(key) { return `${current}:${key}`; }
 function num(key) { return Number(toolValues[slot(key)]); }
+function pick(key) { return toolValues[slot(key)]; }
 function on(key) { return Boolean(toolValues[slot(key)]); }
 function clamp(value, min, max) { return value < min ? min : value > max ? max : value; }
 
@@ -442,6 +444,36 @@ MODES.corners = {
   },
 };
 
+// Тушь: размытые пятна прогоняются через контраст и слипаются в массу.
+let inkCanvas = null;
+function drawInk(drops, r) {
+  const size = Math.max(1, Math.round(S));
+  if (!inkCanvas || inkCanvas.width !== size) {
+    inkCanvas = document.createElement('canvas');
+    inkCanvas.width = size;
+    inkCanvas.height = size;
+  }
+  const oc = inkCanvas.getContext('2d');
+  oc.filter = 'none';
+  oc.fillStyle = '#fff';
+  oc.fillRect(0, 0, size, size);
+  oc.filter = `blur(${Math.max(1, r * 1.6).toFixed(1)}px)`;
+  oc.fillStyle = '#000';
+  for (const d of drops) {
+    oc.beginPath();
+    oc.arc(d.x, d.y, r * 1.5, 0, Math.PI * 2);
+    oc.fill();
+  }
+  oc.filter = 'none';
+  ctx.save();
+  // Белый фон подложки при умножении не мешает бумаге, а контраст режет края.
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.filter = 'contrast(12)';
+  ctx.drawImage(inkCanvas, 0, 0, S, S);
+  ctx.restore();
+  ctx.filter = 'none';
+}
+
 MODES.river = {
   label: 'река',
   note: 'река входит в кадр сверху слева, разворачивается дважды и уходит вниз справа — русло держит форму г',
@@ -454,6 +486,8 @@ MODES.river = {
     { type: 'range', label: 'капля', key: 'drop', min: 0.002, max: 0.03, step: 0.001, value: 0.006 },
     { type: 'range', label: 'сколько воды', key: 'cap', min: 100, max: 3000, step: 50, value: 1200 },
     { type: 'range', label: 'струя', key: 'jet', min: 0.05, max: 1, step: 0.05, value: 0.7 },
+    { type: 'range', label: 'темп', key: 'tempo', min: 0.15, max: 1.6, step: 0.05, value: 1 },
+    { type: 'choice', key: 'skin', value: 'капли', options: ['капли', 'тушь', 'штрих', 'шлейф'] },
     { type: 'range', label: 'вязкость', key: 'visc', min: 0.8, max: 1, step: 0.005, value: 0.985 },
     { type: 'range', label: 'тяжесть', key: 'grav', min: 0, max: 3, step: 0.1, value: 1.4 },
     { type: 'toggle', label: 'палец в струе', key: 'finger', value: true },
@@ -467,6 +501,9 @@ MODES.river = {
   step() {
     const axis = modeState.axis;
     const r = num('bore') * S * 0.5;
+    // Замедление честное: силы падают квадратом темпа, скорости — линейно,
+    // поэтому траектории те же, а река идёт медленнее.
+    const tempo = num('tempo');
     // Устье подаёт поперёк русла, а не по осям кадра.
     const mouth = Math.atan2(axis[1].y - axis[0].y, axis[1].x - axis[0].x);
     const nx = -Math.sin(mouth);
@@ -484,12 +521,12 @@ MODES.river = {
       modeState.drops.push({
         x: axis[0].x + nx * across,
         y: axis[0].y + ny * across,
-        vx: Math.cos(mouth) * S * 0.004,
-        vy: Math.sin(mouth) * S * 0.004,
+        vx: Math.cos(mouth) * S * 0.004 * tempo,
+        vy: Math.sin(mouth) * S * 0.004 * tempo,
       });
     }
     if (modeState.drops.length >= cap) modeState.spawn = 0;
-    const g = num('grav') * S * STEP * STEP;
+    const g = num('grav') * S * STEP * STEP * tempo * tempo;
     const visc = num('visc');
     for (const d of modeState.drops) {
       d.vy += g;
@@ -498,8 +535,8 @@ MODES.river = {
         const fy = d.y - pointer.y;
         const dist = Math.hypot(fx, fy) || 1;
         if (dist < S * 0.1) {
-          d.vx += (fx / dist) * S * 0.0012;
-          d.vy += (fy / dist) * S * 0.0012;
+          d.vx += (fx / dist) * S * 0.0012 * tempo;
+          d.vy += (fy / dist) * S * 0.0012 * tempo;
         }
       }
       d.vx *= visc;
@@ -518,8 +555,8 @@ MODES.river = {
       const tx = axis[lead + 1].x - axis[lead].x;
       const ty = axis[lead + 1].y - axis[lead].y;
       const tl = Math.hypot(tx, ty) || 1;
-      d.vx += (tx / tl) * num('push') * S * 0.0004;
-      d.vy += (ty / tl) * num('push') * S * 0.0004;
+      d.vx += (tx / tl) * num('push') * S * 0.0004 * tempo * tempo;
+      d.vy += (ty / tl) * num('push') * S * 0.0004 * tempo * tempo;
       const near = axis[best];
       const dist = Math.sqrt(bestDist) || 1e-6;
       if (dist > r && best < axis.length - 1) {
@@ -535,10 +572,39 @@ MODES.river = {
     modeState.drops = modeState.drops.filter((d) => d.y < S * 1.15 && d.x < S * 1.2);
     if (modeState.drops.length > cap) modeState.drops.splice(0, modeState.drops.length - cap);
   },
+  persist() { return pick('skin') === 'шлейф'; },
   draw() {
-    strokeNodes(modeState.axis, num('bore') * S, 'rgba(22,22,22,.08)');
-    ctx.fillStyle = INK;
+    const skin = pick('skin');
     const r = Math.max(0.5, num('drop') * S);
+    // Туши нужен непрозрачный низ: она ложится умножением.
+    if (skin === 'тушь') {
+      ctx.fillStyle = PAPER;
+      ctx.fillRect(0, 0, S, S);
+    }
+    if (skin === 'шлейф') {
+      // Кадр не стирается, а выцветает: у каждой капли остаётся хвост.
+      ctx.fillStyle = 'rgba(241,237,229,.06)';
+      ctx.fillRect(0, 0, S, S);
+    }
+    // В шлейфе кадр не стирается, и бледное русло накопилось бы в серую плиту.
+    if (skin !== 'шлейф') strokeNodes(modeState.axis, num('bore') * S, 'rgba(22,22,22,.08)');
+    if (skin === 'тушь') {
+      drawInk(modeState.drops, r);
+      return;
+    }
+    if (skin === 'штрих') {
+      ctx.strokeStyle = INK;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = r * 1.2;
+      for (const d of modeState.drops) {
+        ctx.beginPath();
+        ctx.moveTo(d.x, d.y);
+        ctx.lineTo(d.x - d.vx * 6, d.y - d.vy * 6);
+        ctx.stroke();
+      }
+      return;
+    }
+    ctx.fillStyle = skin === 'шлейф' ? 'rgba(22,22,22,.75)' : INK;
     for (const d of modeState.drops) {
       ctx.beginPath();
       ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
@@ -575,6 +641,25 @@ function renderTools(mode) {
         if (tool.rebuild) setMode(current);
       });
       toolsBar.append(button);
+      continue;
+    }
+    if (tool.type === 'choice') {
+      const group = document.createElement('span');
+      group.className = 'modes';
+      for (const option of tool.options) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = option;
+        button.setAttribute('aria-pressed', String(option === value));
+        button.addEventListener('click', () => {
+          toolValues[key] = option;
+          for (const other of group.children) {
+            other.setAttribute('aria-pressed', String(other.textContent === option));
+          }
+        });
+        group.append(button);
+      }
+      toolsBar.append(group);
       continue;
     }
     const label = document.createElement('label');
@@ -672,7 +757,7 @@ function frame(now) {
     pointer.py = pointer.y;
     debt -= STEP;
   }
-  ctx.clearRect(0, 0, S, S);
+  if (!mode.persist || !mode.persist()) ctx.clearRect(0, 0, S, S);
   mode.draw();
   requestAnimationFrame(frame);
 }
