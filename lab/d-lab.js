@@ -120,19 +120,31 @@ function blockPoints(b) {
     const a = (Math.PI * 2 * i) / 3 - Math.PI / 2;
     out.push([(b.x + Math.cos(a) * b.r) * S, (b.y + Math.sin(a) * b.r * b.dir) * S]);
   }
-  // Отражение по вертикали переворачивает обход, а тест «внутри» смотрит на его знак.
-  return b.dir < 0 ? out.reverse() : out;
+  return out;
+}
+
+// Знак обхода зависит от того, куда смотрит остриё, поэтому меряем его на месте:
+// у перевёрнутого клина внешняя сторона рёбер оказывается по другую руку.
+function winding(tri) {
+  let sum = 0;
+  for (let i = 0; i < 3; i += 1) {
+    const a = tri[i];
+    const b = tri[(i + 1) % 3];
+    sum += (b[0] - a[0]) * (b[1] + a[1]);
+  }
+  return sum < 0 ? -1 : 1;
 }
 
 function pushOut(tri, p) {
   // Внутри клина частицу выносит через ближайшее ребро и разгоняет вдоль него.
+  const w = winding(tri);
   let inside = true;
   let best = null;
   for (let i = 0; i < 3; i += 1) {
     const a = tri[i];
     const b = tri[(i + 1) % 3];
-    const ex = b[0] - a[0];
-    const ey = b[1] - a[1];
+    const ex = (b[0] - a[0]) * w;
+    const ey = (b[1] - a[1]) * w;
     const cross = ex * (p.y - a[1]) - ey * (p.x - a[0]);
     const len = Math.hypot(ex, ey) || 1;
     const dist = cross / len;
@@ -345,7 +357,9 @@ MODES.slime = {
     { type: 'range', label: 'вынос сенсора', key: 'reach', min: 2, max: 18, step: 1, value: 7 },
     { type: 'range', label: 'поворот', key: 'turn', min: 0.05, max: 1.2, step: 0.05, value: 0.4 },
     { type: 'range', label: 'еда буквы', key: 'food', min: 0, max: 12, step: 0.25, value: 4 },
+    { type: 'range', label: 'поводок', key: 'leash', min: 0, max: 1, step: 0.05, value: 0.9 },
     { type: 'range', label: 'шаг', key: 'speed', min: 0.3, max: 2.5, step: 0.1, value: 1 },
+    { type: 'range', label: 'насыщение', key: 'cap', min: 1, max: 30, step: 1, value: 6 },
   ],
   setup() {
     modeState.trail = new Float32Array(N * N);
@@ -384,6 +398,7 @@ MODES.slime = {
     const reach = num('reach');
     const turn = num('turn');
     const speed = num('speed');
+    const leash = num('leash');
     for (const p of agents) {
       const f = sample(p.x + Math.cos(p.a) * reach, p.y + Math.sin(p.a) * reach);
       const l = sample(p.x + Math.cos(p.a - sense) * reach, p.y + Math.sin(p.a - sense) * reach);
@@ -392,9 +407,22 @@ MODES.slime = {
       else if (l > r) p.a -= turn * Math.random();
       else if (r > l) p.a += turn * Math.random();
       else p.a += (Math.random() - 0.5) * turn * 2;
-      p.x = (p.x + Math.cos(p.a) * speed + N) % N;
-      p.y = (p.y + Math.sin(p.a) * speed + N) % N;
+      const nx = (p.x + Math.cos(p.a) * speed + N) % N;
+      const ny = (p.y + Math.sin(p.a) * speed + N) % N;
+      // Поводок держит агента в букве: своя сеть кормит лучше, чем форма, и без
+      // упора колония стягивает лапки и перекладину в выгодное кольцо.
+      const next = Math.floor(ny) * N + Math.floor(nx);
+      if (food[next] === 0 && Math.random() < leash) {
+        p.a += Math.PI * 0.5 + Math.random() * Math.PI;
+      } else {
+        p.x = nx;
+        p.y = ny;
+      }
       trail[Math.floor(p.y) * N + Math.floor(p.x)] += 1;
+    }
+    // Буква подкармливает след постоянно, иначе она стирается собственной сетью.
+    if (foodK > 0) {
+      for (let i = 0; i < N * N; i += 1) if (food[i] > 0) trail[i] += foodK * 0.02;
     }
     if (pointer.down) {
       const cx = Math.floor((pointer.x / S) * N);
@@ -408,6 +436,7 @@ MODES.slime = {
     }
     // Размытие и испарение: без них след не расходится в жилы.
     const keep = 1 - num('evap');
+    const cap = num('cap');
     for (let y = 0; y < N; y += 1) {
       for (let x = 0; x < N; x += 1) {
         let sum = 0;
@@ -416,7 +445,9 @@ MODES.slime = {
             sum += trail[(((y + oy) % N) + N) % N * N + ((((x + ox) % N) + N) % N)];
           }
         }
-        next[y * N + x] = (sum / 9) * keep;
+        // Потолок на след: без него одна жила забирает всю колонию, и тонкие
+        // места буквы — лапки, перекладина — высыхают.
+        next[y * N + x] = Math.min((sum / 9) * keep, cap);
       }
     }
     trail.set(next);
@@ -473,20 +504,28 @@ MODES.chladni = {
     { type: 'range', label: 'частота', key: 'freq', min: 1, max: 12, step: 0.05, value: 3 },
     { type: 'range', label: 'песчинок', key: 'sand', min: 1000, max: 12000, step: 500, value: 6000, rebuild: true },
     { type: 'range', label: 'тряска', key: 'shake', min: 0.2, max: 4, step: 0.1, value: 1.4 },
+    { type: 'range', label: 'качка', key: 'wobble', min: 0, max: 0.6, step: 0.02, value: 0.16 },
+    { type: 'range', label: 'подсев', key: 'reseed', min: 0, max: 40, step: 1, value: 8 },
   ],
   setup() {
     modeState.field = letterField();
+    modeState.t = 0;
     modeState.sand = [];
     for (let i = 0; i < num('sand'); i += 1) {
       modeState.sand.push({ x: Math.random(), y: Math.random() });
     }
   },
   step() {
-    const f = num('freq');
+    modeState.t += STEP;
+    const t = modeState.t;
+    // Живой звук не стоит на месте: частота дышит, а сама пластина то бьёт,
+    // то отпускает — иначе песок оседает за пару секунд и картинка застывает.
+    const f = num('freq') + Math.sin(t * 0.6) * num('wobble');
     const w = Math.exp(-(((f - TUNE) / 0.3) ** 2));
     const n = 1 + Math.floor(f);
     const m = 1 + Math.floor(f * 1.7) % 7;
-    const shake = num('shake') * 0.006;
+    const beat = 0.45 + 0.55 * Math.abs(Math.sin(t * 1.7));
+    const shake = num('shake') * 0.006 * beat;
     const field = modeState.field;
     const letterAt = (x, y) => {
       const ix = clamp(Math.floor(x * FIELD), 0, FIELD - 1);
@@ -508,9 +547,17 @@ MODES.chladni = {
       p.x = clamp(p.x - gx * shake * 3 + (Math.random() - 0.5) * step * 2, 0, 1);
       p.y = clamp(p.y - gy * shake * 3 + (Math.random() - 0.5) * step * 2, 0, 1);
     }
+    // Часть песка возвращается в кадр заново и сползает на линии на глазах:
+    // движение к узору видно не хуже самого узора.
+    const sand = modeState.sand;
+    for (let i = 0; i < num('reseed'); i += 1) {
+      const p = sand[Math.floor(Math.random() * sand.length)];
+      p.x = Math.random();
+      p.y = Math.random();
+    }
   },
   draw() {
-    const f = num('freq');
+    const f = num('freq') + Math.sin(modeState.t * 0.6) * num('wobble');
     const w = Math.exp(-(((f - TUNE) / 0.3) ** 2));
     ctx.fillStyle = w > 0.5 ? RED : INK;
     for (const p of modeState.sand) ctx.fillRect(p.x * S, p.y * S, 1.6, 1.6);
