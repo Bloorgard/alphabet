@@ -1,6 +1,7 @@
 import { mountA } from './letters/a.js';
 import { mountB } from './letters/b.js';
 import { mountV } from './letters/v.js';
+import { mountG } from './letters/g.js';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',
@@ -16,7 +17,8 @@ const DAY = 86400000;
 const READY = new Map([
   ['А', mountA],
   ['Б', mountB],
-  ['В', mountV]
+  ['В', mountV],
+  ['Г', mountG]
 ]);
 
 const grid = document.querySelector('#letter-grid');
