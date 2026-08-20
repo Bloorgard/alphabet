@@ -1,4 +1,4 @@
-/* Полигон буквы Д: пять механик рядом, чтобы посмотреть глазами и выбрать одну.
+/* Полигон буквы Д: девять механик рядом, чтобы посмотреть глазами и выбрать одну.
    Формы заданы в долях кадра, счёт идёт в пикселях кадра S. */
 
 const canvas = document.getElementById('c');
@@ -18,7 +18,7 @@ let dpr = 1;
 let current = null;
 let modeState = {};
 const toolValues = {};
-const pointer = { x: 0, y: 0, px: 0, py: 0, down: false };
+const pointer = { x: 0, y: 0, px: 0, py: 0, down: false, seen: false, erase: false };
 
 function slot(key) { return `${current}:${key}`; }
 function num(key) { return Number(toolValues[slot(key)]); }
@@ -108,17 +108,22 @@ function makeBlocks() {
   // Три клина: верхний развёрнут остриём вверх, нижние — вниз. Огибающие
   // складываются в силуэт Д: узкое горло, расходящиеся бока, две лапки.
   return [
-    { x: 0.5, y: 0.32, r: 0.13, dir: 1 },
-    { x: 0.32, y: 0.74, r: 0.11, dir: -1 },
-    { x: 0.68, y: 0.74, r: 0.11, dir: -1 },
+    { x: 0.5, y: 0.32, r: 0.13, dir: 1, rot: 0 },
+    { x: 0.32, y: 0.74, r: 0.11, dir: -1, rot: 0 },
+    { x: 0.68, y: 0.74, r: 0.11, dir: -1, rot: 0 },
   ];
 }
 
 function blockPoints(b) {
   const out = [];
+  const cos = Math.cos(b.rot);
+  const sin = Math.sin(b.rot);
   for (let i = 0; i < 3; i += 1) {
     const a = (Math.PI * 2 * i) / 3 - Math.PI / 2;
-    out.push([(b.x + Math.cos(a) * b.r) * S, (b.y + Math.sin(a) * b.r * b.dir) * S]);
+    // Клин сначала разворачивается остриём по своему dir, и только потом крутится.
+    const dx = Math.cos(a) * b.r;
+    const dy = Math.sin(a) * b.r * b.dir;
+    out.push([(b.x + dx * cos - dy * sin) * S, (b.y + dx * sin + dy * cos) * S]);
   }
   return out;
 }
@@ -161,12 +166,23 @@ function pushOut(tri, p) {
   }
 }
 
+function nearestBlock() {
+  let best = -1;
+  let dist = S * 0.16;
+  modeState.blocks.forEach((b, i) => {
+    const d = Math.hypot(b.x * S - pointer.x, b.y * S - pointer.y);
+    if (d < dist) { dist = d; best = i; }
+  });
+  return best;
+}
+
 MODES.flow = {
   label: 'поток',
-  note: 'жидкость льётся сверху и огибает клинья: форму держит не буква, а её обтекание. Клин можно тащить',
+  note: 'жидкость льётся сверху и огибает клинья: форму держит не буква, а её обтекание. Клин тащат мышью, крутят колесом или мышью с shift',
   tools: [
     { type: 'button', label: 'слить', action: () => { modeState.drops = []; } },
     { type: 'button', label: 'клинья на место', action: () => { modeState.blocks = makeBlocks(); } },
+    { type: 'button', label: 'повернуть все', action: () => { for (const b of modeState.blocks) b.rot += Math.PI / 12; } },
     { type: 'range', label: 'напор', key: 'flow', min: 1, max: 30, step: 0.5, value: 14 },
     { type: 'range', label: 'струя', key: 'jet', min: 0.005, max: 0.12, step: 0.005, value: 0.02 },
     { type: 'range', label: 'капля', key: 'drop', min: 0.004, max: 0.02, step: 0.001, value: 0.008 },
@@ -235,8 +251,15 @@ MODES.flow = {
     modeState.drops = drops.filter((p) => p.y < S * 1.1 && p.x > -S * 0.2 && p.x < S * 1.2);
     if (pointer.down && modeState.held >= 0) {
       const b = modeState.blocks[modeState.held];
-      b.x = pointer.x / S;
-      b.y = pointer.y / S;
+      if (modeState.spin) {
+        // С shift клин не едет за курсором, а поворачивается вслед за ним.
+        const angle = Math.atan2(pointer.y - b.y * S, pointer.x - b.x * S);
+        if (modeState.grabAngle === undefined) modeState.grabAngle = angle - b.rot;
+        b.rot = angle - modeState.grabAngle;
+      } else {
+        b.x = pointer.x / S;
+        b.y = pointer.y / S;
+      }
     }
   },
   persist() { return on('trail'); },
@@ -265,16 +288,17 @@ MODES.flow = {
       ctx.fill();
     }
   },
-  onDown() {
-    let best = -1;
-    let dist = S * 0.16;
-    modeState.blocks.forEach((b, i) => {
-      const d = Math.hypot(b.x * S - pointer.x, b.y * S - pointer.y);
-      if (d < dist) { dist = d; best = i; }
-    });
-    modeState.held = best;
+  onDown(event) {
+    modeState.held = nearestBlock();
+    modeState.spin = Boolean(event && event.shiftKey);
+    modeState.grabAngle = undefined;
   },
-  onUp() { modeState.held = -1; },
+  onUp() { modeState.held = -1; modeState.grabAngle = undefined; },
+  onWheel(delta) {
+    const i = nearestBlock();
+    if (i < 0) return;
+    modeState.blocks[i].rot += delta * 0.002;
+  },
 };
 
 /* ---------- 2. анаморфоза: буква живёт в одном ракурсе ---------- */
@@ -604,6 +628,611 @@ MODES.slit = {
   },
 };
 
+/* ---------- 6. кристалл: движение плавит, покой выращивает ---------- */
+
+const CRYSTAL = 112;
+
+function seedCrystal(cx, cy, radius) {
+  const grain = ++modeState.grain;
+  for (let y = Math.floor(cy - radius); y <= Math.ceil(cy + radius); y += 1) {
+    for (let x = Math.floor(cx - radius); x <= Math.ceil(cx + radius); x += 1) {
+      if (x < 0 || y < 0 || x >= CRYSTAL || y >= CRYSTAL) continue;
+      if (Math.hypot(x - cx, y - cy) > radius) continue;
+      const i = y * CRYSTAL + x;
+      if (modeState.crystals[i]) continue;
+      modeState.crystals[i] = grain;
+      modeState.age[i] = 0;
+      modeState.occupied.push(i);
+    }
+  }
+}
+
+MODES.crystal = {
+  label: 'кристалл',
+  note: 'движение курсора плавит решётку, неподвижность выращивает новый кристалл. Попробуй замереть',
+  tools: [
+    { type: 'button', label: 'расплавить всё', action: () => setMode(current) },
+    { type: 'range', label: 'рост', key: 'growth', min: 1, max: 40, step: 1, value: 12 },
+    { type: 'range', label: 'покой', key: 'rest', min: 0.05, max: 1.5, step: 0.05, value: 0.35 },
+    { type: 'range', label: 'жар курсора', key: 'heat', min: 2, max: 18, step: 1, value: 8 },
+    { type: 'toggle', label: 'затравки', key: 'seeds', value: true, rebuild: true },
+  ],
+  setup() {
+    modeState.crystals = new Uint16Array(CRYSTAL * CRYSTAL);
+    modeState.age = new Uint8Array(CRYSTAL * CRYSTAL);
+    modeState.occupied = [];
+    modeState.grain = 0;
+    modeState.motion = 0;
+    modeState.still = 0;
+    modeState.tick = 0;
+    const buffer = document.createElement('canvas');
+    buffer.width = CRYSTAL;
+    buffer.height = CRYSTAL;
+    modeState.buffer = buffer;
+    modeState.bctx = buffer.getContext('2d');
+    modeState.image = modeState.bctx.createImageData(CRYSTAL, CRYSTAL);
+    if (on('seeds')) {
+      for (let i = 0; i < 7; i += 1) {
+        seedCrystal(12 + Math.random() * (CRYSTAL - 24), 12 + Math.random() * (CRYSTAL - 24), 1.2);
+      }
+    }
+  },
+  onMove() {
+    modeState.motion = Math.max(modeState.motion, Math.hypot(pointer.x - pointer.px, pointer.y - pointer.py));
+    modeState.still = 0;
+  },
+  step() {
+    modeState.tick += 1;
+    modeState.motion *= 0.78;
+    if (pointer.seen) {
+      if (modeState.motion > 0.8) {
+        const cx = (pointer.x / S) * CRYSTAL;
+        const cy = (pointer.y / S) * CRYSTAL;
+        const radius = num('heat') * (0.65 + Math.min(2, modeState.motion / 12));
+        for (let y = Math.floor(cy - radius); y <= Math.ceil(cy + radius); y += 1) {
+          for (let x = Math.floor(cx - radius); x <= Math.ceil(cx + radius); x += 1) {
+            if (x < 0 || y < 0 || x >= CRYSTAL || y >= CRYSTAL) continue;
+            if (Math.hypot(x - cx, y - cy) > radius) continue;
+            const i = y * CRYSTAL + x;
+            modeState.crystals[i] = 0;
+            modeState.age[i] = 0;
+          }
+        }
+        modeState.still = 0;
+      } else {
+        modeState.still += STEP;
+        if (modeState.still > num('rest') && modeState.tick % 12 === 0) {
+          seedCrystal((pointer.x / S) * CRYSTAL, (pointer.y / S) * CRYSTAL, 1.3);
+        }
+      }
+    }
+
+    const occupied = modeState.occupied;
+    for (let n = 0; n < num('growth') && occupied.length; n += 1) {
+      const from = occupied[Math.floor(Math.random() * occupied.length)];
+      const grain = modeState.crystals[from];
+      if (!grain) continue;
+      const x = from % CRYSTAL;
+      const y = Math.floor(from / CRYSTAL);
+      const dir = Math.floor(Math.random() * 8);
+      const ox = [-1, 0, 1, -1, 1, -1, 0, 1][dir];
+      const oy = [-1, -1, -1, 0, 0, 1, 1, 1][dir];
+      const nx = x + ox;
+      const ny = y + oy;
+      if (nx < 0 || ny < 0 || nx >= CRYSTAL || ny >= CRYSTAL) continue;
+      const to = ny * CRYSTAL + nx;
+      if (modeState.crystals[to]) continue;
+      modeState.crystals[to] = grain;
+      modeState.age[to] = 0;
+      occupied.push(to);
+    }
+    for (let i = 0; i < modeState.age.length; i += 1) {
+      if (modeState.crystals[i] && modeState.age[i] < 255) modeState.age[i] += 1;
+    }
+    if (modeState.tick % 180 === 0) {
+      modeState.occupied = occupied.filter((i) => modeState.crystals[i]);
+    }
+  },
+  draw() {
+    const { crystals, age, image, bctx, buffer } = modeState;
+    const data = image.data;
+    for (let i = 0; i < crystals.length; i += 1) {
+      const p = i * 4;
+      const grain = crystals[i];
+      if (!grain) {
+        data[p] = 241; data[p + 1] = 237; data[p + 2] = 229; data[p + 3] = 255;
+        continue;
+      }
+      if (age[i] < 14) {
+        const hot = 1 - age[i] / 14;
+        data[p] = 22 + (224 - 22) * hot;
+        data[p + 1] = 22 + (33 - 22) * hot;
+        data[p + 2] = 22 + (15 - 22) * hot;
+      } else {
+        const shade = 18 + ((grain * 37) % 38);
+        data[p] = shade; data[p + 1] = shade; data[p + 2] = shade;
+      }
+      data[p + 3] = 255;
+    }
+    bctx.putImageData(image, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(buffer, 0, 0, S, S);
+  },
+};
+
+/* ---------- 7. эхо: настоящее тянет за собой прошлые состояния ---------- */
+
+function echoPath(node, scale) {
+  ctx.save();
+  ctx.translate(node.x, node.y);
+  ctx.scale(scale, scale);
+  ctx.translate(-S * 0.5, -S * 0.5);
+  ctx.beginPath();
+  pathPoly(D_OUTER, S);
+  pathPoly(D_HOLE, S);
+  ctx.restore();
+}
+
+MODES.echo = {
+  label: 'эхо времени',
+  note: 'тащи настоящее: прошлые состояния догоняют его по очереди, а после отпускания возвращают жест назад',
+  tools: [
+    { type: 'button', label: 'собрать', action: () => setMode(current) },
+    { type: 'range', label: 'слоёв', key: 'layers', min: 8, max: 48, step: 2, value: 28, rebuild: true },
+    { type: 'range', label: 'запаздывание', key: 'lag', min: 0.02, max: 0.28, step: 0.01, value: 0.09 },
+    { type: 'range', label: 'инерция', key: 'drag', min: 0.55, max: 0.96, step: 0.01, value: 0.88 },
+    { type: 'range', label: 'глубина', key: 'depth', min: 0, max: 0.5, step: 0.02, value: 0.22 },
+    { type: 'toggle', label: 'связи', key: 'mesh', value: true },
+  ],
+  setup() {
+    modeState.nodes = [];
+    modeState.anchor = { x: S * 0.5, y: S * 0.5 };
+    modeState.release = 9;
+    for (let i = 0; i < num('layers'); i += 1) {
+      modeState.nodes.push({ x: S * 0.5, y: S * 0.5, vx: 0, vy: 0 });
+    }
+  },
+  onUp() { modeState.release = 0; },
+  step() {
+    const nodes = modeState.nodes;
+    if (pointer.down) {
+      modeState.anchor.x = pointer.x;
+      modeState.anchor.y = pointer.y;
+      modeState.release = 0;
+    } else {
+      modeState.release += STEP;
+      if (modeState.release > 0.8) {
+        modeState.anchor.x += (S * 0.5 - modeState.anchor.x) * 0.035;
+        modeState.anchor.y += (S * 0.5 - modeState.anchor.y) * 0.035;
+      }
+    }
+    const targetX = modeState.anchor.x;
+    const targetY = modeState.anchor.y;
+    const damping = num('drag');
+    const lag = num('lag');
+    for (let i = 0; i < nodes.length; i += 1) {
+      const n = nodes[i];
+      const goal = i === 0 ? { x: targetX, y: targetY } : nodes[i - 1];
+      const pull = i === 0 ? 0.14 : lag;
+      n.vx = (n.vx + (goal.x - n.x) * pull) * damping;
+      n.vy = (n.vy + (goal.y - n.y) * pull) * damping;
+      const cap = S * 0.08;
+      const speed = Math.hypot(n.vx, n.vy);
+      if (speed > cap) { n.vx *= cap / speed; n.vy *= cap / speed; }
+      n.x += n.vx;
+      n.y += n.vy;
+    }
+  },
+  draw() {
+    const nodes = modeState.nodes;
+    const depth = num('depth');
+    let hottest = 0;
+    let stretch = 0;
+    for (let i = 1; i < nodes.length; i += 1) {
+      const d = Math.hypot(nodes[i].x - nodes[i - 1].x, nodes[i].y - nodes[i - 1].y);
+      if (d > stretch) { stretch = d; hottest = i; }
+    }
+    if (on('mesh')) {
+      ctx.strokeStyle = 'rgba(22,22,22,.09)';
+      ctx.lineWidth = 1;
+      for (const corner of [0, 2, 4, 7, 9, 11]) {
+        ctx.beginPath();
+        nodes.forEach((node, i) => {
+          const scale = 0.72 * (1 - depth * i / Math.max(1, nodes.length - 1));
+          const p = D_OUTER[corner];
+          const x = node.x + (p[0] - 0.5) * S * scale;
+          const y = node.y + (p[1] - 0.5) * S * scale;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }
+    }
+    for (let i = nodes.length - 1; i >= 0; i -= 1) {
+      const scale = 0.72 * (1 - depth * i / Math.max(1, nodes.length - 1));
+      echoPath(nodes[i], scale);
+      ctx.strokeStyle = i === hottest && stretch > S * 0.012 ? RED : `rgba(22,22,22,${0.08 + (1 - i / nodes.length) * 0.12})`;
+      ctx.lineWidth = i === 0 ? 2 : 1;
+      ctx.stroke();
+    }
+  },
+};
+
+/* ---------- 8. предсказатель: поле реагирует на вероятное будущее ---------- */
+
+MODES.predict = {
+  label: 'предсказатель',
+  note: 'поле уворачивается от места, где курсор окажется позже. Резко смени направление, чтобы сломать прогноз',
+  tools: [
+    { type: 'button', label: 'успокоить', action: () => setMode(current) },
+    { type: 'range', label: 'точек', key: 'density', min: 12, max: 36, step: 2, value: 24, rebuild: true },
+    { type: 'range', label: 'вперёд, сек', key: 'ahead', min: 0.05, max: 0.8, step: 0.05, value: 0.35 },
+    { type: 'range', label: 'влияние', key: 'radius', min: 0.05, max: 0.35, step: 0.01, value: 0.17 },
+    { type: 'range', label: 'сила будущего', key: 'force', min: 0.1, max: 2.5, step: 0.1, value: 1.8 },
+    { type: 'range', label: 'возврат', key: 'return', min: 0.01, max: 0.2, step: 0.01, value: 0.03 },
+    { type: 'toggle', label: 'показывать прогноз', key: 'ghost', value: true },
+  ],
+  setup() {
+    const density = num('density');
+    modeState.particles = [];
+    for (let y = 0; y < density; y += 1) {
+      for (let x = 0; x < density; x += 1) {
+        const px = (x + 0.5) / density;
+        const py = (y + 0.5) / density;
+        if (!inLetter(px, py)) continue;
+        modeState.particles.push({ hx: px * S, hy: py * S, x: px * S, y: py * S, vx: 0, vy: 0 });
+      }
+    }
+    const x = pointer.seen ? pointer.x : S * 0.5;
+    const y = pointer.seen ? pointer.y : S * 0.5;
+    modeState.pred = { x, y };
+    modeState.vx = 0;
+    modeState.vy = 0;
+    modeState.inputX = 0;
+    modeState.inputY = 0;
+    modeState.queue = [];
+    modeState.pulses = [];
+  },
+  onMove() {
+    modeState.inputX += pointer.x - pointer.px;
+    modeState.inputY += pointer.y - pointer.py;
+    const miss = Math.hypot(modeState.pred.x - pointer.x, modeState.pred.y - pointer.y);
+    if (miss > S * 0.14 && modeState.pulses.length < 8) {
+      modeState.pulses.push({ x: pointer.x, y: pointer.y, r: 2, alpha: Math.min(1, miss / (S * 0.3)) });
+    }
+  },
+  step() {
+    const moving = Math.abs(modeState.inputX) + Math.abs(modeState.inputY) > 0.01;
+    modeState.vx = modeState.vx * (moving ? 0.62 : 0.82) + modeState.inputX * 0.38;
+    modeState.vy = modeState.vy * (moving ? 0.62 : 0.82) + modeState.inputY * 0.38;
+    modeState.inputX = 0;
+    modeState.inputY = 0;
+    const frames = Math.max(1, Math.round(num('ahead') / STEP));
+    const cursorX = pointer.seen ? pointer.x : S * 0.5;
+    const cursorY = pointer.seen ? pointer.y : S * 0.5;
+    const tx = clamp(cursorX + modeState.vx * frames, 0, S);
+    const ty = clamp(cursorY + modeState.vy * frames, 0, S);
+    modeState.pred.x += (tx - modeState.pred.x) * 0.35;
+    modeState.pred.y += (ty - modeState.pred.y) * 0.35;
+    modeState.queue.push({ x: modeState.pred.x, y: modeState.pred.y });
+    if (modeState.queue.length > frames) {
+      const expected = modeState.queue.shift();
+      const error = Math.hypot(expected.x - pointer.x, expected.y - pointer.y);
+      if (pointer.seen && error > S * 0.09 && modeState.pulses.length < 8) {
+        modeState.pulses.push({ x: pointer.x, y: pointer.y, r: 2, alpha: Math.min(1, error / (S * 0.3)) });
+      }
+    }
+
+    const radius = num('radius') * S;
+    const force = num('force') * 0.9;
+    const home = num('return');
+    for (const p of modeState.particles) {
+      const dx = p.x - modeState.pred.x;
+      const dy = p.y - modeState.pred.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      if (dist < radius) {
+        const push = (1 - dist / radius) * force;
+        p.vx += (dx / dist) * push;
+        p.vy += (dy / dist) * push;
+      }
+      p.vx = (p.vx + (p.hx - p.x) * home) * 0.87;
+      p.vy = (p.vy + (p.hy - p.y) * home) * 0.87;
+      p.x += p.vx;
+      p.y += p.vy;
+    }
+    for (const pulse of modeState.pulses) {
+      pulse.r += S * 0.006;
+      pulse.alpha *= 0.91;
+    }
+    modeState.pulses = modeState.pulses.filter((pulse) => pulse.alpha > 0.03);
+  },
+  draw() {
+    ctx.fillStyle = INK;
+    const r = Math.max(1.2, S / num('density') * 0.09);
+    for (const p of modeState.particles) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (on('ghost') && pointer.seen) {
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(pointer.x, pointer.y);
+      ctx.lineTo(modeState.pred.x, modeState.pred.y);
+      ctx.moveTo(modeState.pred.x + S * 0.013, modeState.pred.y);
+      ctx.arc(modeState.pred.x, modeState.pred.y, S * 0.013, 0, Math.PI * 2);
+      ctx.moveTo(modeState.pred.x - S * 0.025, modeState.pred.y);
+      ctx.lineTo(modeState.pred.x + S * 0.025, modeState.pred.y);
+      ctx.moveTo(modeState.pred.x, modeState.pred.y - S * 0.025);
+      ctx.lineTo(modeState.pred.x, modeState.pred.y + S * 0.025);
+      ctx.stroke();
+    }
+    for (const pulse of modeState.pulses) {
+      ctx.strokeStyle = `rgba(224,33,15,${pulse.alpha})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pulse.x, pulse.y, pulse.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  },
+};
+
+/* ---------- 9. решётка: направление жеста становится состоянием модуля ---------- */
+
+const GRID_LEVELS = 5;
+const GRID_CAP = 5;
+const PILOT_CURVES = [
+  [[1257.13, 231.104], [1026.3, 505.771], [538.431, 1081.7], [433.631, 1188.1]],
+  [[433.631, 1188.1], [302.631, 1321.1], [103.954, 1148], [229.131, 1030.1]],
+  [[229.131, 1030.1], [397, 872], [626.499, 1243.6], [882.131, 1243.6]],
+  [[882.131, 1243.6], [1224, 1243.6], [1400, 674.5], [1080, 354.5]],
+  [[1080, 354.5], [759.999, 34.5001], [267, 263], [267, 520.5]],
+  [[267, 520.5], [267, 726.5], [423.833, 716.833], [486, 714.5]],
+];
+
+function buildPilotRoute() {
+  const route = [];
+  for (let curve = 0; curve < PILOT_CURVES.length; curve += 1) {
+    const [a, b, c, d] = PILOT_CURVES[curve];
+    for (let i = curve ? 1 : 0; i <= 72; i += 1) {
+      const t = i / 72;
+      const u = 1 - t;
+      const x = u ** 3 * a[0] + 3 * u * u * t * b[0] + 3 * u * t * t * c[0] + t ** 3 * d[0];
+      const y = u ** 3 * a[1] + 3 * u * u * t * b[1] + 3 * u * t * t * c[1] + t ** 3 * d[1];
+      route.push([0.06 + (x / 1446) * 0.88, 0.06 + (y / 1450) * 0.88]);
+    }
+  }
+  return route;
+}
+
+function clearGrid() {
+  modeState.fieldX.fill(0);
+  modeState.fieldY.fill(0);
+  modeState.nextX.fill(0);
+  modeState.nextY.fill(0);
+  modeState.level.fill(0);
+  modeState.display.fill(0);
+  modeState.flash.fill(0);
+}
+
+function rotateGrid() {
+  for (let i = 0; i < modeState.fieldX.length; i += 1) {
+    const x = modeState.fieldX[i];
+    modeState.fieldX[i] = -modeState.fieldY[i];
+    modeState.fieldY[i] = x;
+    modeState.flash[i] = 1;
+  }
+}
+
+function paintGridStroke(fromX, fromY, toX, toY, erase) {
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  const speed = Math.hypot(dx, dy);
+  if (speed < 0.5) return;
+  const n = modeState.n;
+  const cell = S / n;
+  const radius = num('brush') * S;
+  const cx = toX / cell;
+  const cy = toY / cell;
+  const rr = radius / cell;
+  const ux = dx / speed;
+  const uy = dy / speed;
+  const force = num('pressure') * (0.9 + Math.min(2.2, speed / cell));
+  for (let y = Math.floor(cy - rr); y <= Math.ceil(cy + rr); y += 1) {
+    for (let x = Math.floor(cx - rr); x <= Math.ceil(cx + rr); x += 1) {
+      if (x < 0 || y < 0 || x >= n || y >= n) continue;
+      const dist = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+      if (dist > rr) continue;
+      const weight = (1 - dist / rr) ** 1.5;
+      const i = y * n + x;
+      if (erase) {
+        const keep = Math.max(0, 1 - force * weight * 0.34);
+        modeState.fieldX[i] *= keep;
+        modeState.fieldY[i] *= keep;
+        continue;
+      }
+      modeState.fieldX[i] += ux * force * weight;
+      modeState.fieldY[i] += uy * force * weight;
+      const magnitude = Math.hypot(modeState.fieldX[i], modeState.fieldY[i]);
+      if (magnitude > GRID_CAP) {
+        modeState.fieldX[i] *= GRID_CAP / magnitude;
+        modeState.fieldY[i] *= GRID_CAP / magnitude;
+      }
+    }
+  }
+}
+
+MODES.snap = {
+  label: 'решётка',
+  cursor: 'crosshair',
+  note: 'веди — рисуй, повтори в ту же сторону — уплотняй, обратно — стирай, поперёк — поворачивай. Shift — чистый ластик',
+  tools: [
+    { type: 'button', label: 'очистить', action: clearGrid },
+    { type: 'button', label: 'повернуть всё', action: rotateGrid },
+    { type: 'toggle', label: 'автопилот', key: 'pilot', value: false },
+    { type: 'range', label: 'ячеек', key: 'cells', min: 14, max: 46, step: 2, value: 30, rebuild: true },
+    { type: 'range', label: 'кисть', key: 'brush', min: 0.015, max: 0.14, step: 0.005, value: 0.055 },
+    { type: 'range', label: 'нажим', key: 'pressure', min: 0.2, max: 5, step: 0.1, value: 1.5 },
+    { type: 'range', label: 'сцепление', key: 'couple', min: 0, max: 1, step: 0.05, value: 0.2 },
+    { type: 'range', label: 'неодинаковость', key: 'grain', min: 0, max: 1, step: 0.05, value: 0.35 },
+    { type: 'range', label: 'забывание', key: 'fade', min: 0, max: 1, step: 0.05, value: 0 },
+    { type: 'range', label: 'скорость авто', key: 'pilotSpeed', min: 0.5, max: 5, step: 0.1, value: 2.4 },
+  ],
+  setup() {
+    const n = num('cells');
+    const size = n * n;
+    modeState.n = n;
+    modeState.fieldX = new Float32Array(size);
+    modeState.fieldY = new Float32Array(size);
+    modeState.nextX = new Float32Array(size);
+    modeState.nextY = new Float32Array(size);
+    modeState.angle = new Float32Array(size);
+    modeState.display = new Float32Array(size);
+    modeState.level = new Uint8Array(size);
+    modeState.flash = new Float32Array(size);
+    modeState.bias = new Float32Array(size);
+    modeState.twist = new Float32Array(size);
+    modeState.pilotRoute = buildPilotRoute().map(([x, y]) => [x * S, y * S]);
+    modeState.pilotIndex = 0;
+    modeState.pilotCarry = 0;
+    modeState.pilotPause = 0;
+    modeState.pilotRunning = true;
+    modeState.pilotOnce = true;
+    for (let i = 0; i < size; i += 1) {
+      modeState.angle[i] = Math.random() * Math.PI;
+      modeState.bias[i] = Math.random() - 0.5;
+      modeState.twist[i] = Math.random() * 2 - 1;
+    }
+  },
+  onMove() {
+    if (!pointer.down) return;
+    paintGridStroke(pointer.px, pointer.py, pointer.x, pointer.y, pointer.erase);
+  },
+  step() {
+    const n = modeState.n;
+    const repeat = on('pilot');
+    if (!repeat && !modeState.pilotOnce) modeState.pilotRunning = false;
+    if (modeState.pilotPause > 0) {
+      modeState.pilotPause -= STEP;
+      if (modeState.pilotPause <= 0 && repeat) {
+        modeState.pilotIndex = 0;
+        modeState.pilotCarry = 0;
+        modeState.pilotRunning = true;
+      }
+    } else if (repeat && !modeState.pilotRunning && !modeState.pilotOnce) {
+      modeState.pilotIndex = 0;
+      modeState.pilotCarry = 0;
+      modeState.pilotRunning = true;
+    }
+    if (modeState.pilotRunning) {
+      modeState.pilotCarry += num('pilotSpeed');
+      while (modeState.pilotCarry >= 1 && modeState.pilotIndex < modeState.pilotRoute.length - 1) {
+        const from = modeState.pilotRoute[modeState.pilotIndex];
+        const to = modeState.pilotRoute[modeState.pilotIndex + 1];
+        paintGridStroke(from[0], from[1], to[0], to[1], false);
+        modeState.pilotIndex += 1;
+        modeState.pilotCarry -= 1;
+      }
+      if (modeState.pilotIndex >= modeState.pilotRoute.length - 1) {
+        modeState.pilotRunning = false;
+        if (modeState.pilotOnce) {
+          modeState.pilotOnce = false;
+          setToolValue('fade', 0.5);
+        }
+        if (repeat) modeState.pilotPause = 0.8;
+      }
+    }
+    const coupling = num('couple') * 0.025;
+    const fade = num('fade');
+    const keep = fade === 0 ? 1 : 1 - fade * 0.004;
+    for (let y = 0; y < n; y += 1) {
+      for (let x = 0; x < n; x += 1) {
+        const i = y * n + x;
+        let sumX = 0;
+        let sumY = 0;
+        let count = 0;
+        if (x > 0) { sumX += modeState.fieldX[i - 1]; sumY += modeState.fieldY[i - 1]; count += 1; }
+        if (x < n - 1) { sumX += modeState.fieldX[i + 1]; sumY += modeState.fieldY[i + 1]; count += 1; }
+        if (y > 0) { sumX += modeState.fieldX[i - n]; sumY += modeState.fieldY[i - n]; count += 1; }
+        if (y < n - 1) { sumX += modeState.fieldX[i + n]; sumY += modeState.fieldY[i + n]; count += 1; }
+        const ownX = modeState.fieldX[i];
+        const ownY = modeState.fieldY[i];
+        const magnitude = Math.hypot(ownX, ownY) * keep;
+        const mixedX = ownX + (sumX / count - ownX) * coupling;
+        const mixedY = ownY + (sumY / count - ownY) * coupling;
+        const mixedMagnitude = Math.hypot(mixedX, mixedY);
+        if (mixedMagnitude > 1e-6) {
+          modeState.nextX[i] = (mixedX / mixedMagnitude) * magnitude;
+          modeState.nextY[i] = (mixedY / mixedMagnitude) * magnitude;
+        } else {
+          modeState.nextX[i] = ownX * keep;
+          modeState.nextY[i] = ownY * keep;
+        }
+      }
+    }
+    [modeState.fieldX, modeState.nextX] = [modeState.nextX, modeState.fieldX];
+    [modeState.fieldY, modeState.nextY] = [modeState.nextY, modeState.fieldY];
+
+    const grain = num('grain');
+    for (let i = 0; i < modeState.fieldX.length; i += 1) {
+      const magnitude = Math.hypot(modeState.fieldX[i], modeState.fieldY[i]);
+      const raw = (magnitude / GRID_CAP) * GRID_LEVELS + 0.25 + modeState.bias[i] * grain;
+      const level = clamp(Math.floor(raw), 0, GRID_LEVELS - 1);
+      if (level !== modeState.level[i]) {
+        modeState.level[i] = level;
+        modeState.flash[i] = 1;
+      }
+      modeState.flash[i] *= 0.84;
+      modeState.display[i] += (level - modeState.display[i]) * 0.18;
+      if (magnitude > 0.03) {
+        const target = Math.atan2(modeState.fieldY[i], modeState.fieldX[i]) + modeState.twist[i] * grain * 0.42;
+        const turn = Math.atan2(Math.sin(target - modeState.angle[i]), Math.cos(target - modeState.angle[i]));
+        modeState.angle[i] += turn * 0.2;
+      }
+    }
+  },
+  draw() {
+    const n = modeState.n;
+    const cell = S / n;
+    for (let y = 0; y < n; y += 1) {
+      for (let x = 0; x < n; x += 1) {
+        const i = y * n + x;
+        const cx = (x + 0.5) * cell;
+        const cy = (y + 0.5) * cell;
+        const density = modeState.display[i];
+        if (density < 0.08) {
+          ctx.fillStyle = 'rgba(22,22,22,.12)';
+          ctx.fillRect(cx - 0.5, cy - 0.5, 1, 1);
+          continue;
+        }
+        const level = Math.max(1, Math.round(density));
+        const length = cell * (0.54 + density * 0.045);
+        const band = cell * 0.42;
+        const hot = modeState.flash[i] > 0.08;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(modeState.angle[i]);
+        if (level >= GRID_LEVELS - 1) {
+          ctx.fillStyle = hot ? RED : INK;
+          ctx.fillRect(-length / 2, -cell * 0.18, length, cell * 0.36);
+        } else {
+          const lines = level * 2 - 1;
+          ctx.strokeStyle = hot ? RED : INK;
+          ctx.lineWidth = Math.max(0.7, cell * (0.035 + density * 0.008));
+          ctx.beginPath();
+          for (let line = 0; line < lines; line += 1) {
+            const offset = lines === 1 ? 0 : -band / 2 + (band * line) / (lines - 1);
+            ctx.moveTo(-length / 2, offset);
+            ctx.lineTo(length / 2, offset);
+          }
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
+  },
+};
+
 /* ---------- панель ---------- */
 
 function renderTools(mode) {
@@ -624,6 +1253,7 @@ function renderTools(mode) {
     if (tool.type === 'toggle') {
       const button = document.createElement('button');
       button.type = 'button';
+      button.dataset.tool = tool.key;
       button.textContent = tool.label;
       button.setAttribute('aria-pressed', String(value));
       button.addEventListener('click', () => {
@@ -657,6 +1287,7 @@ function renderTools(mode) {
     const input = document.createElement('input');
     const out = document.createElement('span');
     input.type = 'range';
+    input.dataset.tool = tool.key;
     input.min = tool.min;
     input.max = tool.max;
     input.step = tool.step;
@@ -665,16 +1296,29 @@ function renderTools(mode) {
     input.addEventListener('input', () => {
       toolValues[key] = Number(input.value);
       out.textContent = input.value;
-      if (tool.rebuild) setMode(current);
     });
+    if (tool.rebuild) input.addEventListener('change', () => setMode(current));
     label.append(tool.label, input, out);
     toolsBar.append(label);
+  }
+}
+
+function setToolValue(key, value) {
+  toolValues[slot(key)] = value;
+  const control = toolsBar.querySelector(`[data-tool="${key}"]`);
+  if (!control) return;
+  if (control.matches('input')) {
+    control.value = value;
+    if (control.nextElementSibling) control.nextElementSibling.textContent = String(value);
+  } else {
+    control.setAttribute('aria-pressed', String(Boolean(value)));
   }
 }
 
 function setMode(name) {
   current = name;
   const mode = MODES[name];
+  canvas.style.cursor = mode.cursor || 'default';
   // Панель читает значения уже нового режима, поэтому current меняется первым.
   modeState = {};
   renderTools(mode);
@@ -714,6 +1358,8 @@ function track(event) {
   pointer.py = pointer.y;
   pointer.x = event.clientX - bounds.left;
   pointer.y = event.clientY - bounds.top;
+  pointer.seen = true;
+  pointer.erase = event.shiftKey;
 }
 
 canvas.addEventListener('pointerdown', (event) => {
@@ -722,8 +1368,15 @@ canvas.addEventListener('pointerdown', (event) => {
   pointer.py = pointer.y;
   pointer.down = true;
   canvas.setPointerCapture(event.pointerId);
-  MODES[current].onDown?.();
+  MODES[current].onDown?.(event);
 });
+
+canvas.addEventListener('wheel', (event) => {
+  if (!MODES[current].onWheel) return;
+  event.preventDefault();
+  track(event);
+  MODES[current].onWheel(event.deltaY);
+}, { passive: false });
 
 canvas.addEventListener('pointermove', (event) => {
   track(event);
@@ -732,6 +1385,7 @@ canvas.addEventListener('pointermove', (event) => {
 
 window.addEventListener('pointerup', () => {
   pointer.down = false;
+  pointer.erase = false;
   MODES[current].onUp?.();
 });
 
@@ -755,5 +1409,5 @@ function frame(now) {
 
 new ResizeObserver(resize).observe(canvas);
 resize();
-setMode('flow');
+setMode('snap');
 requestAnimationFrame(frame);

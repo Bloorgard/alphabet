@@ -10,7 +10,7 @@
   body { margin: 0; min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto; gap: 16px; padding: 20px; background: var(--paper); color: var(--ink); font: 400 11px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .08em; }
   header, footer { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
   header b { font-weight: 500; letter-spacing: -.02em; text-transform: none; font-size: 14px; }
-  .modes { display: flex; gap: 2px; }
+  .modes { display: flex; flex-wrap: wrap; gap: 2px; }
   .modes button { border: 1px solid rgba(22,22,22,.18); padding: 6px 10px; background: none; color: var(--muted); font: inherit; text-transform: uppercase; letter-spacing: .08em; cursor: pointer; }
   .modes button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--paper); }
   .stage { justify-self: center; align-self: center; position: relative; width: min(76vh, 100%); aspect-ratio: 1/1; border: 1px solid rgba(22,22,22,.18); }
@@ -37,6 +37,6 @@
   <span id="note"></span>
 </footer>
 
-<script src="d-lab.js?9"></script>
+<script src="d-lab.js?13"></script>
 </body>
 </html>
