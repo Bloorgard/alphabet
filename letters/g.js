@@ -10,7 +10,8 @@ const PARAMS = {
   ratio: 1.5,     // во сколько раз следующий угол теснее
   shift: 0.25,    // насколько курсор растаскивает плоскости
   pull: 0.5,      // насколько точка схода идёт за курсором
-  paint: 3,       // каждый такой слой рождается краской, 0 — без краски
+  paint: 0.9,     // сила краски, 0 — без краски
+  spark: 0.3,     // на какой доле кадра угол вспыхивает
 };
 
 const CONTROLS = [
@@ -18,10 +19,12 @@ const CONTROLS = [
   { key: 'ratio', label: 'шаг углов', min: 1.2, max: 2.2, step: 0.01 },
   { key: 'shift', label: 'сдвиг плоскостей', min: 0, max: 0.6, step: 0.01 },
   { key: 'pull', label: 'схождение за курсором', min: 0, max: 1, step: 0.01 },
-  { key: 'paint', label: 'краска', min: 0, max: 12, step: 1 },
+  { key: 'paint', label: 'краска', min: 0, max: 1, step: 0.01 },
+  { key: 'spark', label: 'где вспыхивает', min: 0.06, max: 0.9, step: 0.01 },
 ];
 
 const SEED = 0.6;        // мельчайший угол меньше пикселя: слой рождается из точки
+const GLOW = 0.6;        // ширина вспышки, в шагах вложения
 const SPIN = 0.0016;     // сколько зума даёт пиксель перетаскивания
 const FRICTION = 0.94;   // выбег после броска
 
@@ -85,7 +88,9 @@ export function mountG(workspace) {
     const frac = phase - whole;
     const reach = Math.hypot(W, H) * 2;
     const count = Math.ceil(Math.log(reach / SEED) / Math.log(ratio));
-    const paint = Math.round(params.paint);
+    // Краска привязана к размеру, а не к номеру слоя: номера пересчитываются
+    // на каждом обороте фазы, и цвета от этого перещёлкивали.
+    const spark = Math.min(W, H) * params.spark;
     ctx.clearRect(0, 0, W, H);
 
     for (let i = count - 1; i >= 0; i -= 1) {
@@ -94,10 +99,13 @@ export function mountG(workspace) {
       const dx = drift.x * params.shift * W * depth;
       const dy = drift.y * params.shift * H * depth;
       const base = ((i + whole) % 2 + 2) % 2 === 0 ? PAPER : INK;
-      // Краска рождается в глубине и остывает, пока слой растёт до кадра.
-      const painted = paint > 0 && ((i + whole) % paint + paint) % paint === 0;
-      // Краска держится только в глубине: на весь кадр она бы стала фоном.
-      ctx.fillStyle = painted ? mix(ACCENT, base, size / (Math.min(W, H) * 0.3)) : tone(base);
+      // Каждый угол проходит один и тот же путь: разгорается, дойдя до своей
+      // доли кадра, и гаснет, уходя дальше.
+      const away = Math.log(size / spark) / Math.log(ratio);
+      const heat = params.paint * Math.exp(-(away * away) / (2 * GLOW * GLOW));
+      // Раскаляются только чернила: бумага остаётся бумагой, и красное
+      // всегда одной природы, а не розовеет через слой.
+      ctx.fillStyle = base === INK && heat > 0.01 ? mix(INK, ACCENT, heat) : tone(base);
       ctx.fillRect(
         origin.x - size + dx,
         origin.y - size + dy,
