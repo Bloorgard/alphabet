@@ -9,7 +9,7 @@ const MIST = [131, 129, 122];   // средний тон бумаги и чер�
 const PARAMS = {
   drift: 0.25,    // скорость собственного зума
   ratio: 1.5,     // во сколько раз следующий угол теснее
-  shift: 0.25,    // насколько курсор растаскивает плоскости
+  shift: 0.6,     // насколько курсор растаскивает плоскости, доля от упора
   paint: 0.9,     // сила краски, 0 — без краски
   spark: 0.3,     // на какой доле кадра угол вспыхивает
 };
@@ -17,15 +17,14 @@ const PARAMS = {
 const CONTROLS = [
   { key: 'drift', label: 'ход', min: -1, max: 1, step: 0.01 },
   { key: 'ratio', label: 'шаг углов', min: 1.2, max: 2.2, step: 0.01 },
-  { key: 'shift', label: 'сдвиг плоскостей', min: 0, max: 0.6, step: 0.01 },
+  { key: 'shift', label: 'сдвиг плоскостей', min: 0, max: 1, step: 0.01 },
   { key: 'paint', label: 'краска', min: 0, max: 1, step: 0.01 },
   { key: 'spark', label: 'где вспыхивает', min: 0.06, max: 0.9, step: 0.01 },
 ];
 
 const SEED = 0.6;        // мельчайший угол меньше пикселя: слой рождается из точки
 const GLOW = 0.6;        // ширина вспышки, в шагах вложения
-const FAR = 0.42;        // отъезд до упора: крупнейший угол занимает столько кадра
-const NEAR = 0.6;        // наезд до упора: столько кадра занимает мельчайший
+const LEAN = 0.09;       // упор сдвига: настолько плоскости отходят от граней
 const SPIN = 0.0016;     // сколько зума даёт пиксель перетаскивания
 const FRICTION = 0.94;   // выбег после броска
 
@@ -52,7 +51,6 @@ export function mountG(workspace) {
   let H = 0;
   let phase = 0;
   let spin = 0;              // инерция зума после броска
-  let sway = 1;              // куда камера идёт сама: к наезду или к отъезду
   let frame = 0;
   let drag = null;
   const pointer = { x: 0, y: 0, seen: false };
@@ -76,11 +74,7 @@ export function mountG(workspace) {
   }
 
   function step() {
-    const { min, max } = bounds(params.ratio);
-    phase += (params.drift * sway + spin) / 60;
-    // Собственный ход камеры дышит между упорами, а не упирается в них.
-    if (phase >= max) { phase = max; sway = -1; spin = 0; }
-    if (phase <= min) { phase = min; sway = 1; spin = 0; }
+    phase += (params.drift + spin) / 60;
     spin *= FRICTION;
     if (Math.abs(spin) < 1e-4) spin = 0;
 
@@ -91,47 +85,33 @@ export function mountG(workspace) {
     drift.y += (pointer.y / H - 0.5 - drift.y) * 0.05;
   }
 
-  // Зум конечен: у камеры два крайних положения — узор, сжатый в угол,
-  // и наезд вплотную. Бесконечное самоподобие красиво, но отъехать в нём
-  // невозможно: картинка повторяется на каждом шаге.
-  function bounds(ratio) {
-    const side = Math.min(W, H);
-    const reach = Math.hypot(W, H) * 2;
-    const count = Math.ceil(Math.log(reach / SEED) / Math.log(ratio)) + 1;
-    const step = Math.log(ratio);
-    return {
-      count,
-      min: Math.log((side * FAR) / SEED) / step - (count - 1),
-      max: Math.log((side * NEAR) / SEED) / step,
-    };
-  }
-
   function draw() {
     const ratio = params.ratio;
-    const { count, min, max } = bounds(ratio);
-    phase = Math.min(max, Math.max(min, phase));
+    const whole = Math.floor(phase);
+    const frac = phase - whole;
+    const reach = Math.hypot(W, H) * 2;
+    const count = Math.ceil(Math.log(reach / SEED) / Math.log(ratio));
     // Краска привязана к размеру, а не к номеру слоя: номера пересчитываются
     // на каждом обороте фазы, и цвета от этого перещёлкивали.
     const spark = Math.min(W, H) * params.spark;
     // Сдвиг соразмерен слою и не превышает зазора между соседями,
     // иначе вложенность рвётся и дальние углы вылезают поверх ближних.
     const room = (1 - 1 / ratio) * 0.45;
-    const shift = Math.min(params.shift, room);
+    // И упирается в предел: у края кадра стена с полом должны остаться
+    // узкими плоскостями. Дальше слои отъезжают от граней, и кадр
+    // выглядит вытянутым по холсту, а не снятым из угла.
+    const brink = Math.min(W, H) * LEAN * params.shift;
     ctx.clearRect(0, 0, W, H);
 
-    // Поле вокруг узора — цвет следующего угла: он просто ещё не вырос.
-    ctx.fillStyle = tone(count % 2 === 0 ? PAPER : INK);
-    ctx.fillRect(0, 0, W, H);
-
     for (let i = count - 1; i >= 0; i -= 1) {
-      const size = SEED * Math.pow(ratio, i + phase);
-      if (size > Math.hypot(W, H) * 2.5) continue;
-      // Сдвиг растёт вместе с углом, но у слоёв крупнее кадра замирает:
-      // соразмерный сдвиг оголил бы края.
-      const span = Math.min(size, Math.min(W, H));
-      const dx = drift.x * shift * span;
-      const dy = drift.y * shift * span;
-      const base = i % 2 === 0 ? PAPER : INK;
+      const size = SEED * Math.pow(ratio, i + frac);
+      const bottom = i === count - 1;
+      // Нижний слой держит кадр и потому не ездит: у слоя крупнее кадра
+      // соразмерный сдвиг оголил бы края. Выше сдвиг растёт вместе с углом.
+      const span = Math.min(size * room, brink);
+      const dx = bottom ? 0 : drift.x * span;
+      const dy = bottom ? 0 : drift.y * span;
+      const base = ((i + whole) % 2 + 2) % 2 === 0 ? PAPER : INK;
       // Каждый угол проходит один и тот же путь: разгорается, дойдя до своей
       // доли кадра, и гаснет, уходя дальше.
       const away = Math.log(size / spark) / Math.log(ratio);
@@ -143,11 +123,15 @@ export function mountG(workspace) {
       // ближе к ней контраст гаснет, узор сходится в ровный тон.
       const solid = Math.min(1, Math.max(0, (size - 4) / 22));
       ctx.fillStyle = solid >= 1 ? tone(hot) : mix(MIST, hot, solid);
+      // За точкой схода углов нет: пустоту закрывает только самый нижний слой,
+      // остальные остаются честными углами и не заезжают друг на друга.
+      const tailX = bottom ? Math.max(0, W - origin.x) : 0;
+      const tailY = bottom ? Math.max(0, H - origin.y) : 0;
       ctx.fillRect(
         origin.x - size + dx,
         origin.y - size + dy,
-        size + Math.abs(dx) + 1,
-        size + Math.abs(dy) + 1,
+        size + tailX + Math.abs(dx) + 1,
+        size + tailY + Math.abs(dy) + 1,
       );
     }
   }
@@ -244,7 +228,7 @@ export function mountG(workspace) {
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = 'тяни вверх — углы наплывают, вниз — отступают';
+  hint.textContent = 'тяни вверх и вниз — углы наплывают';
   hint.style.mixBlendMode = 'difference';
   hint.style.color = '#fff';
   // Правый нижний угол занят точкой схода, там подпись не прочесть.
