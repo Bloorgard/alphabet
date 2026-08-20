@@ -1070,13 +1070,13 @@ MODES.snap = {
     { type: 'button', label: 'очистить', action: clearGrid },
     { type: 'button', label: 'повернуть всё', action: rotateGrid },
     { type: 'toggle', label: 'автопилот', key: 'pilot', value: false },
+    { type: 'range', label: 'скорость авто', key: 'pilotSpeed', min: 0.5, max: 5, step: 0.1, value: 2.4 },
+    { type: 'range', label: 'забывание', key: 'fade', min: 0, max: 1, step: 0.05, value: 0 },
     { type: 'range', label: 'ячеек', key: 'cells', min: 14, max: 46, step: 2, value: 30, rebuild: true },
     { type: 'range', label: 'кисть', key: 'brush', min: 0.015, max: 0.14, step: 0.005, value: 0.055 },
     { type: 'range', label: 'нажим', key: 'pressure', min: 0.2, max: 5, step: 0.1, value: 1.5 },
-    { type: 'range', label: 'сцепление', key: 'couple', min: 0, max: 1, step: 0.05, value: 0.2 },
+    { type: 'range', label: 'сцепление соседей', key: 'couple', min: 0, max: 1, step: 0.05, value: 0.2 },
     { type: 'range', label: 'неодинаковость', key: 'grain', min: 0, max: 1, step: 0.05, value: 0.35 },
-    { type: 'range', label: 'забывание', key: 'fade', min: 0, max: 1, step: 0.05, value: 0 },
-    { type: 'range', label: 'скорость авто', key: 'pilotSpeed', min: 0.5, max: 5, step: 0.1, value: 2.4 },
   ],
   setup() {
     const n = num('cells');
@@ -1142,7 +1142,7 @@ MODES.snap = {
         if (repeat) modeState.pilotPause = 0.8;
       }
     }
-    const coupling = num('couple') * 0.025;
+    const coupling = num('couple') * 0.12;
     const fade = num('fade');
     const keep = fade === 0 ? 1 : 1 - fade * 0.004;
     for (let y = 0; y < n; y += 1) {
