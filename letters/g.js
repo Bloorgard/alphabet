@@ -4,12 +4,12 @@
 const PAPER = [241, 237, 229];
 const INK = [22, 22, 22];
 const ACCENT = [224, 33, 15];
+const MIST = [131, 129, 122];   // средний тон бумаги и чернил, в него сходится глубина
 
 const PARAMS = {
   drift: 0.25,    // скорость собственного зума
   ratio: 1.5,     // во сколько раз следующий угол теснее
   shift: 0.25,    // насколько курсор растаскивает плоскости
-  pull: 0.5,      // насколько точка схода идёт за курсором
   paint: 0.9,     // сила краски, 0 — без краски
   spark: 0.3,     // на какой доле кадра угол вспыхивает
 };
@@ -18,7 +18,6 @@ const CONTROLS = [
   { key: 'drift', label: 'ход', min: -1, max: 1, step: 0.01 },
   { key: 'ratio', label: 'шаг углов', min: 1.2, max: 2.2, step: 0.01 },
   { key: 'shift', label: 'сдвиг плоскостей', min: 0, max: 0.6, step: 0.01 },
-  { key: 'pull', label: 'схождение за курсором', min: 0, max: 1, step: 0.01 },
   { key: 'paint', label: 'краска', min: 0, max: 1, step: 0.01 },
   { key: 'spark', label: 'где вспыхивает', min: 0.06, max: 0.9, step: 0.01 },
 ];
@@ -30,6 +29,11 @@ const FRICTION = 0.94;   // выбег после броска
 
 function tone(c) {
   return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
+function mixed(a, b, t) {
+  const k = t < 0 ? 0 : t > 1 ? 1 : t;
+  return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 }
 
 function mix(a, b, t) {
@@ -60,11 +64,11 @@ export function mountG(workspace) {
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    origin.x = W;
+    origin.y = H;
     if (!pointer.seen) {
       pointer.x = W;
       pointer.y = H;
-      origin.x = W;
-      origin.y = H;
     }
   }
 
@@ -73,11 +77,9 @@ export function mountG(workspace) {
     spin *= FRICTION;
     if (Math.abs(spin) < 1e-4) spin = 0;
 
-    // Точка схода и параллакс догоняют курсор мягко — рывок ломает бесконечность.
-    const goalX = W + (pointer.x - W) * params.pull;
-    const goalY = H + (pointer.y - H) * params.pull;
-    origin.x += (goalX - origin.x) * 0.06;
-    origin.y += (goalY - origin.y) * 0.06;
+    // Точка схода живёт в углу кадра: уводить её за курсором — терять кроп,
+    // узор отклеивается от края и превращается в предмет посреди поля.
+    // Курсор растаскивает плоскости, и догоняет их мягко: рывок ломает бесконечность.
     drift.x += (pointer.x / W - 0.5 - drift.x) * 0.05;
     drift.y += (pointer.y / H - 0.5 - drift.y) * 0.05;
   }
@@ -91,13 +93,20 @@ export function mountG(workspace) {
     // Краска привязана к размеру, а не к номеру слоя: номера пересчитываются
     // на каждом обороте фазы, и цвета от этого перещёлкивали.
     const spark = Math.min(W, H) * params.spark;
+    // Сдвиг соразмерен слою и не превышает зазора между соседями,
+    // иначе вложенность рвётся и дальние углы вылезают поверх ближних.
+    const room = (1 - 1 / ratio) * 0.45;
+    const shift = Math.min(params.shift, room);
     ctx.clearRect(0, 0, W, H);
 
     for (let i = count - 1; i >= 0; i -= 1) {
       const size = SEED * Math.pow(ratio, i + frac);
-      const depth = i / count;
-      const dx = drift.x * params.shift * W * depth;
-      const dy = drift.y * params.shift * H * depth;
+      const bottom = i === count - 1;
+      // Нижний слой держит кадр и потому не ездит: у слоя крупнее кадра
+      // соразмерный сдвиг оголил бы края. Выше сдвиг растёт вместе с углом.
+      const span = Math.min(size, Math.min(W, H));
+      const dx = bottom ? 0 : drift.x * shift * span;
+      const dy = bottom ? 0 : drift.y * shift * span;
       const base = ((i + whole) % 2 + 2) % 2 === 0 ? PAPER : INK;
       // Каждый угол проходит один и тот же путь: разгорается, дойдя до своей
       // доли кадра, и гаснет, уходя дальше.
@@ -105,12 +114,20 @@ export function mountG(workspace) {
       const heat = params.paint * Math.exp(-(away * away) / (2 * GLOW * GLOW));
       // Раскаляются только чернила: бумага остаётся бумагой, и красное
       // всегда одной природы, а не розовеет через слой.
-      ctx.fillStyle = base === INK && heat > 0.01 ? mix(INK, ACCENT, heat) : tone(base);
+      const hot = base === INK && heat > 0.01 ? mixed(INK, ACCENT, heat) : base;
+      // У точки схода слои мельче пикселя, и их смена читается как дрожь:
+      // ближе к ней контраст гаснет, узор сходится в ровный тон.
+      const solid = Math.min(1, Math.max(0, (size - 4) / 22));
+      ctx.fillStyle = solid >= 1 ? tone(hot) : mix(MIST, hot, solid);
+      // За точкой схода углов нет: пустоту закрывает только самый нижний слой,
+      // остальные остаются честными углами и не заезжают друг на друга.
+      const tailX = bottom ? Math.max(0, W - origin.x) : 0;
+      const tailY = bottom ? Math.max(0, H - origin.y) : 0;
       ctx.fillRect(
         origin.x - size + dx,
         origin.y - size + dy,
-        size + Math.max(0, W - origin.x) + Math.abs(dx) + 1,
-        size + Math.max(0, H - origin.y) + Math.abs(dy) + 1,
+        size + tailX + Math.abs(dx) + 1,
+        size + tailY + Math.abs(dy) + 1,
       );
     }
   }
@@ -210,8 +227,10 @@ export function mountG(workspace) {
   hint.textContent = 'тяни вверх и вниз — углы наплывают';
   hint.style.mixBlendMode = 'difference';
   hint.style.color = '#fff';
-  hint.style.top = '14px';
-  hint.style.bottom = 'auto';
+  // Правый нижний угол занят точкой схода, там подпись не прочесть.
+  hint.style.right = 'auto';
+  hint.style.left = '50%';
+  hint.style.transform = 'translateX(-50%)';
   workspace.append(hint);
 
   const { panel, toggle } = buildPanel();
