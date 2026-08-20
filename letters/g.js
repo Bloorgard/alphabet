@@ -119,15 +119,17 @@ export function mountG(workspace) {
       // ближе к ней контраст гаснет, узор сходится в ровный тон.
       const solid = Math.min(1, Math.max(0, (size - 4) / 22));
       ctx.fillStyle = solid >= 1 ? tone(hot) : mix(MIST, hot, solid);
-      // За точкой схода углов нет: пустоту закрывает только самый нижний слой,
-      // остальные остаются честными углами и не заезжают друг на друга.
-      const tailX = bottom ? Math.max(0, W - origin.x) : 0;
-      const tailY = bottom ? Math.max(0, H - origin.y) : 0;
+      // Нижний слой работает фоном и кроется на весь кадр: по своей геометрии
+      // он на крупном шаге углов не достаёт до краёв, и наружу лезет сцена.
+      if (bottom) {
+        ctx.fillRect(0, 0, W, H);
+        continue;
+      }
       ctx.fillRect(
         origin.x - size + dx,
         origin.y - size + dy,
-        size + tailX + Math.abs(dx) + 1,
-        size + tailY + Math.abs(dy) + 1,
+        size + Math.abs(dx) + 1,
+        size + Math.abs(dy) + 1,
       );
     }
   }
