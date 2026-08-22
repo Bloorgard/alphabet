@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Е / Ё — полигон трёх линий</title>
+<style>
+  :root {
+    --paper: #f1ede5;
+    --ink: #161616;
+    --muted: #8b877f;
+    --line: rgba(22, 22, 22, .18);
+    --red: #e0210f;
+    --mono: 'DM Mono', 'SFMono-Regular', ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 16px;
+    padding: 18px 20px;
+    overflow-x: hidden;
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 11px/1.45 var(--mono);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+
+  button, input { font: inherit; }
+
+  header {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  .identity {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    white-space: nowrap;
+  }
+
+  .identity b {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: -.02em;
+    text-transform: none;
+  }
+
+  .variant, .modes, .tools {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .modes {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  button {
+    border: 1px solid var(--line);
+    padding: 6px 9px;
+    background: transparent;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    cursor: pointer;
+  }
+
+  button:hover { border-color: var(--ink); color: var(--ink); }
+
+  button[aria-pressed="true"] {
+    border-color: var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .variant button {
+    width: 30px;
+    padding-inline: 0;
+    font-size: 13px;
+  }
+
+  .stage-wrap {
+    min-height: 0;
+    display: grid;
+    place-items: center;
+  }
+
+  .stage {
+    position: relative;
+    width: min(74vh, 100%);
+    aspect-ratio: 1;
+    border: 1px solid var(--line);
+    background:
+      linear-gradient(90deg, transparent 49.9%, rgba(22,22,22,.035) 50%, transparent 50.1%),
+      linear-gradient(transparent 49.9%, rgba(22,22,22,.035) 50%, transparent 50.1%);
+  }
+
+  .stage::before {
+    content: attr(data-index);
+    position: absolute;
+    z-index: 1;
+    top: 9px;
+    left: 11px;
+    color: var(--muted);
+    pointer-events: none;
+  }
+
+  .audio-state {
+    position: absolute;
+    z-index: 1;
+    top: 9px;
+    right: 11px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    pointer-events: none;
+  }
+
+  .audio-state::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+  }
+
+  .audio-state[data-on="true"] { color: var(--red); }
+  .audio-state[data-on="true"]::before { background: currentColor; }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+  }
+
+  footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 38%);
+    gap: 20px;
+    align-items: end;
+    color: var(--muted);
+  }
+
+  .tools {
+    flex-wrap: wrap;
+    gap: 8px 14px;
+  }
+
+  .tools label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .tools input[type="range"] {
+    width: 96px;
+    accent-color: var(--ink);
+  }
+
+  .tools output { min-width: 30px; }
+
+  #note {
+    max-width: 620px;
+    justify-self: end;
+    text-align: right;
+    letter-spacing: .02em;
+    text-transform: none;
+  }
+
+  @media (max-width: 760px) {
+    body { padding: 12px; gap: 12px; }
+    header { grid-template-columns: 1fr; gap: 10px; }
+    .modes { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 3px; }
+    .modes button { flex: 0 0 auto; }
+    .stage { width: min(100%, 70vh); }
+    footer { grid-template-columns: 1fr; }
+    #note { justify-self: start; text-align: left; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="identity">
+    <b>Е / Ё · три линии</b>
+    <div class="variant" id="variant" aria-label="Вариант буквы">
+      <button type="button" data-variant="Е" aria-pressed="true">Е</button>
+      <button type="button" data-variant="Ё" aria-pressed="false">Ё</button>
+    </div>
+  </div>
+  <nav class="modes" id="modes" aria-label="Механика"></nav>
+</header>
+
+<main class="stage-wrap">
+  <div class="stage" id="stage" data-index="01 / 08">
+    <span class="audio-state" id="audio-state" data-on="false">звук спит</span>
+    <canvas id="c"></canvas>
+  </div>
+</main>
+
+<footer>
+  <div class="tools" id="tools"></div>
+  <span id="note"></span>
+</footer>
+
+<script src="e-lab.js?11"></script>
+</body>
+</html>

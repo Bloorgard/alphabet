@@ -3,6 +3,7 @@ import { mountB } from './letters/b.js';
 import { mountV } from './letters/v.js';
 import { mountG } from './letters/g.js';
 import { mountD } from './letters/d.js';
+import { mountE } from './letters/e.js';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',
@@ -20,7 +21,8 @@ const READY = new Map([
   ['Б', mountB],
   ['В', mountV],
   ['Г', mountG],
-  ['Д', mountD]
+  ['Д', mountD],
+  ['Е', mountE]
 ]);
 
 const grid = document.querySelector('#letter-grid');

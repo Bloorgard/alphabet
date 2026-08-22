@@ -72,6 +72,7 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .letter-workspace[data-ground="paper"] .sketch-toggle:hover,
 .letter-workspace[data-ground="paper"] .sketch-toggle[aria-expanded="true"] { color: var(--ink); }
 .letter-workspace[data-ground="paper"] .sketch-panel { background: rgba(241, 237, 229, .86); color: rgba(22, 22, 22, .6); }
+.letter-workspace[data-ground="paper"] .sketch-panel p { color: rgba(22, 22, 22, .38); }
 /* Вендорные псевдоэлементы нельзя объединять в один селектор: правило умирает целиком. */
 .letter-workspace[data-ground="paper"] .sketch-panel input::-webkit-slider-runnable-track { background: rgba(22, 22, 22, .28); }
 .letter-workspace[data-ground="paper"] .sketch-panel input::-moz-range-track { background: rgba(22, 22, 22, .28); }
