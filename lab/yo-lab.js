@@ -469,10 +469,12 @@ MODES.nests = {
 
 /* ---------- ход: Ё едет на своих точках ---------- */
 
-const BODY_W = 0.26;
-const BODY_H = 0.115;
-const WHEEL_R = 0.024;
-const WHEEL_X = 0.3;
+/* пропорции с эскиза: корпус 489x112 при кадре 1200, колёса r=31 на базе 220 */
+const BODY_W = 0.407;
+const BODY_H = 0.093;
+const WHEEL_R = 0.026;
+const WHEEL_X = 0.225;
+const STROKE = 0.0092;
 const SCREEN_X = 0.36;
 const BLOCK_W = 0.035;
 
@@ -488,7 +490,7 @@ function seedBlocks() {
   const car = modeState.car;
   while (modeState.blocks.length < 4) {
     const previous = modeState.blocks.at(-1)?.x ?? car.x + 0.8;
-    modeState.blocks.push({ x: previous + 0.55 + Math.random() * 0.75, h: 0.05 + Math.random() * 0.045, flash: 0 });
+    modeState.blocks.push({ x: previous + 0.95 + Math.random() * 0.85, h: 0.05 + Math.random() * 0.045, flash: 0 });
   }
   modeState.blocks = modeState.blocks.filter((block) => block.x > car.x - 0.6);
 }
@@ -501,8 +503,25 @@ function resetRide() {
   seedBlocks();
 }
 
+/* точка крепления колеса едет вместе с накренённым корпусом */
+function carRotation() {
+  const car = modeState.car;
+  return car.angle + (car.alive ? 0 : modeState.crash * 0.2);
+}
+
+function attachPoint(index) {
+  const car = modeState.car;
+  const rotation = carRotation();
+  const lx = (index === 0 ? -1 : 1) * WHEEL_X * BODY_W;
+  const ly = BODY_H / 2;
+  return {
+    x: car.x + lx * Math.cos(rotation) - ly * Math.sin(rotation),
+    y: car.y - BODY_H / 2 + lx * Math.sin(rotation) + ly * Math.cos(rotation),
+  };
+}
+
 function wheelWorldX(index) {
-  return modeState.car.x + (index === 0 ? -1 : 1) * WHEEL_X * BODY_W;
+  return attachPoint(index).x;
 }
 
 function crashRide(block) {
@@ -526,10 +545,10 @@ MODES.ride = {
   tools: [
     { type: 'range', key: 'speed', label: 'ход', min: 0.2, max: 1.2, step: 0.05, value: 0.6 },
     { type: 'range', key: 'grav', label: 'тяжесть', min: 0.8, max: 4, step: 0.1, value: 2.2 },
-    { type: 'range', key: 'stiff', label: 'подвеска', min: 20, max: 200, step: 5, value: 80 },
-    { type: 'range', key: 'damp', label: 'демпфер', min: 1, max: 14, step: 0.5, value: 6 },
-    { type: 'range', key: 'travel', label: 'ход подвески', min: 0.04, max: 0.13, step: 0.005, value: 0.08 },
-    { type: 'range', key: 'jump', label: 'прыжок', min: 0.4, max: 1.6, step: 0.05, value: 1 },
+    { type: 'range', key: 'stiff', label: 'подвеска', min: 8, max: 120, step: 2, value: 34 },
+    { type: 'range', key: 'damp', label: 'демпфер', min: 0.4, max: 10, step: 0.2, value: 2.4 },
+    { type: 'range', key: 'travel', label: 'ход подвески', min: 0.03, max: 0.12, step: 0.004, value: 0.058 },
+    { type: 'range', key: 'jump', label: 'прыжок', min: 0.4, max: 2, step: 0.05, value: 1.45 },
     { type: 'range', key: 'relief', label: 'рельеф', min: 0, max: 2, step: 0.1, value: 1 },
     { type: 'toggle', key: 'pause', label: 'пауза', value: false },
     { type: 'button', label: 'заново', action: () => resetRide() },
@@ -554,22 +573,26 @@ MODES.ride = {
 
     /* подвеска: каждое колесо тянет корпус вверх пропорционально сжатию */
     let force = 0;
-    let grounded = false;
-    const grounds = [0, 1].map((index) => terrainAt(wheelWorldX(index)) - WHEEL_R);
-    grounds.forEach((groundY) => {
-      const hang = car.y + travel;
+    let contacts = 0;
+    const attach = [0, 1].map((index) => attachPoint(index));
+    const grounds = attach.map((point) => terrainAt(point.x) - WHEEL_R);
+    grounds.forEach((groundY, index) => {
+      const hang = attach[index].y + travel;
       if (hang <= groundY) return;
-      grounded = true;
+      contacts += 1;
       force -= (hang - groundY) * num('stiff');
       force -= car.vy * num('damp');
     });
+    /* вес снимаем с пружины: иначе мягкая подвеска просто садится на упор и не качает */
+    if (contacts) force -= num('grav') * contacts / 2;
+    const grounded = contacts > 0;
 
     car.vy += (num('grav') + force) * STEP;
     car.y += car.vy * STEP;
     car.ground = grounded && car.alive;
 
     /* упор подвески: колесо не должно наезжать на нижнюю линию корпуса */
-    const limit = Math.min(...grounds) - (WHEEL_R + 0.022);
+    const limit = Math.min(...grounds) - (WHEEL_R + 0.008);
     if (car.y > limit) { car.y = limit; if (car.vy > 0) car.vy = 0; }
 
     const slope = Math.atan2(grounds[1] - grounds[0], 2 * WHEEL_X * BODY_W);
@@ -584,7 +607,7 @@ MODES.ride = {
         if (wheel.y > groundY) { wheel.y = groundY; wheel.vy = -wheel.vy * 0.35; wheel.vx *= 0.99; }
         return;
       }
-      wheel.y = Math.min(grounds[index], car.y + travel);
+      wheel.y = Math.min(grounds[index], attach[index].y + travel);
     });
 
     if (!car.alive) return;
@@ -611,7 +634,7 @@ MODES.ride = {
 
     /* рельеф */
     ctx.strokeStyle = INK;
-    ctx.lineWidth = S * 0.004;
+    ctx.lineWidth = S * STROKE;
     ctx.beginPath();
     for (let sx = 0; sx <= 1.001; sx += 0.005) {
       const y = terrainAt(camera + sx) * S;
@@ -632,10 +655,10 @@ MODES.ride = {
     /* корпус: Ё, повёрнутая на пол-оборота */
     ctx.save();
     ctx.translate(SCREEN_X * S, (car.y - BODY_H / 2) * S);
-    ctx.rotate(car.angle + (car.alive ? 0 : modeState.crash * 0.2));
+    ctx.rotate(carRotation());
     ctx.strokeStyle = INK;
-    ctx.lineWidth = S * 0.011;
-    ctx.lineCap = 'round';
+    ctx.lineWidth = S * STROKE;
+    ctx.lineCap = 'butt';
     const half = BODY_W / 2 * S;
     const rows = [-BODY_H / 2, 0, BODY_H / 2].map((offset) => offset * S);
     ctx.beginPath();
@@ -644,7 +667,7 @@ MODES.ride = {
     ctx.stroke();
     rows.forEach((y, index) => {
       ctx.beginPath();
-      ctx.moveTo(index === 1 ? -half * 0.82 : -half, y);
+      ctx.moveTo(index === 0 ? -half * 0.985 : -half, y);
       ctx.lineTo(half, y);
       ctx.stroke();
     });
@@ -652,14 +675,13 @@ MODES.ride = {
 
     /* точки-колёса */
     modeState.wheels.forEach((wheel, index) => {
-      const sx = wheel.gone ? (wheel.x - camera) : (wheelWorldX(index) - camera);
+      const point = attachPoint(index);
+      const sx = (wheel.gone ? wheel.x : point.x) - camera;
+      if (!wheel.gone) line(sx, wheel.y, point.x - camera, point.y, INK, S * STROKE * 0.5);
       ctx.beginPath();
       ctx.arc(sx * S, wheel.y * S, WHEEL_R * S, 0, Math.PI * 2);
       ctx.fillStyle = wheel.gone && modeState.crash > 0.1 ? RED : INK;
       ctx.fill();
-      if (!wheel.gone) {
-        line(sx, wheel.y, SCREEN_X + (index === 0 ? -1 : 1) * WHEEL_X * BODY_W, car.y, INK, 1.5);
-      }
     });
 
     drawStatus();
