@@ -120,6 +120,7 @@ function stepBalls() {
 
 function stepWorld() {
   if (on('pause')) return;
+  if (MODES[current].own) { MODES[current].step(); return; }
   MODES[current].aim?.();
   MODES[current].step?.();
   stepBars();
@@ -464,6 +465,205 @@ MODES.nests = {
     return done === 2 ? 'Ё собрана' : `в гнёздах ${done} / 2`;
   },
   draw() { drawWorld(drawNests); },
+};
+
+/* ---------- ход: Ё едет на своих точках ---------- */
+
+const BODY_W = 0.26;
+const BODY_H = 0.115;
+const WHEEL_R = 0.024;
+const WHEEL_X = 0.3;
+const SCREEN_X = 0.36;
+const BLOCK_W = 0.035;
+
+function terrainAt(x) {
+  const amp = num('relief');
+  return 0.72
+    + Math.sin(x * 2.1) * 0.05 * amp
+    + Math.sin(x * 5.3 + 1.7) * 0.018 * amp
+    + Math.sin(x * 0.73 + 0.4) * 0.035 * amp;
+}
+
+function seedBlocks() {
+  const car = modeState.car;
+  while (modeState.blocks.length < 4) {
+    const previous = modeState.blocks.at(-1)?.x ?? car.x + 0.8;
+    modeState.blocks.push({ x: previous + 0.55 + Math.random() * 0.75, h: 0.05 + Math.random() * 0.045, flash: 0 });
+  }
+  modeState.blocks = modeState.blocks.filter((block) => block.x > car.x - 0.6);
+}
+
+function resetRide() {
+  modeState.car = { x: 0, y: 0.5, vy: 0, angle: 0, alive: true, ground: false };
+  modeState.blocks = [];
+  modeState.wheels = [{ y: 0.6, gone: false, vx: 0, vy: 0 }, { y: 0.6, gone: false, vx: 0, vy: 0 }];
+  modeState.crash = 0;
+  seedBlocks();
+}
+
+function wheelWorldX(index) {
+  return modeState.car.x + (index === 0 ? -1 : 1) * WHEEL_X * BODY_W;
+}
+
+function crashRide(block) {
+  if (!modeState.car.alive) return;
+  modeState.car.alive = false;
+  modeState.crash = 1;
+  if (block) block.flash = 1;
+  modeState.wheels.forEach((wheel, index) => {
+    wheel.gone = true;
+    wheel.vx = 0.35 + index * 0.1;
+    wheel.vy = -0.35;
+    wheel.x = wheelWorldX(index);
+  });
+}
+
+MODES.ride = {
+  label: 'ход',
+  own: true,
+  note: 'Ё перевёрнута и едет на собственных точках: подвеска отрабатывает рельеф, пробел или тап — прыжок. Задел тумбу — точки отваливаются, дальше едет Е.',
+  cursor: 'pointer',
+  tools: [
+    { type: 'range', key: 'speed', label: 'ход', min: 0.2, max: 1.2, step: 0.05, value: 0.6 },
+    { type: 'range', key: 'grav', label: 'тяжесть', min: 0.8, max: 4, step: 0.1, value: 2.2 },
+    { type: 'range', key: 'stiff', label: 'подвеска', min: 20, max: 200, step: 5, value: 80 },
+    { type: 'range', key: 'damp', label: 'демпфер', min: 1, max: 14, step: 0.5, value: 6 },
+    { type: 'range', key: 'travel', label: 'ход подвески', min: 0.04, max: 0.13, step: 0.005, value: 0.08 },
+    { type: 'range', key: 'jump', label: 'прыжок', min: 0.4, max: 1.6, step: 0.05, value: 1 },
+    { type: 'range', key: 'relief', label: 'рельеф', min: 0, max: 2, step: 0.1, value: 1 },
+    { type: 'toggle', key: 'pause', label: 'пауза', value: false },
+    { type: 'button', label: 'заново', action: () => resetRide() },
+  ],
+  setup() { resetRide(); },
+  jump() {
+    const car = modeState.car;
+    if (!car.alive || !car.ground) return;
+    car.vy = -num('jump');
+    car.ground = false;
+  },
+  step() {
+    const car = modeState.car;
+    const travel = num('travel');
+    modeState.crash *= 0.97;
+    modeState.blocks.forEach((block) => { block.flash *= 0.94; });
+
+    if (car.alive) {
+      car.x += num('speed') * STEP;
+      seedBlocks();
+    }
+
+    /* подвеска: каждое колесо тянет корпус вверх пропорционально сжатию */
+    let force = 0;
+    let grounded = false;
+    const grounds = [0, 1].map((index) => terrainAt(wheelWorldX(index)) - WHEEL_R);
+    grounds.forEach((groundY) => {
+      const hang = car.y + travel;
+      if (hang <= groundY) return;
+      grounded = true;
+      force -= (hang - groundY) * num('stiff');
+      force -= car.vy * num('damp');
+    });
+
+    car.vy += (num('grav') + force) * STEP;
+    car.y += car.vy * STEP;
+    car.ground = grounded && car.alive;
+
+    /* упор подвески: колесо не должно наезжать на нижнюю линию корпуса */
+    const limit = Math.min(...grounds) - (WHEEL_R + 0.022);
+    if (car.y > limit) { car.y = limit; if (car.vy > 0) car.vy = 0; }
+
+    const slope = Math.atan2(grounds[1] - grounds[0], 2 * WHEEL_X * BODY_W);
+    car.angle += ((car.alive && grounded ? slope : car.angle * 0.9) - car.angle) * 0.18;
+
+    modeState.wheels.forEach((wheel, index) => {
+      if (wheel.gone) {
+        wheel.x += wheel.vx * STEP;
+        wheel.vy += num('grav') * STEP;
+        wheel.y += wheel.vy * STEP;
+        const groundY = terrainAt(wheel.x) - WHEEL_R;
+        if (wheel.y > groundY) { wheel.y = groundY; wheel.vy = -wheel.vy * 0.35; wheel.vx *= 0.99; }
+        return;
+      }
+      wheel.y = Math.min(grounds[index], car.y + travel);
+    });
+
+    if (!car.alive) return;
+    const lowest = car.y + travel + WHEEL_R;
+    for (const block of modeState.blocks) {
+      const top = terrainAt(block.x) - block.h;
+      const overlap = Math.abs(block.x - car.x) < BLOCK_W / 2 + BODY_W / 2;
+      if (overlap && lowest > top) crashRide(block);
+    }
+  },
+  onDown() { this.jump(); },
+  onKey(event, down) {
+    if (event.code !== 'Space' || !down) return;
+    event.preventDefault();
+    this.jump();
+  },
+  status() {
+    const car = modeState.car;
+    return car.alive ? `Ё · ${car.x.toFixed(1)}` : `Е · ${car.x.toFixed(1)}`;
+  },
+  draw() {
+    const car = modeState.car;
+    const camera = car.x - SCREEN_X;
+
+    /* рельеф */
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = S * 0.004;
+    ctx.beginPath();
+    for (let sx = 0; sx <= 1.001; sx += 0.005) {
+      const y = terrainAt(camera + sx) * S;
+      if (sx === 0) ctx.moveTo(0, y);
+      else ctx.lineTo(sx * S, y);
+    }
+    ctx.stroke();
+
+    /* тумбы */
+    for (const block of modeState.blocks) {
+      const sx = (block.x - camera) * S;
+      if (sx < -S * 0.1 || sx > S * 1.1) continue;
+      const base = terrainAt(block.x) * S;
+      ctx.fillStyle = block.flash > 0.05 ? RED : INK;
+      ctx.fillRect(sx - BLOCK_W * S / 2, base - block.h * S, BLOCK_W * S, block.h * S);
+    }
+
+    /* корпус: Ё, повёрнутая на пол-оборота */
+    ctx.save();
+    ctx.translate(SCREEN_X * S, (car.y - BODY_H / 2) * S);
+    ctx.rotate(car.angle + (car.alive ? 0 : modeState.crash * 0.2));
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = S * 0.011;
+    ctx.lineCap = 'round';
+    const half = BODY_W / 2 * S;
+    const rows = [-BODY_H / 2, 0, BODY_H / 2].map((offset) => offset * S);
+    ctx.beginPath();
+    ctx.moveTo(half, rows[0]);
+    ctx.lineTo(half, rows[2]);
+    ctx.stroke();
+    rows.forEach((y, index) => {
+      ctx.beginPath();
+      ctx.moveTo(index === 1 ? -half * 0.82 : -half, y);
+      ctx.lineTo(half, y);
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    /* точки-колёса */
+    modeState.wheels.forEach((wheel, index) => {
+      const sx = wheel.gone ? (wheel.x - camera) : (wheelWorldX(index) - camera);
+      ctx.beginPath();
+      ctx.arc(sx * S, wheel.y * S, WHEEL_R * S, 0, Math.PI * 2);
+      ctx.fillStyle = wheel.gone && modeState.crash > 0.1 ? RED : INK;
+      ctx.fill();
+      if (!wheel.gone) {
+        line(sx, wheel.y, SCREEN_X + (index === 0 ? -1 : 1) * WHEEL_X * BODY_W, car.y, INK, 1.5);
+      }
+    });
+
+    drawStatus();
+  },
 };
 
 /* ---------- панель ---------- */
