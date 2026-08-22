@@ -166,18 +166,23 @@ export function mountE(workspace) {
   function ping(frequency, duration = 0.32, volume = 0.16, type = 'sine') {
     const ac = wakeAudio();
     if (!ac) return;
-    const start = ac.currentTime;
-    const oscillator = ac.createOscillator();
-    const gain = ac.createGain();
-    oscillator.type = type;
-    oscillator.frequency.setValueAtTime(frequency, start);
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, volume), start + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-    oscillator.connect(gain);
-    gain.connect(audioMaster);
-    oscillator.start(start);
-    oscillator.stop(start + duration + 0.02);
+    const play = () => {
+      if (ac.state !== 'running') return;
+      const start = ac.currentTime;
+      const oscillator = ac.createOscillator();
+      const gain = ac.createGain();
+      oscillator.type = type;
+      oscillator.frequency.setValueAtTime(frequency, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.001, volume), start + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      oscillator.connect(gain);
+      gain.connect(audioMaster);
+      oscillator.start(start);
+      oscillator.stop(start + duration + 0.02);
+    };
+    if (ac.state === 'running') play();
+    else if (ac.state === 'suspended') ac.resume().then(play);
   }
 
   function lightFret(index, fret) {
@@ -196,7 +201,7 @@ export function mountE(workspace) {
     tine.cooldown = 0.045;
     tine.highlight = 1;
     if (params.frets) lightFret(index, fret >= 0 ? fret : fretForSemitone(index, semitones));
-    if (audioContext?.state === 'running') {
+    if (audioContext) {
       const frequency = FREQUENCIES[index] * 2 ** (semitones / 12);
       ping(frequency, 1.5, clamp(Math.abs(amount) * 2.8, 0.035, 0.2), index === 1 ? 'triangle' : 'sine');
     }

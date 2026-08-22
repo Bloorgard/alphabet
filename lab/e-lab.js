@@ -73,18 +73,23 @@ function wakeAudio() {
 function ping(frequency, duration = 0.32, volume = 0.16, type = 'sine', delay = 0) {
   const ac = wakeAudio();
   if (!ac) return;
-  const start = ac.currentTime + delay;
-  const oscillator = ac.createOscillator();
-  const gain = ac.createGain();
-  oscillator.type = type;
-  oscillator.frequency.setValueAtTime(frequency, start);
-  gain.gain.setValueAtTime(0.0001, start);
-  gain.gain.exponentialRampToValueAtTime(Math.max(0.001, volume), start + 0.008);
-  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-  oscillator.connect(gain);
-  gain.connect(audioMaster);
-  oscillator.start(start);
-  oscillator.stop(start + duration + 0.02);
+  const play = () => {
+    if (ac.state !== 'running') return;
+    const start = ac.currentTime + delay;
+    const oscillator = ac.createOscillator();
+    const gain = ac.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, volume), start + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(gain);
+    gain.connect(audioMaster);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.02);
+  };
+  if (ac.state === 'running') play();
+  else if (ac.state === 'suspended') ac.resume().then(play);
 }
 
 function chord(frequencies, duration = 0.55, volume = 0.07) {
@@ -307,7 +312,7 @@ function strikeTine(index, amount = 0.02, position = 1, semitones = 0, fret = -1
   tine.highlight = 1;
   if (on('frets')) lightFret(index, fret >= 0 ? fret : fretForSemitone(index, semitones));
   const volume = clamp(Math.abs(amount) * 2.8, 0.035, 0.2);
-  if (audioContext?.state === 'running') {
+  if (audioContext) {
     const frequency = TUNE_FREQUENCIES[index] * 2 ** (semitones / 12);
     ping(frequency, 1.5, volume, index === 1 ? 'triangle' : 'sine');
   }

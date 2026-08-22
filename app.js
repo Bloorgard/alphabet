@@ -31,6 +31,58 @@ const workspace = document.querySelector('#letter-workspace');
 const workspaceLabel = document.querySelector('#workspace-label');
 let unmountCurrent = null;
 
+function mountWorkspaceHint(letter) {
+  const hint = workspace.querySelector('.workspace-hint');
+  if (!hint) return () => {};
+
+  hint.dataset.mobileOpen = 'false';
+  hint.id ||= `workspace-hint-${letter.toLowerCase()}`;
+
+  const info = document.createElement('button');
+  info.type = 'button';
+  info.className = 'workspace-info';
+  info.dataset.letterLayer = '';
+  info.textContent = 'i';
+  info.setAttribute('aria-label', 'Показать подсказку');
+  info.setAttribute('aria-controls', hint.id);
+  info.setAttribute('aria-expanded', 'false');
+
+  const closeHint = () => {
+    hint.dataset.mobileOpen = 'false';
+    info.setAttribute('aria-label', 'Показать подсказку');
+    info.setAttribute('aria-expanded', 'false');
+  };
+
+  const onInfoClick = () => {
+    const open = hint.dataset.mobileOpen !== 'true';
+    if (!open) {
+      closeHint();
+      return;
+    }
+    hint.dataset.mobileOpen = 'true';
+    info.setAttribute('aria-label', 'Скрыть подсказку');
+    info.setAttribute('aria-expanded', 'true');
+    const panel = workspace.querySelector('.sketch-panel');
+    const toggle = workspace.querySelector('.sketch-toggle');
+    if (panel) panel.hidden = true;
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+  };
+
+  const onWorkspaceClick = (event) => {
+    if (event.target.closest('.sketch-toggle')) closeHint();
+  };
+
+  info.addEventListener('click', onInfoClick);
+  workspace.addEventListener('click', onWorkspaceClick);
+  workspace.append(info);
+
+  return () => {
+    info.removeEventListener('click', onInfoClick);
+    workspace.removeEventListener('click', onWorkspaceClick);
+    info.remove();
+  };
+}
+
 function numberOf(letter) {
   return String(LETTERS.indexOf(letter) + 1).padStart(2, '0');
 }
@@ -68,7 +120,12 @@ function openLetter(letter) {
   workspaceLabel.textContent = `${letter} · ${numberOf(letter)} / 33`;
   dialog.setAttribute('aria-label', `Буква ${letter}`);
   dialog.showModal();
-  unmountCurrent = mount(workspace) || null;
+  const unmountLetter = mount(workspace) || null;
+  const unmountHint = mountWorkspaceHint(letter);
+  unmountCurrent = () => {
+    unmountHint();
+    if (unmountLetter) unmountLetter();
+  };
   history.replaceState(null, '', `?letter=${encodeURIComponent(letter.toLowerCase())}`);
 }
 

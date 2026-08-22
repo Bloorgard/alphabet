@@ -79,6 +79,7 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .letter-workspace[data-ground="paper"] .sketch-panel input::-webkit-slider-thumb { background: var(--ink); }
 .letter-workspace[data-ground="paper"] .sketch-panel input::-moz-range-thumb { background: var(--ink); }
 .workspace-hint { position: absolute; right: 14px; bottom: 14px; font-family: var(--mono); font-size: 10px; letter-spacing: .03em; color: rgba(241, 237, 229, .35); pointer-events: none; }
+.workspace-info { display: none; }
 .dialog-close { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 32px; height: 32px; border: 0; background: none; color: rgba(241, 237, 229, .55); font-size: 20px; line-height: 1; }
 .dialog-close:hover { color: var(--paper); }
 
@@ -110,6 +111,14 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
   .letter-card { padding: 10px; }
   .letter-glyph { font-size: 36px; }
   .letter-meta { font-size: 8px; }
+  .workspace-info { position: absolute; right: 14px; bottom: 14px; z-index: 2; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid currentColor; border-radius: 50%; background: rgba(22, 22, 22, .72); color: rgba(241, 237, 229, .7); font-family: var(--mono); font-size: 11px; line-height: 1; }
+  .workspace-info[aria-expanded="true"] { color: var(--paper); }
+  .letter-workspace[data-ground="paper"] .workspace-info { background: rgba(241, 237, 229, .92); color: rgba(22, 22, 22, .5); }
+  .letter-workspace[data-ground="paper"] .workspace-info[aria-expanded="true"] { color: var(--ink); }
+  .sketch-panel { bottom: 50px; }
+  .workspace-hint { display: none; right: auto !important; bottom: 50px; left: 14px !important; width: 178px; max-width: calc(100% - 28px); padding: 12px 14px; background: rgba(22, 22, 22, .8); backdrop-filter: blur(2px); color: rgba(241, 237, 229, .5); line-height: 1.4; letter-spacing: .02em; text-align: left; text-transform: none; transform: none !important; }
+  .letter-workspace[data-ground="paper"] .workspace-hint { background: rgba(241, 237, 229, .86); color: rgba(22, 22, 22, .6); }
+  .workspace-hint[data-mobile-open="true"] { display: block; }
 }
 
 @media (prefers-reduced-motion: reduce) {
