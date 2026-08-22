@@ -55,7 +55,10 @@ function nearRow(y, radius = 0.09) {
 /* ---------- общее состояние ---------- */
 
 function resetAll() {
-  balls = DOT_SLOTS.map((x) => ({ x, y: DOT_Y, vx: 0, vy: 0, alive: true }));
+  const low = MODES[current]?.startLow;
+  balls = DOT_SLOTS.map((x) => low
+    ? { x: x + 0.24, y: ROWS[2] - DOT_R - 0.012, vx: 0, vy: 0, alive: true }
+    : { x, y: DOT_Y, vx: 0, vy: 0, alive: true });
   bars.forEach((bar, index) => { bar.end = CANON[index]; bar.goal = CANON[index]; bar.vel = 0; });
   angle = 0;
   hits = 0;
@@ -72,12 +75,15 @@ function stepBars() {
   }
 }
 
-function bounceOff(ball, bar, y, fromAbove) {
+function bounceOff(ball, bar, index, y, fromAbove) {
   const bounce = num('bounce');
   ball.y = fromAbove ? y - DOT_R : y + DOT_R;
   ball.vy = -ball.vy * bounce;
+  if (fromAbove && Math.abs(ball.vy) < 0.08) ball.vy = 0;
+  MODES[current].onHit?.(ball, index, ball.x);
   const along = clamp((ball.x - STEM_X) / (bar.end - STEM_X), 0, 1);
-  ball.vx += (along - 0.5) * num('spin');
+  /* подрезка — от удара, а не от касания: иначе лежащая точка сама уползает к обрыву */
+  ball.vx += (along - 0.5) * num('spin') * clamp(Math.abs(ball.vy) / 0.6, 0, 1);
   ball.vx += bar.vel * num('kick');
   hits += 1;
 }
@@ -92,15 +98,15 @@ function collide(ball, px, py) {
   bars.forEach((bar, index) => {
     const y = ROWS[index];
     if (ball.x < STEM_X - DOT_R || ball.x > bar.end + DOT_R) return;
-    if (ball.vy > 0 && py + DOT_R <= y && ball.y + DOT_R >= y) bounceOff(ball, bar, y, true);
-    else if (ball.vy < 0 && py - DOT_R >= y && ball.y - DOT_R <= y) bounceOff(ball, bar, y, false);
+    if (ball.vy > 0 && py + DOT_R <= y && ball.y + DOT_R >= y) bounceOff(ball, bar, index, y, true);
+    else if (ball.vy < 0 && py - DOT_R >= y && ball.y - DOT_R <= y) bounceOff(ball, bar, index, y, false);
   });
 }
 
 function stepBalls() {
   const gravity = num('grav');
   for (const ball of balls) {
-    if (!ball.alive) continue;
+    if (!ball.alive || ball.locked) continue;
     ball.vx += Math.sin(angle) * gravity * STEP;
     ball.vy += Math.cos(angle) * gravity * STEP;
     const px = ball.x;
@@ -115,6 +121,7 @@ function stepBalls() {
 function stepWorld() {
   if (on('pause')) return;
   MODES[current].aim?.();
+  MODES[current].step?.();
   stepBars();
   stepBalls();
 }
@@ -146,15 +153,16 @@ function dot(x, y, color, filled) {
 
 function drawStatus() {
   const alive = aliveCount();
-  const label = alive === 2 ? 'Ё' : alive === 1 ? 'одна точка' : 'Е';
+  const base = alive === 2 ? 'Ё' : alive === 1 ? 'одна точка' : 'Е';
+  const label = MODES[current].status?.() ?? `${base} · ${hits}`;
   ctx.fillStyle = alive === 1 ? RED : MUTED;
   ctx.font = `${Math.round(S * 0.022)}px 'DM Mono', ui-monospace, monospace`;
   ctx.textAlign = 'right';
-  ctx.fillText(`${label} · ${hits}`, S * 0.96, S * 0.06);
+  ctx.fillText(label, S * 0.96, S * 0.06);
   ctx.textAlign = 'left';
 }
 
-function drawWorld() {
+function drawWorld(overlay) {
   ctx.save();
   ctx.translate(0.5 * S, 0.5 * S);
   ctx.rotate(angle);
@@ -170,6 +178,8 @@ function drawWorld() {
     line(STEM_X, ROWS[index], bar.end, ROWS[index], INK, S * 0.013);
     if (index === held) dot(bar.end, ROWS[index], INK, false);
   });
+
+  overlay?.();
 
   const alive = aliveCount();
   balls.forEach((ball, index) => {
@@ -248,6 +258,212 @@ MODES.tilt = {
     angle += (target - angle) * 0.12;
   },
   draw: drawWorld,
+};
+
+/* ---------- цель: текст, потерявший ё ---------- */
+
+const WORDS = [
+  'ёж', 'ёлка', 'мёд', 'всё', 'поём', 'льёт', 'идёт', 'утёс', 'копьё', 'ружьё',
+  'бельё', 'поёт', 'несёт', 'ёжик', 'лёд', 'шёпот', 'тёмный', 'чёрный', 'жёлтый',
+  'зелёный', 'ёлочка', 'подъём', 'приём', 'вёдра', 'клён', 'лён', 'осёл', 'тёща',
+];
+const CHAR_W = 0.038;
+
+function makeRow(index) {
+  const word = WORDS[Math.floor(Math.random() * WORDS.length)];
+  const letters = [...word].map((ch) => ({
+    ch: ch === 'ё' ? 'е' : ch,
+    target: ch === 'ё',
+    fixed: false,
+  }));
+  const width = letters.length * CHAR_W;
+  const room = CANON[index] - STEM_X - width;
+  return { letters, width, offset: STEM_X + Math.random() * Math.max(0, room), flash: 0, timer: 0 };
+}
+
+function dragRow(row, index, dx) {
+  const room = CANON[index] - STEM_X - row.width;
+  row.offset = clamp(row.offset + dx, STEM_X, STEM_X + Math.max(0, room));
+}
+
+function drawRows() {
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  modeState.rows.forEach((row, index) => {
+    const y = ROWS[index];
+    ctx.font = `${Math.round(S * 0.042)}px 'DM Mono', ui-monospace, monospace`;
+    row.letters.forEach((letter, position) => {
+      const x = (row.offset + (position + 0.5) * CHAR_W) * S;
+      const hot = letter.fixed && row.flash > 0.05;
+      ctx.fillStyle = hot ? RED : letter.target && !letter.fixed ? INK : MUTED;
+      ctx.fillText(letter.fixed ? 'ё' : letter.ch, x, y * S - S * 0.014);
+      if (letter.target && !letter.fixed) {
+        ctx.strokeStyle = FAINT;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - CHAR_W * S * 0.5, y * S - S * 0.062, CHAR_W * S, S * 0.048);
+      }
+    });
+  });
+  ctx.textAlign = 'left';
+}
+
+MODES.words = {
+  label: 'слова',
+  note: 'Три строки набраны без ё. Тяни строку по горизонтали и подставь её «е» под падающую точку: попал — слово исправлено, точка летит дальше. Потеряешь обе точки — текст останется без ё.',
+  cursor: 'ew-resize',
+  tools: COMMON_TOOLS,
+  setup() {
+    modeState.rows = ROWS.map((row, index) => makeRow(index));
+    modeState.held = -1;
+    modeState.score = 0;
+    resetAll();
+  },
+  aim() { bars.forEach((bar, index) => { bar.goal = CANON[index]; }); },
+  step() {
+    modeState.rows.forEach((row, index) => {
+      row.flash *= 0.94;
+      if (row.timer > 0) {
+        row.timer -= STEP;
+        if (row.timer <= 0) modeState.rows[index] = makeRow(index);
+      }
+    });
+  },
+  onDown() { modeState.held = nearRow(pointer.y / S); },
+  onMove() {
+    if (modeState.held < 0) return;
+    dragRow(modeState.rows[modeState.held], modeState.held, (pointer.x - pointer.px) / S);
+  },
+  onUp() { modeState.held = -1; },
+  onHit(ball, index, x) {
+    const row = modeState.rows[index];
+    if (row.timer > 0) return;
+    const position = Math.floor((x - row.offset) / CHAR_W);
+    const letter = row.letters[position];
+    if (!letter || !letter.target || letter.fixed) return;
+    letter.fixed = true;
+    row.flash = 1;
+    modeState.score += 1;
+    if (row.letters.every((item) => !item.target || item.fixed)) row.timer = 1.2;
+  },
+  status() { return `исправлено ${modeState.score}`; },
+  draw() { drawWorld(drawRows); },
+};
+
+/* ---------- цель: та же, но без текста ---------- */
+
+const MARK_W = 0.07;
+
+function makeMark(index) {
+  const room = CANON[index] - STEM_X - MARK_W;
+  return { offset: STEM_X + Math.random() * Math.max(0, room), flash: 0 };
+}
+
+function drawMarks() {
+  modeState.rows.forEach((mark, index) => {
+    const y = ROWS[index];
+    const hot = mark.flash > 0.05;
+    ctx.fillStyle = hot ? RED : 'rgba(22,22,22,.1)';
+    ctx.fillRect(mark.offset * S, y * S - S * 0.03, MARK_W * S, S * 0.03);
+    line(mark.offset, y - 0.03, mark.offset, y, hot ? RED : INK, 1);
+    line(mark.offset + MARK_W, y - 0.03, mark.offset + MARK_W, y, hot ? RED : INK, 1);
+  });
+}
+
+MODES.targets = {
+  label: 'мишени',
+  note: 'То же самое без текста: на каждой строке одно гнездо. Тяни строку, подставляй гнездо под точку. Попал — гнездо переезжает.',
+  cursor: 'ew-resize',
+  tools: COMMON_TOOLS,
+  setup() {
+    modeState.rows = ROWS.map((row, index) => makeMark(index));
+    modeState.held = -1;
+    modeState.score = 0;
+    resetAll();
+  },
+  aim() { bars.forEach((bar, index) => { bar.goal = CANON[index]; }); },
+  step() { modeState.rows.forEach((mark) => { mark.flash *= 0.94; }); },
+  onDown() { modeState.held = nearRow(pointer.y / S); },
+  onMove() {
+    if (modeState.held < 0) return;
+    const index = modeState.held;
+    const room = CANON[index] - STEM_X - MARK_W;
+    const mark = modeState.rows[index];
+    mark.offset = clamp(mark.offset + (pointer.x - pointer.px) / S, STEM_X, STEM_X + Math.max(0, room));
+  },
+  onUp() { modeState.held = -1; },
+  onHit(ball, index, x) {
+    const mark = modeState.rows[index];
+    if (x < mark.offset || x > mark.offset + MARK_W) return;
+    const flash = 1;
+    modeState.rows[index] = makeMark(index);
+    modeState.rows[index].flash = flash;
+    modeState.score += 1;
+  },
+  status() { return `попаданий ${modeState.score}`; },
+  draw() { drawWorld(drawMarks); },
+};
+
+/* ---------- цель: занести точки в гнёзда над буквой ---------- */
+
+function drawNests() {
+  DOT_SLOTS.forEach((x, index) => {
+    if (modeState.locked?.[index]) return;
+    ctx.beginPath();
+    ctx.arc(x * S, DOT_Y * S, DOT_R * 1.9 * S, 0, Math.PI * 2);
+    ctx.strokeStyle = FAINT;
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+}
+
+MODES.nests = {
+  label: 'гнёзда',
+  startLow: true,
+  note: 'Точки лежат внизу, над буквой два пустых гнезда. Тапни строку в момент касания — перекладина подбивает точку выше. Занеси обе, не уронив за край.',
+  cursor: 'pointer',
+  tools: [...COMMON_TOOLS, { type: 'range', key: 'boost', label: 'подбив', min: 1.05, max: 1.8, step: 0.05, value: 1.4 }],
+  setup() {
+    modeState.charge = { index: -1, time: 0 };
+    modeState.locked = [false, false];
+    resetAll();
+  },
+  aim() { bars.forEach((bar, index) => { bar.goal = CANON[index]; }); },
+  step() {
+    if (modeState.charge.time > 0) modeState.charge.time -= STEP;
+    balls.forEach((ball) => {
+      if (!ball.alive || ball.locked) return;
+      DOT_SLOTS.forEach((x, index) => {
+        if (modeState.locked[index]) return;
+        if (Math.hypot(ball.x - x, ball.y - DOT_Y) > DOT_R * 2.2) return;
+        modeState.locked[index] = true;
+        ball.locked = true;
+        ball.x = x;
+        ball.y = DOT_Y;
+        ball.vx = 0;
+        ball.vy = 0;
+      });
+    });
+  },
+  onDown() {
+    const index = nearRow(pointer.y / S);
+    if (index < 0) return;
+    modeState.charge = { index, time: 0.18 };
+    balls.forEach((ball) => {
+      if (!ball.alive || ball.locked) return;
+      const resting = Math.abs(ball.y - (ROWS[index] - DOT_R)) < 0.012 && Math.abs(ball.vy) < 0.1;
+      if (resting && ball.x > STEM_X && ball.x < bars[index].end) ball.vy = -num('boost') * 0.7;
+    });
+  },
+  onHit(ball, index) {
+    if (modeState.charge.time > 0 && modeState.charge.index === index) ball.vy *= num('boost');
+  },
+  status() {
+    const done = modeState.locked.filter(Boolean).length;
+    return done === 2 ? 'Ё собрана' : `в гнёздах ${done} / 2`;
+  },
+  draw() { drawWorld(drawNests); },
 };
 
 /* ---------- панель ---------- */
