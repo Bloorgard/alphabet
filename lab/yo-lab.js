@@ -694,7 +694,7 @@ MODES.ride = {
 const TRACK_SCALE = 0.62;
 const T_BODY_W = 0.407 * TRACK_SCALE;
 const T_BODY_H = 0.093 * TRACK_SCALE;
-const T_WHEEL_BASE = 0.026 * TRACK_SCALE;
+const T_WHEEL_BASE = 0.016;
 const T_WHEEL_X = 0.4;
 const T_WHEEL_DROP = 0.048;
 const T_STROKE = 0.0092 * TRACK_SCALE;
@@ -771,6 +771,14 @@ function wheelR() {
   return num('wheel');
 }
 
+/* момент инерции растёт вместе с разносом масс: у большого колеса
+   и плечо больше, и раскрутить тело тяжелее */
+function trackInertia() {
+  const reach = wheelOffset() + wheelR();
+  const base = T_BODY_H / 2 + T_WHEEL_DROP + T_WHEEL_BASE;
+  return T_INERTIA * (reach / base) ** 2;
+}
+
 /* точки стоят на одном вылете всегда: лежащая буква — это её нормальный
    вид, и подтянутая подвеска ломала бы его. Большое колесо отодвигает
    крепление, иначе оно накрывает саму букву. */
@@ -841,7 +849,7 @@ function stepTrackRide() {
     const fy = n.y * normal + n.ty * along;
     bike.vx += fx * STEP;
     bike.vy += fy * STEP;
-    bike.omega += (rx * fy - ry * fx) / T_INERTIA * STEP;
+    bike.omega += (rx * fy - ry * fx) / trackInertia() * STEP;
   });
 
   bike.omega += lean * num('lean') * (contacts ? 0.35 : 1) * STEP;
