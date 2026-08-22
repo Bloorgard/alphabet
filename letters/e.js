@@ -158,31 +158,31 @@ export function mountE(workspace) {
       audioMaster = audioContext.createGain();
       audioMaster.gain.value = 0.24;
       audioMaster.connect(audioContext.destination);
+      const unlock = audioContext.createBufferSource();
+      unlock.buffer = audioContext.createBuffer(1, 1, 22050);
+      unlock.connect(audioMaster);
+      unlock.start();
     }
-    if (audioContext.state === 'suspended') audioContext.resume();
+    if (audioContext.state !== 'running' && audioContext.state !== 'closed') audioContext.resume();
     return audioContext;
   }
 
   function ping(frequency, duration = 0.32, volume = 0.16, type = 'sine') {
     const ac = wakeAudio();
     if (!ac) return;
-    const play = () => {
-      if (ac.state !== 'running') return;
-      const start = ac.currentTime;
-      const oscillator = ac.createOscillator();
-      const gain = ac.createGain();
-      oscillator.type = type;
-      oscillator.frequency.setValueAtTime(frequency, start);
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(Math.max(0.001, volume), start + 0.008);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-      oscillator.connect(gain);
-      gain.connect(audioMaster);
-      oscillator.start(start);
-      oscillator.stop(start + duration + 0.02);
-    };
-    if (ac.state === 'running') play();
-    else if (ac.state === 'suspended') ac.resume().then(play);
+    const start = ac.currentTime;
+    const oscillator = ac.createOscillator();
+    const gain = ac.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, volume), start + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(gain);
+    gain.connect(audioMaster);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.02);
+    if (ac.state !== 'running' && ac.state !== 'closed') ac.resume();
   }
 
   function lightFret(index, fret) {
@@ -671,13 +671,13 @@ export function mountE(workspace) {
   }
 
   function onPointerDown(event) {
+    wakeAudio();
     track(event);
     pointer.px = pointer.x;
     pointer.py = pointer.y;
     pointer.down = true;
-    canvas.setPointerCapture(event.pointerId);
+    try { canvas.setPointerCapture(event.pointerId); } catch (error) { /* Safari may reject capture */ }
     stopDemoFromTouch();
-    wakeAudio();
     const row = nearRow(pointer.y, params.frets ? 0.085 : 0.055);
     if (params.frets) {
       const fret = row >= 0 ? fretAt(row, pointer.x) : -1;
