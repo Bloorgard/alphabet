@@ -689,6 +689,225 @@ MODES.ride = {
   },
 };
 
+/* ---------- трасса: Ё как мотоцикл ---------- */
+
+const TRACK_SCALE = 0.62;
+const T_BODY_W = 0.407 * TRACK_SCALE;
+const T_BODY_H = 0.093 * TRACK_SCALE;
+const T_WHEEL_R = 0.026 * TRACK_SCALE;
+const T_WHEEL_X = 0.4;
+const T_STROKE = 0.0092 * TRACK_SCALE;
+const T_SCREEN_X = 0.3;
+const T_INERTIA = 0.02;
+const T_WHEEL_DROP = 0.048;
+
+/* трамплины: редкие гладкие горбы, с которых на скорости отрывает */
+function trackBumps(x) {
+  let sum = 0;
+  const cell = Math.floor(x / 3.4);
+  for (let k = cell - 1; k <= cell + 1; k += 1) {
+    const center = k * 3.4 + ((k * 97) % 13) / 13 * 1.6;
+    const width = 0.34 + ((k * 57) % 7) / 7 * 0.2;
+    const height = 0.08 + ((k * 31) % 11) / 11 * 0.07;
+    const d = (x - center) / width;
+    if (Math.abs(d) < 1.8) sum -= height * Math.exp(-d * d * 2.2);
+  }
+  return sum;
+}
+
+function trackAt(x) {
+  const relief = num('relief');
+  return 0.62
+    + (Math.sin(x * 0.41) * 0.11
+      + Math.sin(x * 0.83 + 1.1) * 0.06
+      + Math.sin(x * 2.1 + 0.4) * 0.02
+      + trackBumps(x)) * relief;
+}
+
+function trackSlope(x) {
+  const step = 0.004;
+  return (trackAt(x + step) - trackAt(x - step)) / (2 * step);
+}
+
+function resetTrack() {
+  modeState.bike = {
+    x: 0, y: trackAt(0) - (T_BODY_H / 2 + T_WHEEL_DROP + T_WHEEL_R),
+    vx: 0, vy: 0,
+    angle: 0, omega: 0,
+    alive: true, wheelsOn: [false, false],
+  };
+  modeState.camY = modeState.bike.y;
+  modeState.wheelDrop = [0, 0];
+  modeState.crash = 0;
+  modeState.best = modeState.best ?? 0;
+  modeState.keys = modeState.keys ?? new Set();
+}
+
+function bikePoint(lx, ly) {
+  const bike = modeState.bike;
+  const cos = Math.cos(bike.angle);
+  const sin = Math.sin(bike.angle);
+  return { x: bike.x + lx * cos - ly * sin, y: bike.y + lx * sin + ly * cos };
+}
+
+function crashTrack() {
+  const bike = modeState.bike;
+  if (!bike.alive) return;
+  bike.alive = false;
+  modeState.crash = 1;
+  modeState.best = Math.max(modeState.best, bike.x);
+}
+
+MODES.track = {
+  label: 'трасса',
+  own: true,
+  note: 'Ё едет сама: ↑ газ, ↓ тормоз, ← и → наклоняют корпус в воздухе и на дуге. Прыжка нет — прыгаешь с рельефа. Коснулся земли корпусом, а не точками, — точки отвалились.',
+  cursor: 'pointer',
+  tools: [
+    { type: 'range', key: 'power', label: 'тяга', min: 0.5, max: 7, step: 0.1, value: 3.4 },
+    { type: 'range', key: 'grav', label: 'тяжесть', min: 0.8, max: 4, step: 0.1, value: 2 },
+    { type: 'range', key: 'stiff', label: 'подвеска', min: 80, max: 600, step: 10, value: 260 },
+    { type: 'range', key: 'damp', label: 'демпфер', min: 2, max: 40, step: 1, value: 14 },
+    { type: 'range', key: 'grip', label: 'сцепление', min: 0.5, max: 8, step: 0.1, value: 2 },
+    { type: 'range', key: 'lean', label: 'наклон', min: 1, max: 12, step: 0.5, value: 5 },
+    { type: 'range', key: 'relief', label: 'рельеф', min: 0.4, max: 2, step: 0.1, value: 1 },
+    { type: 'toggle', key: 'pause', label: 'пауза', value: false },
+    { type: 'button', label: 'заново', action: () => resetTrack() },
+  ],
+  setup() { modeState.best = 0; modeState.keys = new Set(); resetTrack(); },
+  step() {
+    const bike = modeState.bike;
+    const keys = modeState.keys;
+    const gravity = num('grav');
+    modeState.crash *= 0.98;
+
+    const throttle = bike.alive && (keys.has('ArrowUp') || modeState.tap) ? 1 : 0;
+    const brake = keys.has('ArrowDown') ? 1 : 0;
+    const lean = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0);
+
+    bike.vy += gravity * STEP;
+
+    let contacts = 0;
+    [0, 1].forEach((index) => {
+      const local = (index === 0 ? -1 : 1) * T_WHEEL_X * T_BODY_W;
+      const point = bikePoint(local, T_BODY_H / 2 + T_WHEEL_DROP);
+      const ground = trackAt(point.x);
+      const depth = point.y + T_WHEEL_R - ground;
+      modeState.wheelDrop[index] = 0;
+      bike.wheelsOn[index] = depth > 0;
+      if (depth <= 0) return;
+      contacts += 1;
+      modeState.wheelDrop[index] = Math.min(depth, T_WHEEL_R);
+
+      const slope = trackSlope(point.x);
+      const norm = Math.hypot(slope, 1);
+      const nx = slope / norm;
+      const ny = -1 / norm;
+      const tx = 1 / norm;
+      const ty = slope / norm;
+
+      const rx = point.x - bike.x;
+      const ry = point.y - bike.y;
+      const vpx = bike.vx - bike.omega * ry;
+      const vpy = bike.vy + bike.omega * rx;
+
+      const vn = vpx * nx + vpy * ny;
+      const vt = vpx * tx + vpy * ty;
+
+      const normal = Math.max(0, clamp(depth, 0, 0.06) * num('stiff') - vn * num('damp'));
+      /* тяга и торможение живут на задней точке — отсюда и вилли на газу */
+      let along = -vt * num('grip');
+      if (index === 0) along += throttle * num('power') - brake * vt * 2.5;
+
+      const fx = nx * normal + tx * along;
+      const fy = ny * normal + ty * along;
+      bike.vx += fx * STEP;
+      bike.vy += fy * STEP;
+      bike.omega += (rx * fy - ry * fx) / T_INERTIA * STEP;
+    });
+
+    /* наклон корпуса: в воздухе рулит только он */
+    bike.omega += lean * num('lean') * (contacts ? 0.35 : 1) * STEP;
+    bike.omega *= contacts ? 0.97 : 0.995;
+    bike.omega = clamp(bike.omega, -5, 5);
+    bike.vx = clamp(bike.vx, -1.2, 2.4);
+
+    bike.x += bike.vx * STEP;
+    bike.y += bike.vy * STEP;
+    bike.angle += bike.omega * STEP;
+
+    modeState.camY += (bike.y - modeState.camY) * 0.06;
+
+    if (!bike.alive) return;
+    /* корпус коснулся земли — точки долой */
+    const corners = [
+      [-T_BODY_W / 2, -T_BODY_H / 2], [T_BODY_W / 2, -T_BODY_H / 2],
+      [T_BODY_W / 2, T_BODY_H / 2], [-T_BODY_W / 2, T_BODY_H / 2],
+    ];
+    for (const [lx, ly] of corners) {
+      const point = bikePoint(lx, ly);
+      if (point.y > trackAt(point.x)) { crashTrack(); return; }
+    }
+  },
+  onDown() { modeState.tap = true; },
+  onUp() { modeState.tap = false; },
+  onKey(event, down) {
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyR'].includes(event.code)) return;
+    event.preventDefault();
+    if (event.code === 'KeyR') { if (down) resetTrack(); return; }
+    if (down) modeState.keys.add(event.code);
+    else modeState.keys.delete(event.code);
+  },
+  status() {
+    const bike = modeState.bike;
+    return bike.alive ? `Ё · ${bike.x.toFixed(1)}` : `Е · ${bike.x.toFixed(1)} · R`;
+  },
+  draw() {
+    const bike = modeState.bike;
+    const camX = bike.x - T_SCREEN_X;
+    const camY = modeState.camY - 0.55;
+
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = S * T_STROKE;
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    for (let sx = 0; sx <= 1.001; sx += 0.004) {
+      const y = (trackAt(camX + sx) - camY) * S;
+      if (sx === 0) ctx.moveTo(0, y);
+      else ctx.lineTo(sx * S, y);
+    }
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate((bike.x - camX) * S, (bike.y - camY) * S);
+    ctx.rotate(bike.angle);
+    const half = T_BODY_W / 2 * S;
+    const rows = [-T_BODY_H / 2, 0, T_BODY_H / 2].map((offset) => offset * S);
+    ctx.beginPath();
+    ctx.moveTo(half, rows[0]);
+    ctx.lineTo(half, rows[2]);
+    ctx.stroke();
+    rows.forEach((y, index) => {
+      ctx.beginPath();
+      ctx.moveTo(index === 0 ? -half * 0.985 : -half, y);
+      ctx.lineTo(half, y);
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    [0, 1].forEach((index) => {
+      const local = (index === 0 ? -1 : 1) * T_WHEEL_X * T_BODY_W;
+      const point = bikePoint(local, T_BODY_H / 2 + T_WHEEL_DROP);
+      ctx.beginPath();
+      ctx.arc((point.x - camX) * S, (point.y - camY - modeState.wheelDrop[index]) * S, T_WHEEL_R * S, 0, Math.PI * 2);
+      ctx.fillStyle = !bike.alive && modeState.crash > 0.15 ? RED : INK;
+      ctx.fill();
+    });
+
+    drawStatus();
+  },
+};
+
 /* ---------- панель ---------- */
 
 function renderTools(mode) {
