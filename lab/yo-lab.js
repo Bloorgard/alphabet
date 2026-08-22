@@ -762,7 +762,6 @@ function resetTrack(keepPlace = false) {
   modeState.runStart = from;
   modeState.camY = modeState.bike.y;
   modeState.wheelDrop = [0, 0];
-  modeState.dropK = 1;
   modeState.best = modeState.best ?? 0;
 }
 
@@ -772,10 +771,11 @@ function wheelR() {
   return num('wheel');
 }
 
+/* точки стоят на одном вылете всегда: лежащая буква — это её нормальный
+   вид, и подтянутая подвеска ломала бы его. Большое колесо отодвигает
+   крепление, иначе оно накрывает саму букву. */
 function wheelOffset() {
-  /* большое колесо отодвигает крепление, иначе оно накрывает саму букву */
-  const drop = Math.max(T_WHEEL_DROP, wheelR() * 1.15);
-  return T_BODY_H / 2 + drop * modeState.dropK;
+  return T_BODY_H / 2 + Math.max(T_WHEEL_DROP, wheelR() * 1.15);
 }
 
 function bikePoint(lx, ly) {
@@ -983,8 +983,6 @@ MODES.track = {
     else if (modeState.phase === 'fall') stepTrackFall();
     else if (modeState.phase === 'rest') stepTrackRest();
     else stepTrackRevive();
-    const wantDrop = modeState.phase === 'ride' || modeState.phase === 'revive' ? 1 : 0.5;
-    modeState.dropK += (wantDrop - modeState.dropK) * (modeState.phase === 'revive' ? 0.12 : 0.06);
     modeState.camY += (modeState.bike.y - modeState.camY) * 0.06;
   },
   onDown() {
