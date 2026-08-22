@@ -694,7 +694,7 @@ MODES.ride = {
 const TRACK_SCALE = 0.62;
 const T_BODY_W = 0.407 * TRACK_SCALE;
 const T_BODY_H = 0.093 * TRACK_SCALE;
-const T_WHEEL_R = 0.026 * TRACK_SCALE;
+const T_WHEEL_BASE = 0.026 * TRACK_SCALE;
 const T_WHEEL_X = 0.4;
 const T_WHEEL_DROP = 0.048;
 const T_STROKE = 0.0092 * TRACK_SCALE;
@@ -729,8 +729,14 @@ function trackBumps(x) {
   return sum;
 }
 
+/* сложность привязана к месту на трассе, а не ко времени: рельеф позади
+   остаётся тем же, а впереди растёт */
+function trackGrowth(x) {
+  return 1 + clamp(x / 45, 0, 1) * 1.1;
+}
+
 function trackAt(x) {
-  const relief = num('relief');
+  const relief = num('relief') * trackGrowth(x);
   return 0.62
     + (noise1(x * 0.42) * 0.2
       + noise1(x * 1.15 + 11.3) * 0.075
@@ -746,7 +752,7 @@ function trackSlope(x) {
 function resetTrack(keepPlace = false) {
   const from = keepPlace ? modeState.bike.x : 0;
   modeState.bike = {
-    x: from, y: trackAt(from) - (T_BODY_H / 2 + T_WHEEL_DROP + T_WHEEL_R),
+    x: from, y: trackAt(from) - (T_BODY_H / 2 + Math.max(T_WHEEL_DROP, (num('wheel') || T_WHEEL_BASE) * 1.15) + (num('wheel') || T_WHEEL_BASE)),
     vx: 0, vy: 0,
     angle: 0, omega: 0,
     wheelsOn: [false, false],
@@ -762,8 +768,14 @@ function resetTrack(keepPlace = false) {
 
 /* лёжа точки подтягиваются к корпусу и читаются как диакритика,
    на ходу отъезжают на подвеску */
+function wheelR() {
+  return num('wheel');
+}
+
 function wheelOffset() {
-  return T_BODY_H / 2 + T_WHEEL_DROP * modeState.dropK;
+  /* большое колесо отодвигает крепление, иначе оно накрывает саму букву */
+  const drop = Math.max(T_WHEEL_DROP, wheelR() * 1.15);
+  return T_BODY_H / 2 + drop * modeState.dropK;
 }
 
 function bikePoint(lx, ly) {
@@ -804,12 +816,13 @@ function stepTrackRide() {
   [0, 1].forEach((index) => {
     const local = (index === 0 ? -1 : 1) * T_WHEEL_X * T_BODY_W;
     const point = bikePoint(local, wheelOffset());
-    const depth = point.y + T_WHEEL_R - trackAt(point.x);
+    const radius = wheelR();
+    const depth = point.y + radius - trackAt(point.x);
     modeState.wheelDrop[index] = 0;
     bike.wheelsOn[index] = depth > 0;
     if (depth <= 0) return;
     contacts += 1;
-    modeState.wheelDrop[index] = Math.min(depth, T_WHEEL_R);
+    modeState.wheelDrop[index] = Math.min(depth, radius);
 
     const n = trackNormal(point.x);
     const rx = point.x - bike.x;
@@ -941,7 +954,7 @@ function reviveTrack() {
     angle: bike.angle,
     turn: bike.angle > 0 ? Math.PI * 2 : -Math.PI * 2,
     y: bike.y,
-    stand: trackAt(bike.x) - (T_BODY_H / 2 + T_WHEEL_DROP + T_WHEEL_R),
+    stand: trackAt(bike.x) - (T_BODY_H / 2 + Math.max(T_WHEEL_DROP, wheelR() * 1.15) + wheelR()),
   };
 }
 
@@ -959,6 +972,7 @@ MODES.track = {
     { type: 'range', key: 'grip', label: 'сцепление', min: 0.5, max: 8, step: 0.1, value: 2 },
     { type: 'range', key: 'lean', label: 'наклон', min: 1, max: 12, step: 0.5, value: 5 },
     { type: 'range', key: 'relief', label: 'рельеф', min: 0.4, max: 2, step: 0.1, value: 1 },
+    { type: 'range', key: 'wheel', label: 'колесо', min: 0.008, max: 0.13, step: 0.002, value: 0.016 },
     { type: 'toggle', key: 'night', label: 'ночь', value: true },
     { type: 'toggle', key: 'pause', label: 'пауза', value: false },
     { type: 'button', label: 'заново', action: () => resetTrack() },
@@ -1040,7 +1054,7 @@ MODES.track = {
       const x = (point.x - camX) * S;
       const y = (point.y - camY - modeState.wheelDrop[index]) * S;
       ctx.beginPath();
-      ctx.arc(x, y, T_WHEEL_R * S, 0, Math.PI * 2);
+      ctx.arc(x, y, wheelR() * S, 0, Math.PI * 2);
       ctx.fillStyle = ink;
       ctx.fill();
     });
@@ -1050,23 +1064,14 @@ MODES.track = {
     const anchorY = (bike.y - camY) * S;
     ctx.textAlign = 'center';
     ctx.fillStyle = ground;
-    if (resting) {
-      ctx.font = `${Math.round(S * 0.022)}px 'DM Mono', ui-monospace, monospace`;
-      ctx.fillText(`лучший ${modeState.best.toFixed(1)}`, anchorX, anchorY - S * 0.215);
-      ctx.font = `${Math.round(S * 0.05)}px 'DM Mono', ui-monospace, monospace`;
-      ctx.fillText(runDistance().toFixed(1), anchorX, anchorY - S * 0.165);
-      const label = 'продолжить';
-      ctx.font = `${Math.round(S * 0.026)}px 'DM Mono', ui-monospace, monospace`;
-      const width = ctx.measureText(label).width + S * 0.05;
-      const boxY = anchorY - S * 0.145;
-      ctx.strokeStyle = ground;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(anchorX - width / 2, boxY, width, S * 0.045);
-      ctx.fillText(label, anchorX, boxY + S * 0.031);
-    } else {
-      ctx.font = `${Math.round(S * 0.032)}px 'DM Mono', ui-monospace, monospace`;
-      ctx.fillText(runDistance().toFixed(1), anchorX, anchorY - S * 0.13);
-    }
+    ctx.globalAlpha = 0.5;
+    if (ctx.letterSpacing !== undefined) ctx.letterSpacing = `${S * 0.004}px`;
+    ctx.font = `${Math.round(S * 0.021)}px 'DM Mono', ui-monospace, monospace`;
+    const above = Math.max(0.12, wheelR() + 0.09);
+    ctx.fillText(runDistance().toFixed(1), anchorX, anchorY - above * S);
+    if (resting) ctx.fillText(`лучший ${modeState.best.toFixed(1)}`, anchorX, anchorY - (above + 0.035) * S);
+    if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '0px';
+    ctx.globalAlpha = 1;
     ctx.textAlign = 'left';
   },
 };
