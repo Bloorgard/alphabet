@@ -696,19 +696,33 @@ const T_BODY_W = 0.407 * TRACK_SCALE;
 const T_BODY_H = 0.093 * TRACK_SCALE;
 const T_WHEEL_R = 0.026 * TRACK_SCALE;
 const T_WHEEL_X = 0.4;
+const T_WHEEL_DROP = 0.048;
 const T_STROKE = 0.0092 * TRACK_SCALE;
 const T_SCREEN_X = 0.3;
 const T_INERTIA = 0.02;
-const T_WHEEL_DROP = 0.048;
+const T_LIGHT = '#f2eee6';
+const T_DARK = '#101010';
+
+function hash1(i) {
+  const x = Math.sin(i * 127.1) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function noise1(x) {
+  const i = Math.floor(x);
+  const f = x - i;
+  const t = f * f * (3 - 2 * f);
+  return (hash1(i) + (hash1(i + 1) - hash1(i)) * t) - 0.5;
+}
 
 /* трамплины: редкие гладкие горбы, с которых на скорости отрывает */
 function trackBumps(x) {
   let sum = 0;
   const cell = Math.floor(x / 3.4);
   for (let k = cell - 1; k <= cell + 1; k += 1) {
-    const center = k * 3.4 + ((k * 97) % 13) / 13 * 1.6;
-    const width = 0.34 + ((k * 57) % 7) / 7 * 0.2;
-    const height = 0.08 + ((k * 31) % 11) / 11 * 0.07;
+    const center = k * 3.4 + hash1(k * 3.7) * 2.2;
+    const width = 0.3 + hash1(k * 9.1) * 0.28;
+    const height = 0.06 + hash1(k * 5.3) * 0.09;
     const d = (x - center) / width;
     if (Math.abs(d) < 1.8) sum -= height * Math.exp(-d * d * 2.2);
   }
@@ -718,9 +732,9 @@ function trackBumps(x) {
 function trackAt(x) {
   const relief = num('relief');
   return 0.62
-    + (Math.sin(x * 0.41) * 0.11
-      + Math.sin(x * 0.83 + 1.1) * 0.06
-      + Math.sin(x * 2.1 + 0.4) * 0.02
+    + (noise1(x * 0.42) * 0.2
+      + noise1(x * 1.15 + 11.3) * 0.075
+      + Math.sin(x * 2.4 + 0.4) * 0.014
       + trackBumps(x)) * relief;
 }
 
@@ -729,18 +743,27 @@ function trackSlope(x) {
   return (trackAt(x + step) - trackAt(x - step)) / (2 * step);
 }
 
-function resetTrack() {
+function resetTrack(keepPlace = false) {
+  const from = keepPlace ? modeState.bike.x : 0;
   modeState.bike = {
-    x: 0, y: trackAt(0) - (T_BODY_H / 2 + T_WHEEL_DROP + T_WHEEL_R),
+    x: from, y: trackAt(from) - (T_BODY_H / 2 + T_WHEEL_DROP + T_WHEEL_R),
     vx: 0, vy: 0,
     angle: 0, omega: 0,
-    alive: true, wheelsOn: [false, false],
+    wheelsOn: [false, false],
   };
+  modeState.phase = 'ride';
+  modeState.timer = 0;
+  modeState.runStart = from;
   modeState.camY = modeState.bike.y;
   modeState.wheelDrop = [0, 0];
-  modeState.crash = 0;
+  modeState.dropK = 1;
   modeState.best = modeState.best ?? 0;
-  modeState.keys = modeState.keys ?? new Set();
+}
+
+/* лёжа точки подтягиваются к корпусу и читаются как диакритика,
+   на ходу отъезжают на подвеску */
+function wheelOffset() {
+  return T_BODY_H / 2 + T_WHEEL_DROP * modeState.dropK;
 }
 
 function bikePoint(lx, ly) {
@@ -750,18 +773,183 @@ function bikePoint(lx, ly) {
   return { x: bike.x + lx * cos - ly * sin, y: bike.y + lx * sin + ly * cos };
 }
 
-function crashTrack() {
+function bodyCorners() {
+  return [
+    [-T_BODY_W / 2, -T_BODY_H / 2], [T_BODY_W / 2, -T_BODY_H / 2],
+    [T_BODY_W / 2, T_BODY_H / 2], [-T_BODY_W / 2, T_BODY_H / 2],
+  ].map(([lx, ly]) => bikePoint(lx, ly));
+}
+
+function runDistance() {
+  return Math.max(0, modeState.bike.x - modeState.runStart);
+}
+
+/* нормаль к рельефу, вверх от поверхности */
+function trackNormal(x) {
+  const slope = trackSlope(x);
+  const norm = Math.hypot(slope, 1);
+  return { x: slope / norm, y: -1 / norm, tx: 1 / norm, ty: slope / norm };
+}
+
+function stepTrackRide() {
   const bike = modeState.bike;
-  if (!bike.alive) return;
-  bike.alive = false;
-  modeState.crash = 1;
-  modeState.best = Math.max(modeState.best, bike.x);
+  const keys = modeState.keys;
+  const throttle = keys.has('ArrowUp') || modeState.tap ? 1 : 0;
+  const brake = keys.has('ArrowDown') ? 1 : 0;
+  const lean = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0);
+
+  bike.vy += num('grav') * STEP;
+
+  let contacts = 0;
+  [0, 1].forEach((index) => {
+    const local = (index === 0 ? -1 : 1) * T_WHEEL_X * T_BODY_W;
+    const point = bikePoint(local, wheelOffset());
+    const depth = point.y + T_WHEEL_R - trackAt(point.x);
+    modeState.wheelDrop[index] = 0;
+    bike.wheelsOn[index] = depth > 0;
+    if (depth <= 0) return;
+    contacts += 1;
+    modeState.wheelDrop[index] = Math.min(depth, T_WHEEL_R);
+
+    const n = trackNormal(point.x);
+    const rx = point.x - bike.x;
+    const ry = point.y - bike.y;
+    const vpx = bike.vx - bike.omega * ry;
+    const vpy = bike.vy + bike.omega * rx;
+    const vn = vpx * n.x + vpy * n.y;
+    const vt = vpx * n.tx + vpy * n.ty;
+
+    const normal = Math.max(0, clamp(depth, 0, 0.06) * num('stiff') - vn * num('damp'));
+    /* тяга и торможение живут на задней точке — отсюда и вилли на газу */
+    let along = -vt * num('grip');
+    if (index === 0) along += throttle * num('power') - brake * vt * 2.5;
+
+    const fx = n.x * normal + n.tx * along;
+    const fy = n.y * normal + n.ty * along;
+    bike.vx += fx * STEP;
+    bike.vy += fy * STEP;
+    bike.omega += (rx * fy - ry * fx) / T_INERTIA * STEP;
+  });
+
+  bike.omega += lean * num('lean') * (contacts ? 0.35 : 1) * STEP;
+  bike.omega *= contacts ? 0.97 : 0.995;
+  bike.omega = clamp(bike.omega, -5, 5);
+  bike.vx = clamp(bike.vx, -1.2, 2.4);
+
+  bike.x += bike.vx * STEP;
+  bike.y += bike.vy * STEP;
+  bike.angle += bike.omega * STEP;
+
+  for (const corner of bodyCorners()) {
+    if (corner.y > trackAt(corner.x)) {
+      modeState.phase = 'fall';
+      modeState.timer = 0;
+      modeState.best = Math.max(modeState.best, runDistance());
+      return;
+    }
+  }
+}
+
+/* падение: корпус разговаривает с землёй сам, и его доворачивает
+   в нормальное положение буквы — точками вверх */
+function stepTrackFall() {
+  const bike = modeState.bike;
+  bike.vy += num('grav') * STEP;
+  modeState.timer += STEP;
+
+  bodyCorners().forEach((corner, index) => {
+    const ground = trackAt(corner.x);
+    const depth = corner.y - ground;
+    if (depth <= 0) return;
+    const n = trackNormal(corner.x);
+    const local = [
+      [-T_BODY_W / 2, -T_BODY_H / 2], [T_BODY_W / 2, -T_BODY_H / 2],
+      [T_BODY_W / 2, T_BODY_H / 2], [-T_BODY_W / 2, T_BODY_H / 2],
+    ][index];
+    const rx = corner.x - bike.x;
+    const ry = corner.y - bike.y;
+    const vpx = bike.vx - bike.omega * ry;
+    const vpy = bike.vy + bike.omega * rx;
+    const vn = vpx * n.x + vpy * n.y;
+    const normal = Math.max(0, clamp(depth, 0, 0.05) * 240 - vn * 16);
+    const friction = -(vpx * n.tx + vpy * n.ty) * 4;
+    const fx = n.x * normal + n.tx * friction;
+    const fy = n.y * normal + n.ty * friction;
+    bike.vx += fx * STEP;
+    bike.vy += fy * STEP;
+    bike.omega += (rx * fy - ry * fx) / T_INERTIA * STEP;
+    void local;
+  });
+
+  /* мягкая подкрутка к ближайшему обороту: буква ложится правильной стороной */
+  const target = bike.angle > 0 ? Math.PI : -Math.PI;
+  bike.omega += (target - bike.angle) * 2.4 * STEP;
+  bike.omega = clamp(bike.omega * 0.985, -6, 6);
+  bike.vx *= 0.99;
+
+  bike.x += bike.vx * STEP;
+  bike.y += bike.vy * STEP;
+  bike.angle += bike.omega * STEP;
+
+  const settled = Math.abs(bike.omega) < 0.35 && Math.abs(bike.vy) < 0.12;
+  if (modeState.timer > 0.7 && settled) {
+    modeState.phase = 'rest';
+    modeState.timer = 0;
+    modeState.restAngle = bike.angle;
+  }
+}
+
+/* покой: буква укладывается ровно по рельефу и ждёт «продолжить» */
+function stepTrackRest() {
+  const bike = modeState.bike;
+  modeState.timer += STEP;
+  const turn = bike.angle > 0 ? Math.PI : -Math.PI;
+  const target = turn + Math.atan(trackSlope(bike.x));
+  bike.angle += (target - bike.angle) * 0.12;
+  bike.omega = 0;
+  bike.vx *= 0.9;
+  bike.vy = 0;
+  const lie = trackAt(bike.x) - T_BODY_H / 2 - T_STROKE * 1.5;
+  bike.y += (lie - bike.y) * 0.12;
+}
+
+/* оживление: буква докручивает оборот и снова встаёт на точки */
+function stepTrackRevive() {
+  const bike = modeState.bike;
+  modeState.timer += STEP;
+  const t = clamp(modeState.timer / 0.55, 0, 1);
+  const ease = t * t * (3 - 2 * t);
+  const from = modeState.reviveFrom;
+  const lift = Math.sin(Math.PI * t) * 0.09;
+  bike.angle = from.angle + (from.turn - from.angle) * ease;
+  bike.y = from.y + (from.stand - from.y) * ease - lift;
+  if (t < 1) return;
+  bike.angle = 0;
+  bike.omega = 0;
+  bike.vx = 0;
+  bike.vy = 0;
+  modeState.phase = 'ride';
+  modeState.runStart = bike.x;
+}
+
+function reviveTrack() {
+  if (modeState.phase !== 'rest') return;
+  const bike = modeState.bike;
+  modeState.phase = 'revive';
+  modeState.timer = 0;
+  modeState.reviveFrom = {
+    angle: bike.angle,
+    turn: bike.angle > 0 ? Math.PI * 2 : -Math.PI * 2,
+    y: bike.y,
+    stand: trackAt(bike.x) - (T_BODY_H / 2 + T_WHEEL_DROP + T_WHEEL_R),
+  };
 }
 
 MODES.track = {
   label: 'трасса',
   own: true,
-  note: 'Ё едет сама: ↑ газ, ↓ тормоз, ← и → наклоняют корпус в воздухе и на дуге. Прыжка нет — прыгаешь с рельефа. Коснулся земли корпусом, а не точками, — точки отвалились.',
+  dark: true,
+  note: 'Ё едет сама: ↑ газ, ↓ тормоз, ← и → наклоняют корпус. Прыжка нет — прыгаешь с рельефа. Легла корпусом на землю — оказалась правильной Ё; пробел или клик поднимают её обратно.',
   cursor: 'pointer',
   tools: [
     { type: 'range', key: 'power', label: 'тяга', min: 0.5, max: 7, step: 0.1, value: 3.4 },
@@ -771,140 +959,122 @@ MODES.track = {
     { type: 'range', key: 'grip', label: 'сцепление', min: 0.5, max: 8, step: 0.1, value: 2 },
     { type: 'range', key: 'lean', label: 'наклон', min: 1, max: 12, step: 0.5, value: 5 },
     { type: 'range', key: 'relief', label: 'рельеф', min: 0.4, max: 2, step: 0.1, value: 1 },
+    { type: 'toggle', key: 'fill', label: 'земля', value: true },
     { type: 'toggle', key: 'pause', label: 'пауза', value: false },
     { type: 'button', label: 'заново', action: () => resetTrack() },
   ],
-  setup() { modeState.best = 0; modeState.keys = new Set(); resetTrack(); },
+  setup() { modeState.keys = new Set(); modeState.best = 0; resetTrack(); },
   step() {
-    const bike = modeState.bike;
-    const keys = modeState.keys;
-    const gravity = num('grav');
-    modeState.crash *= 0.98;
-
-    const throttle = bike.alive && (keys.has('ArrowUp') || modeState.tap) ? 1 : 0;
-    const brake = keys.has('ArrowDown') ? 1 : 0;
-    const lean = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0);
-
-    bike.vy += gravity * STEP;
-
-    let contacts = 0;
-    [0, 1].forEach((index) => {
-      const local = (index === 0 ? -1 : 1) * T_WHEEL_X * T_BODY_W;
-      const point = bikePoint(local, T_BODY_H / 2 + T_WHEEL_DROP);
-      const ground = trackAt(point.x);
-      const depth = point.y + T_WHEEL_R - ground;
-      modeState.wheelDrop[index] = 0;
-      bike.wheelsOn[index] = depth > 0;
-      if (depth <= 0) return;
-      contacts += 1;
-      modeState.wheelDrop[index] = Math.min(depth, T_WHEEL_R);
-
-      const slope = trackSlope(point.x);
-      const norm = Math.hypot(slope, 1);
-      const nx = slope / norm;
-      const ny = -1 / norm;
-      const tx = 1 / norm;
-      const ty = slope / norm;
-
-      const rx = point.x - bike.x;
-      const ry = point.y - bike.y;
-      const vpx = bike.vx - bike.omega * ry;
-      const vpy = bike.vy + bike.omega * rx;
-
-      const vn = vpx * nx + vpy * ny;
-      const vt = vpx * tx + vpy * ty;
-
-      const normal = Math.max(0, clamp(depth, 0, 0.06) * num('stiff') - vn * num('damp'));
-      /* тяга и торможение живут на задней точке — отсюда и вилли на газу */
-      let along = -vt * num('grip');
-      if (index === 0) along += throttle * num('power') - brake * vt * 2.5;
-
-      const fx = nx * normal + tx * along;
-      const fy = ny * normal + ty * along;
-      bike.vx += fx * STEP;
-      bike.vy += fy * STEP;
-      bike.omega += (rx * fy - ry * fx) / T_INERTIA * STEP;
-    });
-
-    /* наклон корпуса: в воздухе рулит только он */
-    bike.omega += lean * num('lean') * (contacts ? 0.35 : 1) * STEP;
-    bike.omega *= contacts ? 0.97 : 0.995;
-    bike.omega = clamp(bike.omega, -5, 5);
-    bike.vx = clamp(bike.vx, -1.2, 2.4);
-
-    bike.x += bike.vx * STEP;
-    bike.y += bike.vy * STEP;
-    bike.angle += bike.omega * STEP;
-
-    modeState.camY += (bike.y - modeState.camY) * 0.06;
-
-    if (!bike.alive) return;
-    /* корпус коснулся земли — точки долой */
-    const corners = [
-      [-T_BODY_W / 2, -T_BODY_H / 2], [T_BODY_W / 2, -T_BODY_H / 2],
-      [T_BODY_W / 2, T_BODY_H / 2], [-T_BODY_W / 2, T_BODY_H / 2],
-    ];
-    for (const [lx, ly] of corners) {
-      const point = bikePoint(lx, ly);
-      if (point.y > trackAt(point.x)) { crashTrack(); return; }
-    }
+    if (modeState.phase === 'ride') stepTrackRide();
+    else if (modeState.phase === 'fall') stepTrackFall();
+    else if (modeState.phase === 'rest') stepTrackRest();
+    else stepTrackRevive();
+    const wantDrop = modeState.phase === 'ride' || modeState.phase === 'revive' ? 1 : 0.5;
+    modeState.dropK += (wantDrop - modeState.dropK) * (modeState.phase === 'revive' ? 0.12 : 0.06);
+    modeState.camY += (modeState.bike.y - modeState.camY) * 0.06;
   },
-  onDown() { modeState.tap = true; },
+  onDown() {
+    if (modeState.phase === 'rest') { reviveTrack(); return; }
+    modeState.tap = true;
+  },
   onUp() { modeState.tap = false; },
   onKey(event, down) {
-    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyR'].includes(event.code)) return;
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) return;
     event.preventDefault();
-    if (event.code === 'KeyR') { if (down) resetTrack(); return; }
+    if (event.code === 'Space') { if (down) reviveTrack(); return; }
     if (down) modeState.keys.add(event.code);
     else modeState.keys.delete(event.code);
-  },
-  status() {
-    const bike = modeState.bike;
-    return bike.alive ? `Ё · ${bike.x.toFixed(1)}` : `Е · ${bike.x.toFixed(1)} · R`;
   },
   draw() {
     const bike = modeState.bike;
     const camX = bike.x - T_SCREEN_X;
     const camY = modeState.camY - 0.55;
+    const resting = modeState.phase === 'rest';
 
-    ctx.strokeStyle = INK;
-    ctx.lineWidth = S * T_STROKE;
-    ctx.lineCap = 'butt';
+    ctx.fillStyle = T_DARK;
+    ctx.fillRect(0, 0, S, S);
+
     ctx.beginPath();
     for (let sx = 0; sx <= 1.001; sx += 0.004) {
       const y = (trackAt(camX + sx) - camY) * S;
       if (sx === 0) ctx.moveTo(0, y);
       else ctx.lineTo(sx * S, y);
     }
-    ctx.stroke();
+    if (on('fill')) {
+      ctx.lineTo(S, S);
+      ctx.lineTo(0, S);
+      ctx.closePath();
+      ctx.fillStyle = T_LIGHT;
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = T_LIGHT;
+      ctx.lineWidth = S * T_STROKE;
+      ctx.lineCap = 'butt';
+      ctx.stroke();
+    }
 
     ctx.save();
     ctx.translate((bike.x - camX) * S, (bike.y - camY) * S);
     ctx.rotate(bike.angle);
     const half = T_BODY_W / 2 * S;
-    const rows = [-T_BODY_H / 2, 0, T_BODY_H / 2].map((offset) => offset * S);
-    ctx.beginPath();
-    ctx.moveTo(half, rows[0]);
-    ctx.lineTo(half, rows[2]);
-    ctx.stroke();
-    rows.forEach((y, index) => {
+    const top = -T_BODY_H / 2 * S;
+    const bottom = T_BODY_H / 2 * S;
+    ctx.lineJoin = 'miter';
+    ctx.lineCap = 'butt';
+    /* корпус рисуется дважды: тёмная подложка держит букву читаемой на залитой земле */
+    [[T_DARK, S * T_STROKE * 3.2], [T_LIGHT, S * T_STROKE]].forEach(([color, width]) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
       ctx.beginPath();
-      ctx.moveTo(index === 0 ? -half * 0.985 : -half, y);
-      ctx.lineTo(half, y);
+      ctx.moveTo(-half, top);
+      ctx.lineTo(half, top);
+      ctx.lineTo(half, bottom);
+      ctx.lineTo(-half, bottom);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-half, 0);
+      ctx.lineTo(half, 0);
       ctx.stroke();
     });
     ctx.restore();
 
     [0, 1].forEach((index) => {
       const local = (index === 0 ? -1 : 1) * T_WHEEL_X * T_BODY_W;
-      const point = bikePoint(local, T_BODY_H / 2 + T_WHEEL_DROP);
+      const point = bikePoint(local, wheelOffset());
+      const x = (point.x - camX) * S;
+      const y = (point.y - camY - modeState.wheelDrop[index]) * S;
       ctx.beginPath();
-      ctx.arc((point.x - camX) * S, (point.y - camY - modeState.wheelDrop[index]) * S, T_WHEEL_R * S, 0, Math.PI * 2);
-      ctx.fillStyle = !bike.alive && modeState.crash > 0.15 ? RED : INK;
+      ctx.arc(x, y, T_WHEEL_R * S, 0, Math.PI * 2);
+      ctx.fillStyle = resting ? RED : T_LIGHT;
       ctx.fill();
+      ctx.lineWidth = S * T_STROKE * 1.1;
+      ctx.strokeStyle = T_DARK;
+      ctx.stroke();
     });
 
-    drawStatus();
+    /* счёт и «продолжить» живут рядом с буквой, а не в углу кадра */
+    const anchorX = (bike.x - camX) * S;
+    const anchorY = (bike.y - camY) * S;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = T_LIGHT;
+    if (resting) {
+      ctx.font = `${Math.round(S * 0.022)}px 'DM Mono', ui-monospace, monospace`;
+      ctx.fillText(`лучший ${modeState.best.toFixed(1)}`, anchorX, anchorY - S * 0.215);
+      ctx.font = `${Math.round(S * 0.05)}px 'DM Mono', ui-monospace, monospace`;
+      ctx.fillText(runDistance().toFixed(1), anchorX, anchorY - S * 0.165);
+      const label = 'продолжить';
+      ctx.font = `${Math.round(S * 0.026)}px 'DM Mono', ui-monospace, monospace`;
+      const width = ctx.measureText(label).width + S * 0.05;
+      const boxY = anchorY - S * 0.145;
+      ctx.strokeStyle = T_LIGHT;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(anchorX - width / 2, boxY, width, S * 0.045);
+      ctx.fillText(label, anchorX, boxY + S * 0.031);
+    } else {
+      ctx.font = `${Math.round(S * 0.032)}px 'DM Mono', ui-monospace, monospace`;
+      ctx.fillText(runDistance().toFixed(1), anchorX, anchorY - S * 0.13);
+    }
+    ctx.textAlign = 'left';
   },
 };
 
