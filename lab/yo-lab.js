@@ -469,14 +469,16 @@ MODES.nests = {
 
 /* ---------- ход: Ё едет на своих точках ---------- */
 
-/* пропорции с эскиза: корпус 489x112 при кадре 1200, колёса r=31 на базе 220 */
-const BODY_W = 0.407;
-const BODY_H = 0.093;
-const WHEEL_R = 0.026;
+/* пропорции с эскиза: корпус 489x112 при кадре 1200, колёса r=31 на базе 220.
+   SCALE ужимает букву целиком, чтобы в кадр влезало больше карты. */
+const SCALE = 0.62;
+const BODY_W = 0.407 * SCALE;
+const BODY_H = 0.093 * SCALE;
+const WHEEL_R = 0.026 * SCALE;
 const WHEEL_X = 0.225;
-const STROKE = 0.0092;
+const STROKE = 0.0092 * SCALE;
 const SCREEN_X = 0.36;
-const BLOCK_W = 0.035;
+const BLOCK_W = 0.035 * SCALE;
 
 function terrainAt(x) {
   const amp = num('relief');
@@ -490,7 +492,7 @@ function seedBlocks() {
   const car = modeState.car;
   while (modeState.blocks.length < 4) {
     const previous = modeState.blocks.at(-1)?.x ?? car.x + 0.8;
-    modeState.blocks.push({ x: previous + 0.95 + Math.random() * 0.85, h: 0.05 + Math.random() * 0.045, flash: 0 });
+    modeState.blocks.push({ x: previous + 0.95 + Math.random() * 0.85, h: (0.05 + Math.random() * 0.045) * SCALE, flash: 0 });
   }
   modeState.blocks = modeState.blocks.filter((block) => block.x > car.x - 0.6);
 }
@@ -547,7 +549,7 @@ MODES.ride = {
     { type: 'range', key: 'grav', label: 'тяжесть', min: 0.8, max: 4, step: 0.1, value: 2.2 },
     { type: 'range', key: 'stiff', label: 'подвеска', min: 8, max: 120, step: 2, value: 34 },
     { type: 'range', key: 'damp', label: 'демпфер', min: 0.4, max: 10, step: 0.2, value: 2.4 },
-    { type: 'range', key: 'travel', label: 'ход подвески', min: 0.03, max: 0.12, step: 0.004, value: 0.058 },
+    { type: 'range', key: 'travel', label: 'ход подвески', min: 0.02, max: 0.08, step: 0.002, value: 0.036 },
     { type: 'range', key: 'jump', label: 'прыжок', min: 0.4, max: 2, step: 0.05, value: 1.45 },
     { type: 'range', key: 'relief', label: 'рельеф', min: 0, max: 2, step: 0.1, value: 1 },
     { type: 'toggle', key: 'pause', label: 'пауза', value: false },
@@ -592,7 +594,7 @@ MODES.ride = {
     car.ground = grounded && car.alive;
 
     /* упор подвески: колесо не должно наезжать на нижнюю линию корпуса */
-    const limit = Math.min(...grounds) - (WHEEL_R + 0.008);
+    const limit = Math.min(...grounds) - (WHEEL_R + 0.005);
     if (car.y > limit) { car.y = limit; if (car.vy > 0) car.vy = 0; }
 
     const slope = Math.atan2(grounds[1] - grounds[0], 2 * WHEEL_X * BODY_W);
@@ -677,7 +679,6 @@ MODES.ride = {
     modeState.wheels.forEach((wheel, index) => {
       const point = attachPoint(index);
       const sx = (wheel.gone ? wheel.x : point.x) - camera;
-      if (!wheel.gone) line(sx, wheel.y, point.x - camera, point.y, INK, S * STROKE * 0.5);
       ctx.beginPath();
       ctx.arc(sx * S, wheel.y * S, WHEEL_R * S, 0, Math.PI * 2);
       ctx.fillStyle = wheel.gone && modeState.crash > 0.1 ? RED : INK;
