@@ -909,7 +909,7 @@ function stepTrackRest() {
   bike.omega = 0;
   bike.vx *= 0.9;
   bike.vy = 0;
-  const lie = trackAt(bike.x) - T_BODY_H / 2 - T_STROKE * 1.5;
+  const lie = trackAt(bike.x) - T_BODY_H / 2 - T_STROKE * 2;
   bike.y += (lie - bike.y) * 0.12;
 }
 
@@ -959,7 +959,7 @@ MODES.track = {
     { type: 'range', key: 'grip', label: 'сцепление', min: 0.5, max: 8, step: 0.1, value: 2 },
     { type: 'range', key: 'lean', label: 'наклон', min: 1, max: 12, step: 0.5, value: 5 },
     { type: 'range', key: 'relief', label: 'рельеф', min: 0.4, max: 2, step: 0.1, value: 1 },
-    { type: 'toggle', key: 'fill', label: 'земля', value: true },
+    { type: 'toggle', key: 'night', label: 'ночь', value: true },
     { type: 'toggle', key: 'pause', label: 'пауза', value: false },
     { type: 'button', label: 'заново', action: () => resetTrack() },
   ],
@@ -990,8 +990,14 @@ MODES.track = {
     const camX = bike.x - T_SCREEN_X;
     const camY = modeState.camY - 0.55;
     const resting = modeState.phase === 'rest';
+    /* буква одного цвета с землёй: на небе она видна, а коснувшись — краснеет */
+    const night = on('night');
+    const sky = night ? T_DARK : T_LIGHT;
+    const ground = night ? T_LIGHT : T_DARK;
+    const touched = modeState.phase === 'fall' || resting;
+    const ink = touched ? RED : ground;
 
-    ctx.fillStyle = T_DARK;
+    ctx.fillStyle = sky;
     ctx.fillRect(0, 0, S, S);
 
     ctx.beginPath();
@@ -1000,18 +1006,11 @@ MODES.track = {
       if (sx === 0) ctx.moveTo(0, y);
       else ctx.lineTo(sx * S, y);
     }
-    if (on('fill')) {
-      ctx.lineTo(S, S);
-      ctx.lineTo(0, S);
-      ctx.closePath();
-      ctx.fillStyle = T_LIGHT;
-      ctx.fill();
-    } else {
-      ctx.strokeStyle = T_LIGHT;
-      ctx.lineWidth = S * T_STROKE;
-      ctx.lineCap = 'butt';
-      ctx.stroke();
-    }
+    ctx.lineTo(S, S);
+    ctx.lineTo(0, S);
+    ctx.closePath();
+    ctx.fillStyle = ground;
+    ctx.fill();
 
     ctx.save();
     ctx.translate((bike.x - camX) * S, (bike.y - camY) * S);
@@ -1021,21 +1020,18 @@ MODES.track = {
     const bottom = T_BODY_H / 2 * S;
     ctx.lineJoin = 'miter';
     ctx.lineCap = 'butt';
-    /* корпус рисуется дважды: тёмная подложка держит букву читаемой на залитой земле */
-    [[T_DARK, S * T_STROKE * 3.2], [T_LIGHT, S * T_STROKE]].forEach(([color, width]) => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
-      ctx.beginPath();
-      ctx.moveTo(-half, top);
-      ctx.lineTo(half, top);
-      ctx.lineTo(half, bottom);
-      ctx.lineTo(-half, bottom);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-half, 0);
-      ctx.lineTo(half, 0);
-      ctx.stroke();
-    });
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = S * T_STROKE;
+    ctx.beginPath();
+    ctx.moveTo(-half, top);
+    ctx.lineTo(half, top);
+    ctx.lineTo(half, bottom);
+    ctx.lineTo(-half, bottom);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-half, 0);
+    ctx.lineTo(half, 0);
+    ctx.stroke();
     ctx.restore();
 
     [0, 1].forEach((index) => {
@@ -1045,18 +1041,15 @@ MODES.track = {
       const y = (point.y - camY - modeState.wheelDrop[index]) * S;
       ctx.beginPath();
       ctx.arc(x, y, T_WHEEL_R * S, 0, Math.PI * 2);
-      ctx.fillStyle = resting ? RED : T_LIGHT;
+      ctx.fillStyle = ink;
       ctx.fill();
-      ctx.lineWidth = S * T_STROKE * 1.1;
-      ctx.strokeStyle = T_DARK;
-      ctx.stroke();
     });
 
     /* счёт и «продолжить» живут рядом с буквой, а не в углу кадра */
     const anchorX = (bike.x - camX) * S;
     const anchorY = (bike.y - camY) * S;
     ctx.textAlign = 'center';
-    ctx.fillStyle = T_LIGHT;
+    ctx.fillStyle = ground;
     if (resting) {
       ctx.font = `${Math.round(S * 0.022)}px 'DM Mono', ui-monospace, monospace`;
       ctx.fillText(`лучший ${modeState.best.toFixed(1)}`, anchorX, anchorY - S * 0.215);
@@ -1066,7 +1059,7 @@ MODES.track = {
       ctx.font = `${Math.round(S * 0.026)}px 'DM Mono', ui-monospace, monospace`;
       const width = ctx.measureText(label).width + S * 0.05;
       const boxY = anchorY - S * 0.145;
-      ctx.strokeStyle = T_LIGHT;
+      ctx.strokeStyle = ground;
       ctx.lineWidth = 1;
       ctx.strokeRect(anchorX - width / 2, boxY, width, S * 0.045);
       ctx.fillText(label, anchorX, boxY + S * 0.031);
