@@ -19,6 +19,8 @@ const STEP = 1 / 60;
 const ROWS = [0.26, 0.5, 0.74];
 const ENDS = [0.8, 0.66, 0.84];
 const STEM_X = 0.22;
+const TINE_X1 = 0.42;
+const TINE_X2 = 0.78;
 
 let S = 0;
 let dpr = 1;
@@ -533,13 +535,25 @@ function tinePath(tine, start, length) {
   ctx.beginPath();
   ctx.moveTo(start, tine.y);
   ctx.bezierCurveTo(
-    start + length * 0.42, tine.y,
-    start + length * 0.78, tine.y + tine.offset * 0.48,
+    start + length * TINE_X1, tine.y,
+    start + length * TINE_X2, tine.y + tine.offset * 0.48,
     tine.end, tine.y + tine.offset,
   );
 }
 
-function tineYAt(tine, t) {
+function tineYAt(tine, xRatio) {
+  if (xRatio <= 0) return tine.y;
+  if (xRatio >= 1) return tine.y + tine.offset;
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 10; step += 1) {
+    const t = (low + high) / 2;
+    const u = 1 - t;
+    const curveX = 3 * u * u * t * TINE_X1 + 3 * u * t * t * TINE_X2 + t * t * t;
+    if (curveX < xRatio) low = t;
+    else high = t;
+  }
+  const t = (low + high) / 2;
   const bend = 1.44 * (1 - t) * t * t + t * t * t;
   return tine.y + tine.offset * bend;
 }
