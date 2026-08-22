@@ -23,7 +23,16 @@ const ODE = [
   [2, 0, 1], [2, 0, 1], [2, 2, 1], [0, 0, 1],
   [0, 0, 1], [2, 2, 1], [2, 2, 2],
 ];
-const ODE_TEMPO = 96;
+const NOCTURNE = [
+  [2, 0, 0.5],
+  [1, 2, 1.5], [1, 2, 0.5], [1, 0, 0.5], [1, 2, 0.5], [1, 0, 1.5], [0, 1, 1], [2, 0, 0.5],
+  [1, 2, 1], [2, 2, 0.5], [1, 5, 1], [1, 2, 0.5], [1, 5, 1.5], [1, 4, 1], [1, 2, 0.5],
+  [1, 0, 1.5], [1, 2, 1], [0, 0, 0.5], [0, 1, 1.5], [2, 2, 1.5],
+];
+const MELODIES = {
+  ode: { label: 'ода', title: 'ода к радости', complete: 'ода к радости сыграна', tempo: 96, notes: ODE },
+  nocturne: { label: 'ноктюрн', title: 'ноктюрн', complete: 'ноктюрн сыгран', tempo: 66, notes: NOCTURNE },
+};
 
 const PARAMS = {
   decay: 0.987,
@@ -32,6 +41,7 @@ const PARAMS = {
   frets: true,
   demo: false,
   lesson: false,
+  melody: 'ode',
 };
 
 function clamp(value, min, max) {
@@ -70,11 +80,16 @@ export function mountE(workspace) {
   let audioContext = null;
   let audioMaster = null;
   let fretsButton = null;
+  let melodyButton = null;
   let demoButton = null;
   let lessonButton = null;
 
   function noteName(index, semitones = 0) {
     return NOTE_NAMES[mod(NOTE_CLASSES[index] + Math.round(semitones), 12)];
+  }
+
+  function currentMelody() {
+    return MELODIES[params.melody];
   }
 
   function nearRow(y, radius = 0.07) {
@@ -107,22 +122,22 @@ export function mountE(workspace) {
 
   function lessonTarget() {
     if (!state.lesson || state.lesson.complete) return null;
-    const [index, semitones] = ODE[state.lesson.index];
+    const [index, semitones] = currentMelody().notes[state.lesson.index];
     return { index, semitones, fret: fretForSemitone(index, semitones) };
   }
 
   function updateHint() {
     if (state.lesson?.complete) {
-      hint.textContent = 'ода к радости сыграна';
+      hint.textContent = currentMelody().complete;
       return;
     }
     if (state.lesson) {
       const target = lessonTarget();
-      hint.textContent = `ода · ${state.lesson.index + 1} / ${ODE.length} · сыграй ${noteName(target.index, target.semitones)}`;
+      hint.textContent = `${currentMelody().label} · ${state.lesson.index + 1} / ${currentMelody().notes.length} · сыграй ${noteName(target.index, target.semitones)}`;
       return;
     }
     if (state.demo) {
-      hint.textContent = 'ода играет сама · коснись, чтобы остановить';
+      hint.textContent = `авто · ${currentMelody().title} · коснись, чтобы остановить`;
       return;
     }
     hint.textContent = params.frets
@@ -277,7 +292,7 @@ export function mountE(workspace) {
     const target = lessonTarget();
     if (!target || index !== target.index || semitones !== target.semitones) return;
     state.lesson.index += 1;
-    if (state.lesson.index >= ODE.length) {
+    if (state.lesson.index >= currentMelody().notes.length) {
       state.lesson.complete = true;
       state.lesson.celebration = 1;
       setSwitch(lessonButton, 'lesson', false);
@@ -296,8 +311,9 @@ export function mountE(workspace) {
 
   function beginDemoNote() {
     const demo = state.demo;
-    const [index, semitones, beats] = ODE[demo.index];
-    const duration = (60 / ODE_TEMPO) * beats;
+    const melody = currentMelody();
+    const [index, semitones, beats] = melody.notes[demo.index];
+    const duration = (60 / melody.tempo) * beats;
     const bent = semitones > 0 && !params.frets;
     const direction = index === 2 ? -1 : 1;
     const target = direction * (semitones / params.bendRange) * S * 0.14;
@@ -358,7 +374,7 @@ export function mountE(workspace) {
     releaseDemoTine();
     demo.current = null;
     demo.index += 1;
-    if (demo.index >= ODE.length) {
+    if (demo.index >= currentMelody().notes.length) {
       demo.index = 0;
       demo.pause = 1.1;
     }
@@ -558,7 +574,7 @@ export function mountE(workspace) {
         ctx.font = `${Math.max(9, S * 0.015)}px 'DM Mono', monospace`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(`${noteName(index, target.semitones)} · ${state.lesson.index + 1}/${ODE.length}`, start + length * t, tineYAt(tine, t) - S * 0.024);
+        ctx.fillText(`${noteName(index, target.semitones)} · ${state.lesson.index + 1}/${currentMelody().notes.length}`, start + length * t, tineYAt(tine, t) - S * 0.024);
       }
 
       if (tine.held) {
@@ -756,7 +772,21 @@ export function mountE(workspace) {
     updateHint();
   });
 
-  demoButton = makeSwitch('ода сама', 'demo', (enabled) => {
+  melodyButton = document.createElement('button');
+  melodyButton.type = 'button';
+  melodyButton.className = 'sketch-action';
+  melodyButton.textContent = `мелодия · ${currentMelody().label}`;
+  melodyButton.addEventListener('click', () => {
+    setSwitch(demoButton, 'demo', false);
+    stopDemo();
+    stopLesson();
+    params.melody = params.melody === 'ode' ? 'nocturne' : 'ode';
+    melodyButton.textContent = `мелодия · ${currentMelody().label}`;
+    updateHint();
+  });
+  panel.append(melodyButton);
+
+  demoButton = makeSwitch('авто', 'demo', (enabled) => {
     if (enabled) startDemo();
     else {
       setSwitch(demoButton, 'demo', false);
