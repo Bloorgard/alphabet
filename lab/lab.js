@@ -362,7 +362,9 @@ function labBuildVariants(names) {
 
 /* ---------- ввод ---------- */
 
+/* До startLab режимов ещё нет, а указатель над сценой уже ходит. */
 canvas.addEventListener('pointerdown', (event) => {
+  if (!labStarted) return;
   track(event);
   pointer.px = pointer.x;
   pointer.py = pointer.y;
@@ -372,11 +374,13 @@ canvas.addEventListener('pointerdown', (event) => {
 });
 
 canvas.addEventListener('pointermove', (event) => {
+  if (!labStarted) return;
   track(event);
   labModes[current].onMove?.(event);
 });
 
 window.addEventListener('pointerup', () => {
+  if (!labStarted) return;
   pointer.down = false;
   labModes[current].onUp?.();
 });

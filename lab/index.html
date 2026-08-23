@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Полигоны — буквальный челлендж</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lab.css" id="lab-css">
+<script>
+  const labStamp = Date.now();
+  document.getElementById('lab-css').href = `lab.css?t=${labStamp}`;
+</script>
+<style>
+  body.index {
+    padding: 18px 20px 60px;
+    text-transform: uppercase;
+  }
+
+  .index-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 18px;
+    flex-wrap: wrap;
+    margin-bottom: 26px;
+  }
+
+  .index-head b {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: -.02em;
+    text-transform: none;
+  }
+
+  .index-head a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+
+  .index-head a:hover { color: var(--ink); }
+
+  .index-head .count { color: var(--muted); }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 20px;
+  }
+
+  .card {
+    display: grid;
+    gap: 10px;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .frame {
+    position: relative;
+    aspect-ratio: 1;
+    border: 1px solid var(--line);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background:
+      linear-gradient(90deg, transparent 49.9%, var(--grid) 50%, transparent 50.1%),
+      linear-gradient(transparent 49.9%, var(--grid) 50%, transparent 50.1%);
+  }
+
+  .card:hover .frame { border-color: var(--ink); }
+
+  /* Плитка не перехватывает клик: карточка целиком остаётся ссылкой. */
+  .frame iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    pointer-events: none;
+  }
+
+  /* Полигон на старом шелле плитку не умеет — вместо неё сама буква. */
+  .glyph {
+    font-size: 76px;
+    font-weight: 500;
+    color: var(--line);
+    text-transform: none;
+    user-select: none;
+  }
+
+  .meta {
+    display: grid;
+    gap: 5px;
+  }
+
+  .head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .head b {
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: -.02em;
+  }
+
+  .head .date { margin-left: auto; color: var(--muted); }
+
+  .list, .chosen {
+    color: var(--muted);
+    text-transform: none;
+    letter-spacing: .02em;
+  }
+
+  .chosen b {
+    font-weight: 400;
+    color: var(--ink);
+  }
+
+  @media (max-width: 760px) {
+    body.index { padding: 12px 12px 40px; }
+    .cards { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+  }
+</style>
+</head>
+<body class="index">
+
+<header class="index-head">
+  <b>Полигоны</b>
+  <span class="count" id="count"></span>
+  <a href="../">на алфавит</a>
+</header>
+
+<main class="cards" id="cards"></main>
+
+<script src="labs.js"></script>
+<script>
+  /* Тот же счёт, что и на сайте: старт с А, дальше по букве в день. */
+  const LETTERS = [
+    'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',
+    'К', 'Л', 'М', 'Н', 'О', 'П', 'Р', 'С', 'Т', 'У', 'Ф', 'Х',
+    'Ц', 'Ч', 'Ш', 'Щ', 'Ъ', 'Ы', 'Ь', 'Э', 'Ю', 'Я',
+  ];
+  const START = Date.UTC(2026, 7, 17);
+  const DAY = 86400000;
+
+  const dateOf = (letter) => new Date(START + LETTERS.indexOf(letter) * DAY)
+    .toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+  const cards = document.getElementById('cards');
+  const order = [...LABS].sort((a, b) => LETTERS.indexOf(a.letter) - LETTERS.indexOf(b.letter));
+
+  document.getElementById('count').textContent = `${LABS.length} из ${LETTERS.length} букв`;
+
+  for (const lab of order) {
+    const card = document.createElement('a');
+    card.className = 'card';
+    card.href = `${lab.slug}.html`;
+
+    const frame = document.createElement('div');
+    frame.className = 'frame';
+    if (lab.tile) frame.dataset.tile = lab.slug;
+    else frame.innerHTML = `<span class="glyph">${lab.letter}</span>`;
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `
+      <span class="head"><b>${lab.letter} · ${lab.title}</b><span class="date">${dateOf(lab.letter)}</span></span>
+      <span class="list">${lab.mechanics.join(' · ')}</span>
+      <span class="chosen">${lab.chosen ? `в букве: <b>${lab.chosen}</b>` : 'механика ещё не выбрана'}</span>
+    `;
+
+    card.append(frame, meta);
+    cards.append(card);
+  }
+
+  /* Плитка грузится, когда доезжает до экрана, и стоит замершей.
+     Живёт только под курсором — тридцати трёх сцен разом не бывает. */
+  const wake = (frame, run) => {
+    const view = frame.querySelector('iframe')?.contentWindow;
+    view?.postMessage(run ? 'lab:run' : 'lab:hold', '*');
+  };
+
+  const watcher = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const frame = entry.target;
+      const view = document.createElement('iframe');
+      view.loading = 'lazy';
+      view.setAttribute('tabindex', '-1');
+      view.setAttribute('aria-hidden', 'true');
+      view.src = `${frame.dataset.tile}.html?bare`;
+      frame.append(view);
+      watcher.unobserve(frame);
+    }
+  }, { rootMargin: '200px' });
+
+  for (const frame of document.querySelectorAll('[data-tile]')) {
+    watcher.observe(frame);
+    const card = frame.closest('.card');
+    card.addEventListener('pointerenter', () => wake(frame, true));
+    card.addEventListener('pointerleave', () => wake(frame, false));
+  }
+</script>
+</body>
+</html>
