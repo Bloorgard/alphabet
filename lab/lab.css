@@ -1,0 +1,201 @@
+/* Шелл полигона. Один на все буквы, подключается стабом lab/<буква>.html. */
+
+:root {
+  --paper: #f1ede5;
+  --ink: #161616;
+  --muted: #8b877f;
+  --line: rgba(22, 22, 22, .18);
+  --grid: rgba(22, 22, 22, .035);
+  --red: #e0210f;
+  --mono: 'DM Mono', 'SFMono-Regular', ui-monospace, monospace;
+}
+
+/* Тёмная сцена — та же, на которой буква живёт на сайте. «Бумага» и «чернила»
+   меняются местами, поэтому все правила ниже работают без изменений. */
+body[data-ground="ink"] {
+  --paper: #161616;
+  --ink: #f1ede5;
+  --muted: rgba(241, 237, 229, .45);
+  --line: rgba(241, 237, 229, .18);
+  --grid: rgba(241, 237, 229, .05);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  padding: 18px 20px;
+  overflow-x: hidden;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 11px/1.45 var(--mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+button, input { font: inherit; }
+
+header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: start;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.identity b {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -.02em;
+  text-transform: none;
+}
+
+.back {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.back:hover { color: var(--ink); }
+
+.variant, .modes, .tools, .globals {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.modes {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.globals { white-space: nowrap; }
+
+button {
+  border: 1px solid var(--line);
+  padding: 6px 9px;
+  background: transparent;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--ink); color: var(--ink); }
+
+button[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.variant button {
+  width: 30px;
+  padding-inline: 0;
+  font-size: 13px;
+}
+
+.stage-wrap {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+.stage {
+  position: relative;
+  width: min(74vh, 100%);
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(90deg, transparent 49.9%, var(--grid) 50%, transparent 50.1%),
+    linear-gradient(transparent 49.9%, var(--grid) 50%, transparent 50.1%);
+}
+
+.stage::before {
+  content: attr(data-index);
+  position: absolute;
+  z-index: 1;
+  top: 9px;
+  left: 11px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 38%);
+  gap: 20px;
+  align-items: end;
+  color: var(--muted);
+}
+
+.tools {
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.tools label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tools input[type="range"] {
+  width: 96px;
+  accent-color: var(--ink);
+}
+
+.tools output { min-width: 30px; }
+
+#note {
+  max-width: 650px;
+  justify-self: end;
+  text-align: right;
+  letter-spacing: .02em;
+  text-transform: none;
+}
+
+/* Голый режим: одна сцена в кадре, для плиток на перечне. */
+body[data-bare] {
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+}
+
+body[data-bare] header,
+body[data-bare] footer { display: none; }
+
+body[data-bare] .stage {
+  width: min(100%, 100vh);
+  border: 0;
+  background: none;
+}
+
+body[data-bare] .stage::before { display: none; }
+
+@media (max-width: 760px) {
+  body { padding: 12px; gap: 12px; }
+  header { grid-template-columns: 1fr; gap: 10px; }
+  .modes { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 3px; }
+  .modes button { flex: 0 0 auto; }
+  .stage { width: min(100%, 70vh); }
+  footer { grid-template-columns: 1fr; }
+  #note { justify-self: start; text-align: left; }
+}
