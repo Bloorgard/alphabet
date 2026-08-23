@@ -824,7 +824,8 @@ function wheelContact(index, throttle = 0, brake = 0) {
   modeState.wheelDrop[index] = 0;
   bike.wheelsOn[index] = drop > 0;
   if (drop <= 0) return false;
-  modeState.wheelDrop[index] = Math.min(drop, radius);
+  /* колесо всегда катится по поверхности: проседает корпус, а не оно */
+  modeState.wheelDrop[index] = drop;
 
   const n = trackNormal(point.x);
   /* на склоне вертикальный зазор длиннее настоящего — меряем по нормали */
