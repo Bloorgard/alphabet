@@ -98,7 +98,7 @@ const BEETLE_ARM = Math.hypot(BEETLE_ARM_X, BEETLE_ARM_Y);
 const BEETLE_WIDTH = 0.05;
 const BEETLE_MARK_LIFE = 12;
 const BEETLE_MARK_FADE = 4;
-const BEETLE_SETTLE_DELAY = 5;
+const BEETLE_SETTLE_DELAY = 3;
 const BEETLE_SETTLE_EPSILON = 0.003;
 const BEETLE_UR = Math.atan2(-BEETLE_ARM_Y, BEETLE_ARM_X);
 const BEETLE_UL = Math.atan2(-BEETLE_ARM_Y, -BEETLE_ARM_X);
@@ -218,7 +218,7 @@ function stepLegs() {
 
 MODES.beetle = {
   label: 'жук',
-  note: 'Буква идёт за курсором: стойка — тело, боковые ломаные — лапы. «Скорость» ускоряет и тело, и перебор лап; их вылет задаёт только «шаг». Красным остаётся след. Через пять секунд тишины лапы возвращаются в спокойное положение.',
+  note: 'Буква идёт за курсором: стойка — тело, боковые ломаные — лапы. «Скорость» ускоряет и тело, и перебор лап; их вылет задаёт только «шаг», «угасание» — скорость исчезновения следа. Через три секунды тишины лапы возвращаются в спокойное положение.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'скорость', min: 0.05, max: 2.4, step: 0.01, value: 1.2 },
@@ -226,6 +226,7 @@ MODES.beetle = {
     { type: 'range', key: 'swing', label: 'перенос', min: 0.05, max: 0.5, step: 0.01, value: 0.16 },
     { type: 'range', key: 'lead', label: 'упреждение', min: 0, max: 0.5, step: 0.01, value: 0.14 },
     { type: 'range', key: 'knee', label: 'излом', min: 0, max: 0.1, step: 0.005, value: 0 },
+    { type: 'range', key: 'fade', label: 'угасание', min: 0.25, max: 3, step: 0.05, value: 1 },
     { type: 'toggle', key: 'six', label: 'шесть лап', value: false },
     { type: 'toggle', key: 'turn', label: 'поворот', value: true },
     { type: 'toggle', key: 'flee', label: 'от курсора', value: false },
@@ -259,9 +260,10 @@ MODES.beetle = {
     stepLegs();
 
     const marksVisible = on('marks');
+    const fadeSpeed = num('fade');
     if (marksVisible) modeState.marksOpacity = 1;
-    else modeState.marksOpacity *= Math.exp(-STEP / 1.4);
-    modeState.marks.forEach((mark) => { mark.age += STEP; });
+    else modeState.marksOpacity *= Math.exp((-STEP * fadeSpeed) / 1.4);
+    modeState.marks.forEach((mark) => { mark.age += STEP * fadeSpeed; });
     modeState.marks = modeState.marks.filter((mark) => mark.age < BEETLE_MARK_LIFE);
     if (!marksVisible && modeState.marksOpacity < 0.002) modeState.marks = [];
   },
