@@ -55,7 +55,7 @@ export function mountYo(workspace) {
   const touches = new Map();
   const bike = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, omega: 0, wheelsOn: [false, false] };
   const state = {
-    phase: 'ride',
+    phase: 'intro',
     timer: 0,
     runStart: 0,
     best: 0,
@@ -153,17 +153,18 @@ export function mountYo(workspace) {
     return ground(x) - (BODY_H / 2 + Math.max(WHEEL_DROP, wheelR() * 1.15) + wheelR());
   }
 
-  function restart(keepPlace = false) {
-    const from = keepPlace ? bike.x : 0;
-    bike.x = from;
-    bike.y = standHeight(from);
+  /* первый кадр — не игра, а обычная Ё, лежащая точками вверх:
+     она встаёт на них только после первого касания */
+  function restart() {
+    bike.x = 0;
+    bike.y = ground(0) - BODY_H / 2 - STROKE * 2;
     bike.vx = 0;
     bike.vy = 0;
-    bike.angle = 0;
+    bike.angle = Math.PI;
     bike.omega = 0;
-    state.phase = 'ride';
+    state.phase = 'intro';
     state.timer = 0;
-    state.runStart = from;
+    state.runStart = 0;
     state.camY = bike.y;
     state.wheelDrop = [0, 0];
   }
@@ -250,8 +251,10 @@ export function mountYo(workspace) {
     bike.y += bike.vy * dt;
     bike.angle += bike.omega * dt;
 
+    /* допуск в толщину линии: касание мельче неё не видно глазу,
+       и краш по нему читается как несправедливый */
     for (const corner of corners()) {
-      if (corner.y > ground(corner.x)) {
+      if (corner.y > ground(corner.x) + STROKE) {
         state.phase = 'fall';
         state.timer = 0;
         state.best = Math.max(state.best, distance());
@@ -336,7 +339,7 @@ export function mountYo(workspace) {
   }
 
   function revive() {
-    if (state.phase !== 'rest') return false;
+    if (state.phase !== 'rest' && state.phase !== 'intro') return false;
     state.phase = 'revive';
     state.timer = 0;
     state.revive = {
@@ -359,7 +362,7 @@ export function mountYo(workspace) {
         else break;
       }
       dt = STEP;
-    } else if (state.phase === 'rest') stepRest();
+    } else if (state.phase === 'rest' || state.phase === 'intro') stepRest();
     else stepRevive();
     state.camY += (bike.y - state.camY) * 0.06;
   }
@@ -419,7 +422,7 @@ export function mountYo(workspace) {
       ctx.fill();
     });
 
-    if (!params.digits) return;
+    if (!params.digits || state.phase === 'intro') return;
     const anchorX = (bike.x - camX) * S;
     const anchorY = (bike.y - camY) * S;
     const above = Math.max(0.12, wheelR() + 0.09);
@@ -520,6 +523,10 @@ export function mountYo(workspace) {
 
   function updateHint() {
     const byTouch = state.touched || narrow.matches;
+    if (state.phase === 'intro') {
+      hint.textContent = byTouch ? 'коснись — буква поедет' : 'клик или пробел — буква поедет';
+      return;
+    }
     if (state.phase === 'rest') {
       hint.textContent = byTouch ? 'коснись — буква встанет' : 'пробел или клик — буква встанет';
       return;

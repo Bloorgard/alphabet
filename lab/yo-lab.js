@@ -873,8 +873,10 @@ function stepTrackRide() {
   bike.y += bike.vy * tDt;
   bike.angle += bike.omega * tDt;
 
+  /* допуск в толщину линии: касание мельче неё не видно глазу,
+     и краш по нему читается как несправедливый */
   for (const corner of bodyCorners()) {
-    if (corner.y > trackAt(corner.x)) {
+    if (corner.y > trackAt(corner.x) + T_STROKE) {
       modeState.phase = 'fall';
       modeState.timer = 0;
       modeState.best = Math.max(modeState.best, runDistance());

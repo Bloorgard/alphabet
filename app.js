@@ -4,7 +4,7 @@ import { mountV } from './letters/v.js';
 import { mountG } from './letters/g.js';
 import { mountD } from './letters/d.js';
 import { mountE } from './letters/e.js?v=3';
-import { mountYo } from './letters/yo.js?v=5';
+import { mountYo } from './letters/yo.js?v=6';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',
