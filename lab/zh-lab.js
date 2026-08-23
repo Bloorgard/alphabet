@@ -231,15 +231,15 @@ MODES.beetle = {
     const dist = Math.hypot(dx, dy) || 1;
     /* подходя к цели, жук замедляется — иначе топчется на месте рывками */
     const want = on('flee') ? speed : Math.min(speed, dist * 2.4);
-    b.vx += ((dx / dist) * want - b.vx) * 0.12;
-    b.vy += ((dy / dist) * want - b.vy) * 0.12;
+    b.vx += ((dx / dist) * want - b.vx) * 0.22;
+    b.vy += ((dy / dist) * want - b.vy) * 0.22;
     b.x = clamp(b.x + b.vx * STEP, 0.14, 0.86);
     b.y = clamp(b.y + b.vy * STEP, 0.14, 0.86);
 
     const moving = Math.hypot(b.vx, b.vy) > 0.03;
     const goal = on('turn') && moving ? wrap(Math.atan2(b.vy, b.vx) - UP) : 0;
     const turn = wrap(goal - b.rot);
-    b.rot = wrap(b.rot + clamp(turn, -2.4 * STEP, 2.4 * STEP));
+    b.rot = wrap(b.rot + clamp(turn, -4.8 * STEP, 4.8 * STEP));
 
     stepLegs();
   },
