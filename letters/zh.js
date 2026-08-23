@@ -26,23 +26,12 @@ const LEGS_4 = [
   { a: DL, len: ARM, group: 0 },
 ];
 
-const LEGS_6 = [
-  { a: UR, len: ARM, group: 0 },
-  { a: UL, len: ARM, group: 1 },
-  { a: 0, len: ARM_X, group: 1 },
-  { a: Math.PI, len: ARM_X, group: 0 },
-  { a: DR, len: ARM, group: 0 },
-  { a: DL, len: ARM, group: 1 },
-];
-
 const PARAMS = {
   speed: 1.2,
   stride: 0.12,
   swing: 0.16,
   lead: 0.14,
-  knee: 0,
   fade: 1,
-  six: false,
   turn: true,
   flee: false,
   marks: true,
@@ -53,15 +42,15 @@ const CONTROLS = [
   { key: 'stride', label: 'шаг', min: 0.012, max: 0.24, step: 0.004 },
   { key: 'swing', label: 'перенос', min: 0.05, max: 0.5, step: 0.01 },
   { key: 'lead', label: 'упреждение', min: 0, max: 0.5, step: 0.01 },
-  { key: 'knee', label: 'излом', min: 0, max: 0.1, step: 0.005 },
-  { key: 'fade', label: 'угасание', min: 0.25, max: 3, step: 0.05 },
 ];
 
+const FADE_CONTROL = {
+  key: 'fade', label: 'угасание следов', min: 0.25, max: 3, step: 0.05,
+};
+
 const SWITCHES = [
-  { key: 'six', label: 'шесть лап' },
   { key: 'turn', label: 'поворот' },
   { key: 'flee', label: 'от курсора' },
-  { key: 'marks', label: 'след' },
 ];
 
 function clamp(value, min, max) {
@@ -99,14 +88,6 @@ export function mountZh(workspace) {
     };
   }
 
-  function toBody(px, py) {
-    const c = Math.cos(-body.rot);
-    const s = Math.sin(-body.rot);
-    const dx = px - body.x;
-    const dy = py - body.y;
-    return { x: dx * c - dy * s, y: dx * s + dy * c };
-  }
-
   function restPoint(leg) {
     return toWorld(Math.cos(leg.a) * leg.len, Math.sin(leg.a) * leg.len);
   }
@@ -122,7 +103,7 @@ export function mountZh(workspace) {
 
   function reset() {
     Object.assign(body, { x: 0.5, y: 0.5, rot: 0, vx: 0, vy: 0 });
-    legs = (params.six ? LEGS_6 : LEGS_4).map((leg) => ({
+    legs = LEGS_4.map((leg) => ({
       ...leg,
       foot: { x: 0, y: 0 },
       swing: -1,
@@ -239,29 +220,8 @@ export function mountZh(workspace) {
     line(top.x, top.y, bottom.x, bottom.y);
 
     for (const leg of legs) {
-      const side = Math.sign(Math.cos(leg.a) || 1);
       const hip = hipPoint(leg);
-      if (params.knee <= 0.001) {
-        line(hip.x, hip.y, leg.foot.x, leg.foot.y);
-        continue;
-      }
-
-      const foot = toBody(leg.foot.x, leg.foot.y);
-      const hipX = side * HIP;
-      const dx = foot.x - hipX;
-      const length = Math.hypot(dx, foot.y) || 1;
-      let px = -foot.y / length;
-      let py = dx / length;
-      if (px * side < 0) {
-        px = -px;
-        py = -py;
-      }
-      const bend = toWorld(
-        (hipX + foot.x) / 2 + px * params.knee,
-        foot.y / 2 + py * params.knee,
-      );
-      line(hip.x, hip.y, bend.x, bend.y);
-      line(bend.x, bend.y, leg.foot.x, leg.foot.y);
+      line(hip.x, hip.y, leg.foot.x, leg.foot.y);
     }
   }
 
@@ -306,7 +266,7 @@ export function mountZh(workspace) {
   panel.style.maxHeight = 'calc(100% - 64px)';
   panel.style.overflowY = 'auto';
 
-  for (const control of CONTROLS) {
+  function addRange(control) {
     const label = document.createElement('label');
     label.textContent = control.label;
     const input = document.createElement('input');
@@ -322,7 +282,7 @@ export function mountZh(workspace) {
     panel.append(label);
   }
 
-  for (const item of SWITCHES) {
+  function addSwitch(item) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'sketch-switch';
@@ -331,21 +291,14 @@ export function mountZh(workspace) {
     button.addEventListener('click', () => {
       params[item.key] = !params[item.key];
       button.setAttribute('aria-pressed', String(params[item.key]));
-      if (item.key === 'six') reset();
     });
     panel.append(button);
   }
 
-  const note = document.createElement('p');
-  note.textContent = 'угасание: вправо — быстрее';
-  panel.append(note);
-
-  const again = document.createElement('button');
-  again.type = 'button';
-  again.className = 'sketch-action';
-  again.textContent = 'в центр';
-  again.addEventListener('click', reset);
-  panel.append(again);
+  for (const control of CONTROLS) addRange(control);
+  addSwitch({ key: 'marks', label: 'след' });
+  addRange(FADE_CONTROL);
+  for (const item of SWITCHES) addSwitch(item);
 
   const toggle = document.createElement('button');
   toggle.type = 'button';
