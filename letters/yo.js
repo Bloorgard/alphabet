@@ -489,7 +489,11 @@ export function mountYo(workspace) {
 
   function onKeyDown(event) {
     if (event.target instanceof Element && event.target.closest('input, textarea')) return;
-    if (event.key === 'p' || event.key === 'з') { toggle.click(); return; }
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      toggle.click();
+      return;
+    }
     if (event.code === 'Space') {
       event.preventDefault();
       revive();
@@ -614,7 +618,7 @@ export function mountYo(workspace) {
   toggle.type = 'button';
   toggle.className = 'sketch-toggle';
   toggle.dataset.letterLayer = '';
-  toggle.textContent = 'параметры';
+  toggle.textContent = 'параметры (tab)';
   toggle.setAttribute('aria-expanded', 'false');
   toggle.addEventListener('click', () => {
     panel.hidden = !panel.hidden;

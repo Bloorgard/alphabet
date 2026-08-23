@@ -1,10 +1,10 @@
-import { mountA } from './letters/a.js';
-import { mountB } from './letters/b.js';
-import { mountV } from './letters/v.js';
-import { mountG } from './letters/g.js';
-import { mountD } from './letters/d.js';
-import { mountE } from './letters/e.js?v=3';
-import { mountYo } from './letters/yo.js?v=7';
+import { mountA } from './letters/a.js?v=2';
+import { mountB } from './letters/b.js?v=2';
+import { mountV } from './letters/v.js?v=2';
+import { mountG } from './letters/g.js?v=2';
+import { mountD } from './letters/d.js?v=2';
+import { mountE } from './letters/e.js?v=4';
+import { mountYo } from './letters/yo.js?v=8';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',

@@ -401,7 +401,7 @@ export function mountD(workspace) {
   toggle.type = 'button';
   toggle.className = 'sketch-toggle';
   toggle.dataset.letterLayer = '';
-  toggle.textContent = 'параметры';
+  toggle.textContent = 'параметры (tab)';
   toggle.setAttribute('aria-expanded', 'false');
   toggle.addEventListener('click', () => {
     panel.hidden = !panel.hidden;
@@ -410,8 +410,9 @@ export function mountD(workspace) {
   workspace.append(panel, toggle);
 
   function onKeyDown(event) {
-    if (event.key !== 'p' && event.key !== 'з') return;
+    if (event.key !== 'Tab') return;
     if (event.target.closest('input, textarea')) return;
+    event.preventDefault();
     toggle.click();
   }
 
