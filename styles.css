@@ -3,6 +3,7 @@
   --ink: #161616;
   --muted: #8b877f;
   --line: rgba(22, 22, 22, .14);
+  --red: #e0210f;
   --mono: 'DM Mono', monospace;
   --sans: 'Manrope', system-ui, sans-serif;
   --gap: 24px;
@@ -35,7 +36,8 @@ h1, h2, p { margin: 0; }
 h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; letter-spacing: -.02em; font-weight: 600; }
 .intro-text { max-width: 400px; color: var(--muted); font-size: 14px; line-height: 1.6; }
 
-.alphabet-section { border-top: 1px solid var(--line); }
+.alphabet-section { position: relative; border-top: 1px solid var(--line); }
+.alphabet-section::before { content: ''; position: absolute; top: -1px; left: 0; width: var(--alphabet-progress, 0%); height: 1px; background: var(--red); pointer-events: none; transition: width .5s ease; }
 .section-heading { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 0 20px; }
 .section-heading h2 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
 .section-heading p { color: var(--muted); }

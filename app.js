@@ -30,6 +30,7 @@ const READY = new Map([
 ]);
 
 const grid = document.querySelector('#letter-grid');
+const alphabetSection = document.querySelector('.alphabet-section');
 const dialog = document.querySelector('#letter-dialog');
 const workspace = document.querySelector('#letter-workspace');
 const workspaceLabel = document.querySelector('#workspace-label');
@@ -114,6 +115,7 @@ function renderGrid() {
       </button>`;
   }).join('');
   document.querySelector('#ready-count').textContent = READY.size;
+  alphabetSection.style.setProperty('--alphabet-progress', `${(READY.size / LETTERS.length) * 100}%`);
 }
 
 function openLetter(letter) {
