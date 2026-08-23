@@ -54,6 +54,7 @@ let audioMaster = null;
 function wakeAudio() {
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (!AudioContext) return null;
+  if (navigator.audioSession) navigator.audioSession.type = 'playback';
   if (!audioContext) {
     audioContext = new AudioContext();
     audioMaster = audioContext.createGain();
