@@ -955,31 +955,23 @@ MODES.field = {
   },
 };
 
-/* ---------- 6. калейдоскоп: один штрих на шесть лучей ---------- */
+/* ---------- 6. калейдоскоп: вертикаль — главная ось зеркала ---------- */
 
-const KALEIDO_ORDER = [3, 0, 2, 4, 1, 5];
+const KALEIDO_STEP = Math.PI / 3;
+const KALEIDO_START = -Math.PI / 2;
+const KALEIDO_COPIES = [
+  { turn: 0, mirror: false },
+  { turn: 0, mirror: true },
+  { turn: 1, mirror: false },
+  { turn: 2, mirror: true },
+  { turn: 2, mirror: false },
+  { turn: 1, mirror: true },
+];
 
-function kaleidoSector(index) {
-  const rank = KALEIDO_ORDER.indexOf(index);
-  const angle = SKELETON[index].a;
-  let previous = SKELETON[KALEIDO_ORDER[(rank + 5) % 6]].a;
-  let next = SKELETON[KALEIDO_ORDER[(rank + 1) % 6]].a;
-  while (previous >= angle) previous -= Math.PI * 2;
-  while (next <= angle) next += Math.PI * 2;
-  return { rank, angle, negative: (angle - previous) / 2, positive: (next - angle) / 2 };
-}
-
-function nearestKaleidoRay() {
-  const angle = Math.atan2(pointer.y - 0.5, pointer.x - 0.5);
-  let picked = 0;
-  let nearest = Infinity;
-  SKELETON.forEach((ray, index) => {
-    const distance = Math.abs(wrap(angle - ray.a));
-    if (distance >= nearest) return;
-    nearest = distance;
-    picked = index;
-  });
-  return picked;
+function kaleidoSectorAt(x, y) {
+  const angle = Math.atan2(y - 0.5, x - 0.5);
+  const normalized = (angle - KALEIDO_START + Math.PI * 2) % (Math.PI * 2);
+  return Math.min(5, Math.floor(normalized / KALEIDO_STEP));
 }
 
 function kaleidoReset() {
@@ -996,18 +988,12 @@ function addKaleidoPoint() {
   const previous = stroke.points[stroke.points.length - 1];
   if (previous && Math.hypot(pointer.x - previous.x, pointer.y - previous.y) < 0.004) return;
 
-  const ray = SKELETON[stroke.source];
-  const sector = kaleidoSector(stroke.source);
   const dx = pointer.x - 0.5;
   const dy = pointer.y - 0.5;
   const distance = Math.hypot(dx, dy);
-  const offset = wrap(Math.atan2(dy, dx) - ray.a);
-  const span = offset < 0 ? sector.negative : sector.positive;
   stroke.points.push({
     x: pointer.x,
     y: pointer.y,
-    r: Math.min(1.75, distance / ray.len),
-    u: clamp(offset / span, -1, 1),
     time: modeState.clock,
   });
   if (stroke.points.length > 280) stroke.points.shift();
@@ -1018,41 +1004,36 @@ function addKaleidoPoint() {
   }
 }
 
-function mapKaleidoPoint(point, stroke, target) {
-  const sourceRank = kaleidoSector(stroke.source).rank;
-  const targetSector = kaleidoSector(target);
-  const step = (targetSector.rank - sourceRank + 6) % 6;
-  const u = on('mirror') && step % 2 ? -point.u : point.u;
-  const span = u < 0 ? targetSector.negative : targetSector.positive;
-  const angle = SKELETON[target].a + u * span;
-  const radius = point.r * SKELETON[target].len;
-  return { x: 0.5 + Math.cos(angle) * radius, y: 0.5 + Math.sin(angle) * radius };
+function mapKaleidoPoint(point, copy) {
+  const transform = KALEIDO_COPIES[copy];
+  let dx = point.x - 0.5;
+  const dy = point.y - 0.5;
+  if (transform.mirror) dx = -dx;
+  const angle = transform.turn * Math.PI * 2 / 3;
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  return { x: 0.5 + dx * c - dy * s, y: 0.5 + dx * s + dy * c };
 }
 
 function drawKaleidoGuides() {
-  KALEIDO_ORDER.forEach((index) => {
-    const sector = kaleidoSector(index);
-    const boundary = sector.angle - sector.negative;
+  for (let index = 0; index < 6; index += 1) {
+    const boundary = KALEIDO_START + index * KALEIDO_STEP;
     line(0.5, 0.5, 0.5 + Math.cos(boundary) * 0.72, 0.5 + Math.sin(boundary) * 0.72, 'rgba(22,22,22,.075)', 0.0015);
-  });
+  }
 }
 
 function fillKaleidoSector(index) {
-  const sector = kaleidoSector(index);
+  const start = KALEIDO_START + index * KALEIDO_STEP;
   ctx.beginPath();
   ctx.moveTo(0.5 * S, 0.5 * S);
-  ctx.arc(0.5 * S, 0.5 * S, 0.72 * S, sector.angle - sector.negative, sector.angle + sector.positive);
+  ctx.arc(0.5 * S, 0.5 * S, 0.72 * S, start, start + KALEIDO_STEP);
   ctx.closePath();
   ctx.fillStyle = 'rgba(22,22,22,.025)';
   ctx.fill();
 }
 
-function drawKaleidoStroke(stroke, target) {
-  const sourceRank = kaleidoSector(stroke.source).rank;
-  const targetRank = kaleidoSector(target).rank;
-  const around = Math.abs(targetRank - sourceRank);
-  const distance = Math.min(around, 6 - around);
-  const delay = distance * num('lag');
+function drawKaleidoStroke(stroke, copy) {
+  const delay = Math.floor(copy / 2) * num('lag');
   const life = num('life');
   const visible = stroke.points.filter((point) => point.time + delay <= modeState.clock);
   if (!visible.length) return;
@@ -1060,7 +1041,7 @@ function drawKaleidoStroke(stroke, target) {
   if (visible.length === 1) {
     const age = modeState.clock - visible[0].time - delay;
     const alpha = 0.72 * clamp(1 - age / life, 0, 1);
-    const point = mapKaleidoPoint(visible[0], stroke, target);
+    const point = mapKaleidoPoint(visible[0], copy);
     dot(point.x, point.y, `rgba(22,22,22,${alpha})`, num('brush') * 0.5);
     return;
   }
@@ -1069,28 +1050,27 @@ function drawKaleidoStroke(stroke, target) {
     const age = modeState.clock - visible[i].time - delay;
     const alpha = 0.72 * clamp(1 - age / life, 0, 1);
     if (alpha <= 0) continue;
-    const from = mapKaleidoPoint(visible[i - 1], stroke, target);
-    const to = mapKaleidoPoint(visible[i], stroke, target);
+    const from = mapKaleidoPoint(visible[i - 1], copy);
+    const to = mapKaleidoPoint(visible[i], copy);
     line(from.x, from.y, to.x, to.y, `rgba(22,22,22,${alpha})`, num('brush'));
   }
 }
 
 MODES.kaleido = {
   label: 'калейдоскоп',
-  note: 'Начни рисовать в любом секторе: первое касание выберет его, а штрих отразится в остальных пяти. Секторы привязаны к настоящим лучам «Ж», поэтому вертикаль остаётся короче диагоналей. Пересечение центра даёт красную вспышку.',
+  note: 'Начни рисовать в любом из шести равных секторов. Вертикаль «Ж» — главная ось: каждый штрих сразу получает точную зеркальную пару. Остальные пары приходят эхом после поворота на 120°. Пересечение центра даёт красную вспышку.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'brush', label: 'штрих', min: 0.002, max: 0.024, step: 0.001, value: 0.007 },
     { type: 'range', key: 'life', label: 'память', min: 1, max: 20, step: 0.5, value: 8 },
     { type: 'range', key: 'lag', label: 'эхо', min: 0, max: 0.2, step: 0.01, value: 0.04 },
-    { type: 'toggle', key: 'mirror', label: 'зеркало', value: true },
     { type: 'toggle', key: 'sectors', label: 'секторы', value: true },
     { type: 'toggle', key: 'ghost', label: 'форма', value: true },
     { type: 'button', label: 'смыть', action: () => kaleidoReset() },
   ],
   setup() { kaleidoReset(); },
   onDown() {
-    const stroke = { source: nearestKaleidoRay(), points: [] };
+    const stroke = { source: kaleidoSectorAt(pointer.x, pointer.y), points: [] };
     modeState.active = stroke;
     modeState.strokes.push(stroke);
     if (modeState.strokes.length > 24) modeState.strokes.shift();
@@ -1116,7 +1096,7 @@ MODES.kaleido = {
     if (on('sectors')) drawKaleidoGuides();
     if (on('ghost')) drawGhost();
     modeState.strokes.forEach((stroke) => {
-      KALEIDO_ORDER.forEach((target) => drawKaleidoStroke(stroke, target));
+      KALEIDO_COPIES.forEach((copy, index) => drawKaleidoStroke(stroke, index));
     });
 
     dot(0.5, 0.5, modeState.flare > 0 ? RED : INK, 0.006 + modeState.flare * 0.01);
@@ -1127,7 +1107,7 @@ MODES.kaleido = {
       ctx.lineWidth = 0.002 * S;
       ctx.stroke();
     }
-    const sector = modeState.active ? kaleidoSector(modeState.active.source).rank + 1 : 0;
+    const sector = modeState.active ? modeState.active.source + 1 : 0;
     drawStatus(sector ? `сектор ${sector} / 6` : `штрихов ${modeState.strokes.length}`, modeState.flare > 0);
   },
 };
