@@ -98,6 +98,8 @@ const BEETLE_ARM = Math.hypot(BEETLE_ARM_X, BEETLE_ARM_Y);
 const BEETLE_WIDTH = 0.05;
 const BEETLE_MARK_LIFE = 12;
 const BEETLE_MARK_FADE = 4;
+const BEETLE_SETTLE_DELAY = 120;
+const BEETLE_SETTLE_EPSILON = 0.003;
 const BEETLE_UR = Math.atan2(-BEETLE_ARM_Y, BEETLE_ARM_X);
 const BEETLE_UL = Math.atan2(-BEETLE_ARM_Y, -BEETLE_ARM_X);
 const BEETLE_DR = Math.atan2(BEETLE_ARM_Y, BEETLE_ARM_X);
@@ -155,14 +157,15 @@ function beetleReset() {
   modeState.legs.forEach((leg) => { leg.foot = restPoint(leg); });
   modeState.marks = [];
   modeState.marksOpacity = on('marks') ? 1 : 0;
+  modeState.idle = 0;
 }
 
-function liftGroup(group) {
+function liftGroup(group, settling = false) {
   const lead = num('lead');
   const stride = num('stride');
   const b = modeState.body;
   const speed = Math.hypot(b.vx, b.vy);
-  const ahead = lead * stride * 4;
+  const ahead = settling ? 0 : lead * stride * 4;
   const dx = speed ? b.vx / speed * ahead : 0;
   const dy = speed ? b.vy / speed * ahead : 0;
   modeState.legs.forEach((leg) => {
@@ -181,10 +184,19 @@ function stepLegs() {
   const legs = modeState.legs;
 
   if (!legs.some((leg) => leg.swing >= 0)) {
-    for (const group of [0, 1]) {
-      if (legs.some((leg) => leg.group === group && stretch(leg) > stride)) {
-        liftGroup(group);
-        break;
+    if (modeState.idle >= BEETLE_SETTLE_DELAY) {
+      for (const group of [0, 1]) {
+        if (legs.some((leg) => leg.group === group && stretch(leg) > BEETLE_SETTLE_EPSILON)) {
+          liftGroup(group, true);
+          break;
+        }
+      }
+    } else {
+      for (const group of [0, 1]) {
+        if (legs.some((leg) => leg.group === group && stretch(leg) > stride)) {
+          liftGroup(group);
+          break;
+        }
       }
     }
   }
@@ -206,7 +218,7 @@ function stepLegs() {
 
 MODES.beetle = {
   label: 'жук',
-  note: 'Буква идёт за курсором: стойка — тело, боковые ломаные — лапы. «Скорость» ускоряет и тело, и перебор лап; их вылет задаёт только «шаг». Красным остаётся след.',
+  note: 'Буква идёт за курсором: стойка — тело, боковые ломаные — лапы. «Скорость» ускоряет и тело, и перебор лап; их вылет задаёт только «шаг». Красным остаётся след. Через две минуты тишины лапы возвращаются в спокойное положение.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'скорость', min: 0.05, max: 2.4, step: 0.01, value: 1.2 },
@@ -222,6 +234,7 @@ MODES.beetle = {
     { type: 'button', label: 'вернуть', action: () => beetleReset() },
   ],
   setup() { beetleReset(); },
+  onMove() { modeState.idle = 0; },
   step() {
     if (modeState.six !== on('six')) beetleReset();
     const b = modeState.body;
@@ -242,6 +255,7 @@ MODES.beetle = {
     const turn = wrap(goal - b.rot);
     b.rot = wrap(b.rot + clamp(turn, -4.8 * STEP, 4.8 * STEP));
 
+    modeState.idle += STEP;
     stepLegs();
 
     const marksVisible = on('marks');
