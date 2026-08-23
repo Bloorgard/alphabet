@@ -442,6 +442,7 @@ MODES.frost = {
 function hingeReset() {
   modeState.body = { x: 0.5, y: 0.5, vx: 0, vy: 0, ax: 0, ay: 0 };
   modeState.rays = [UR, UL, DR, DL].map((a) => ({ a, a0: a, w: 0, hit: 0 }));
+  modeState.drag = -1;
 }
 
 function foldTarget(a0, fold) {
@@ -449,9 +450,50 @@ function foldTarget(a0, fold) {
   return a0 + (vertical - a0) * fold;
 }
 
+function hingeTip(index) {
+  const b = modeState.body;
+  const ray = modeState.rays[index];
+  return { x: b.x + Math.cos(ray.a) * ARM, y: b.y + Math.sin(ray.a) * ARM };
+}
+
+function pickHingeRay() {
+  let picked = -1;
+  let nearest = 0.075;
+  modeState.rays.forEach((ray, index) => {
+    const tip = hingeTip(index);
+    const distance = Math.hypot(pointer.x - tip.x, pointer.y - tip.y);
+    if (distance >= nearest) return;
+    nearest = distance;
+    picked = index;
+  });
+  return picked;
+}
+
+function drawHingeTies() {
+  const b = modeState.body;
+  const tips = modeState.rays.map((ray, index) => hingeTip(index));
+  const points = [
+    { x: b.x, y: b.y - STEM }, tips[0], tips[2],
+    { x: b.x, y: b.y + STEM }, tips[3], tips[1],
+  ];
+  const rest = [
+    { x: 0, y: -STEM }, { x: Math.cos(UR) * ARM, y: Math.sin(UR) * ARM },
+    { x: Math.cos(DR) * ARM, y: Math.sin(DR) * ARM }, { x: 0, y: STEM },
+    { x: Math.cos(DL) * ARM, y: Math.sin(DL) * ARM }, { x: Math.cos(UL) * ARM, y: Math.sin(UL) * ARM },
+  ];
+
+  points.forEach((point, index) => {
+    const next = (index + 1) % points.length;
+    const length = Math.hypot(points[next].x - point.x, points[next].y - point.y);
+    const restLength = Math.hypot(rest[next].x - rest[index].x, rest[next].y - rest[index].y);
+    const strain = Math.min(1, Math.abs(length / restLength - 1) * 4);
+    line(point.x, point.y, points[next].x, points[next].y, `rgba(22,22,22,${0.1 + strain * 0.32})`, 0.0025);
+  });
+}
+
 MODES.hinge = {
   label: 'шарнир',
-  note: 'Лучи сидят на шарнире в узле и возвращаются к своей форме пружиной. Тяни букву — лучи отстают и качаются; «сжатие» складывает их к стойке, «симметрия» связывает левые с правыми. Краска — на луче, дошедшем до предела перегиба.',
+  note: 'Тяни кончик луча — симметричный ответит ему, а тонкие стяжки покажут напряжение. Тяни за пустое место — в движение придёт вся буква. Краска появляется только на луче, дошедшем до предела.',
   cursor: 'grab',
   tools: [
     { type: 'range', key: 'stiff', label: 'жёсткость', min: 0.1, max: 4, step: 0.05, value: 1.2 },
@@ -461,15 +503,25 @@ MODES.hinge = {
     { type: 'range', key: 'pull', label: 'тяга', min: 0.2, max: 4, step: 0.05, value: 1.2 },
     { type: 'range', key: 'limit', label: 'предел', min: 0.1, max: 1.5, step: 0.05, value: 0.9 },
     { type: 'toggle', key: 'sym', label: 'симметрия', value: true },
+    { type: 'toggle', key: 'ties', label: 'стяжки', value: true },
     { type: 'toggle', key: 'ghost', label: 'форма', value: true },
     { type: 'button', label: 'вернуть', action: () => hingeReset() },
   ],
   setup() { hingeReset(); },
+  onDown() {
+    modeState.drag = pickHingeRay();
+    canvas.style.cursor = modeState.drag >= 0 ? 'grabbing' : 'move';
+  },
+  onUp() {
+    modeState.drag = -1;
+    canvas.style.cursor = 'grab';
+  },
   step() {
     const b = modeState.body;
     const pull = num('pull') * 60;
-    const tx = pointer.down ? pointer.x : 0.5;
-    const ty = pointer.down ? pointer.y : 0.5;
+    const draggingRay = pointer.down && modeState.drag >= 0;
+    const tx = pointer.down && !draggingRay ? pointer.x : 0.5;
+    const ty = pointer.down && !draggingRay ? pointer.y : 0.5;
     const vx = b.vx;
     const vy = b.vy;
     b.vx += ((tx - b.x) * pull - b.vx * 7) * STEP;
@@ -485,8 +537,17 @@ MODES.hinge = {
     const fold = num('fold');
     const limit = num('limit');
 
-    modeState.rays.forEach((ray) => {
+    modeState.rays.forEach((ray, index) => {
       const target = foldTarget(ray.a0, fold);
+      if (index === modeState.drag && pointer.down) {
+        const wanted = Math.atan2(pointer.y - b.y, pointer.x - b.x);
+        const offset = wrap(wanted - target);
+        const bounded = wrap(target + clamp(offset, -limit, limit));
+        ray.w = clamp(wrap(bounded - ray.a) / STEP, -10, 10);
+        ray.a = bounded;
+        if (Math.abs(offset) >= limit) ray.hit = 1;
+        return;
+      }
       /* ускорение узла толкает луч в бок — он отстаёт, как рука на повороте */
       const torque = -(b.ax * -Math.sin(ray.a) + b.ay * Math.cos(ray.a)) * lag;
       const off = wrap(ray.a - target);
@@ -502,23 +563,172 @@ MODES.hinge = {
     });
 
     if (on('sym')) {
-      /* правые лучи ведут, левые повторяют отражением через стойку */
-      modeState.rays[1].a = wrap(Math.PI - modeState.rays[0].a);
-      modeState.rays[3].a = wrap(Math.PI - modeState.rays[2].a);
-      modeState.rays[1].hit = modeState.rays[0].hit;
-      modeState.rays[3].hit = modeState.rays[2].hit;
+      [[0, 1], [2, 3]].forEach(([right, left]) => {
+        const leader = modeState.drag === left ? left : right;
+        const follower = leader === right ? left : right;
+        modeState.rays[follower].a = wrap(Math.PI - modeState.rays[leader].a);
+        modeState.rays[follower].w = -modeState.rays[leader].w;
+        modeState.rays[follower].hit = modeState.rays[leader].hit;
+      });
     }
   },
   draw() {
     if (on('ghost')) drawGhost();
     const b = modeState.body;
+    if (on('ties')) drawHingeTies();
     line(b.x, b.y + Math.sin(UP) * STEM, b.x, b.y + Math.sin(DOWN) * STEM, INK, 0.016);
-    modeState.rays.forEach((ray) => {
+    modeState.rays.forEach((ray, index) => {
       const color = ray.hit > 0.05 ? RED : INK;
       line(b.x, b.y, b.x + Math.cos(ray.a) * ARM, b.y + Math.sin(ray.a) * ARM, color, 0.013);
+      if (modeState.drag === index && pointer.down) {
+        const tip = hingeTip(index);
+        ctx.beginPath();
+        ctx.arc(tip.x * S, tip.y * S, 0.018 * S, 0, Math.PI * 2);
+        ctx.strokeStyle = MUTED;
+        ctx.lineWidth = 0.002 * S;
+        ctx.stroke();
+      }
     });
     const bent = modeState.rays.reduce((sum, ray) => sum + Math.abs(wrap(ray.a - ray.a0)), 0) / 4;
     drawStatus(`перегиб ${bent.toFixed(2)}`, bent > 0.5);
+  },
+};
+
+/* ---------- 4. резонанс: шесть импульсов сходятся в узле ---------- */
+
+const OPPOSITE_RAY = [1, 0, 5, 4, 3, 2];
+
+function resonanceReset() {
+  modeState.pulses = [];
+  modeState.arrivals = [];
+  modeState.stroke = new Set();
+  modeState.clock = 0;
+  modeState.lastSync = -10;
+  modeState.match = 0;
+  modeState.flare = 0;
+  modeState.shock = -1;
+}
+
+function emitPulse(ray, outward = false) {
+  modeState.pulses.push({ ray, t: 0, outward });
+}
+
+function emitAll() {
+  SKELETON.forEach((ray, index) => emitPulse(index));
+}
+
+function resonanceTip(index) {
+  const ray = SKELETON[index];
+  return { x: 0.5 + Math.cos(ray.a) * ray.len, y: 0.5 + Math.sin(ray.a) * ray.len };
+}
+
+function pluckResonanceRay() {
+  let picked = -1;
+  let nearest = 0.09;
+  SKELETON.forEach((ray, index) => {
+    const tip = resonanceTip(index);
+    const distance = Math.hypot(pointer.x - tip.x, pointer.y - tip.y);
+    if (distance >= nearest) return;
+    nearest = distance;
+    picked = index;
+  });
+  if (picked < 0 || modeState.stroke.has(picked)) return;
+  modeState.stroke.add(picked);
+  emitPulse(picked);
+}
+
+function drawPulse(pulse) {
+  const ray = SKELETON[pulse.ray];
+  const head = ray.len * (pulse.outward ? pulse.t : 1 - pulse.t);
+  const length = num('length');
+  const tail = pulse.outward ? Math.max(0, head - length) : Math.min(ray.len, head + length);
+  const c = Math.cos(ray.a);
+  const s = Math.sin(ray.a);
+  const color = pulse.outward ? MUTED : INK;
+  line(0.5 + c * tail, 0.5 + s * tail, 0.5 + c * head, 0.5 + s * head, color, 0.018);
+  dot(0.5 + c * head, 0.5 + s * head, color, 0.009);
+}
+
+MODES.resonance = {
+  label: 'резонанс',
+  note: 'Нажми кончик луча или проведи по нескольким — импульсы пойдут к узлу и выйдут с противоположной стороны. Центр окрасится, только если все шесть придут вместе. Нажатие на узел — точный камертон.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'speed', label: 'скорость', min: 0.3, max: 1.8, step: 0.05, value: 0.75 },
+    { type: 'range', key: 'window', label: 'допуск', min: 0.04, max: 0.5, step: 0.01, value: 0.18 },
+    { type: 'range', key: 'length', label: 'длина', min: 0.015, max: 0.12, step: 0.005, value: 0.055 },
+    { type: 'toggle', key: 'echo', label: 'отклик', value: true },
+    { type: 'button', label: 'все вместе', action: () => emitAll() },
+    { type: 'button', label: 'очистить', action: () => resonanceReset() },
+  ],
+  setup() {
+    resonanceReset();
+    emitAll();
+  },
+  onDown() {
+    modeState.stroke = new Set();
+    if (Math.hypot(pointer.x - 0.5, pointer.y - 0.5) < 0.075) {
+      emitAll();
+      SKELETON.forEach((ray, index) => modeState.stroke.add(index));
+      return;
+    }
+    pluckResonanceRay();
+  },
+  onMove() {
+    if (pointer.down) pluckResonanceRay();
+  },
+  onUp() { modeState.stroke.clear(); },
+  step() {
+    modeState.clock += STEP;
+    const speed = num('speed');
+    const born = [];
+
+    modeState.pulses.forEach((pulse) => {
+      pulse.t += speed * STEP;
+      if (pulse.t < 1 || pulse.outward) return;
+      modeState.arrivals.push({ ray: pulse.ray, time: modeState.clock });
+      if (on('echo')) born.push({ ray: OPPOSITE_RAY[pulse.ray], t: 0, outward: true });
+    });
+    modeState.pulses = modeState.pulses.filter((pulse) => pulse.t < 1);
+    modeState.pulses.push(...born);
+
+    const window = num('window');
+    modeState.arrivals = modeState.arrivals.filter((arrival) => modeState.clock - arrival.time <= window);
+    modeState.match = new Set(modeState.arrivals.map((arrival) => arrival.ray)).size;
+    if (modeState.match === SKELETON.length && modeState.clock - modeState.lastSync > window) {
+      modeState.lastSync = modeState.clock;
+      modeState.flare = 1;
+      modeState.shock = 0;
+      modeState.arrivals = [];
+    }
+    modeState.flare = Math.max(0, modeState.flare - STEP * 1.25);
+    if (modeState.shock >= 0) {
+      modeState.shock += STEP * 1.8;
+      if (modeState.shock > 1) modeState.shock = -1;
+    }
+  },
+  draw() {
+    SKELETON.forEach((ray, index) => {
+      const tip = resonanceTip(index);
+      line(0.5, 0.5, tip.x, tip.y, INK, 0.006);
+      ctx.beginPath();
+      ctx.arc(tip.x * S, tip.y * S, 0.013 * S, 0, Math.PI * 2);
+      ctx.strokeStyle = MUTED;
+      ctx.lineWidth = 0.002 * S;
+      ctx.stroke();
+    });
+    modeState.pulses.forEach(drawPulse);
+
+    const count = modeState.flare > 0 ? SKELETON.length : modeState.match;
+    dot(0.5, 0.5, modeState.flare > 0 ? RED : INK, 0.008 + modeState.flare * 0.014);
+    if (modeState.shock >= 0) {
+      ctx.beginPath();
+      ctx.arc(0.5 * S, 0.5 * S, (0.025 + modeState.shock * 0.12) * S, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(224,33,15,${0.55 * (1 - modeState.shock)})`;
+      ctx.lineWidth = 0.003 * S;
+      ctx.stroke();
+    }
+    drawStatus(`совпадение ${count} / ${SKELETON.length}`, count === SKELETON.length);
   },
 };
 
