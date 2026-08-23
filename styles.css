@@ -32,7 +32,7 @@ h1, h2, p { margin: 0; }
 
 .intro { max-width: 640px; padding: clamp(56px, 10vw, 120px) 0 clamp(56px, 10vw, 120px); }
 .eyebrow { margin-bottom: 20px; color: var(--muted); }
-h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; letter-spacing: 0; font-weight: 600; }
+h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; letter-spacing: -.02em; font-weight: 600; }
 .intro-text { max-width: 400px; color: var(--muted); font-size: 14px; line-height: 1.6; }
 
 .alphabet-section { border-top: 1px solid var(--line); }
