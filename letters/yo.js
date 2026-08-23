@@ -499,6 +499,8 @@ export function mountYo(workspace) {
     if (!key) return;
     event.preventDefault();
     keys.add(key);
+    /* газ поднимает лежащую букву сам: держать клавишу и ждать клика незачем */
+    if (key === 'up') revive();
   }
 
   function onKeyUp(event) {
@@ -524,11 +526,11 @@ export function mountYo(workspace) {
   function updateHint() {
     const byTouch = state.touched || narrow.matches;
     if (state.phase === 'intro') {
-      hint.textContent = byTouch ? 'коснись — буква поедет' : 'клик или пробел — буква поедет';
+      hint.textContent = byTouch ? 'коснись — буква поедет' : '↑ или клик — буква поедет';
       return;
     }
     if (state.phase === 'rest') {
-      hint.textContent = byTouch ? 'коснись — буква встанет' : 'пробел или клик — буква встанет';
+      hint.textContent = byTouch ? 'коснись — буква встанет' : '↑ или клик — буква встанет';
       return;
     }
     hint.textContent = byTouch
