@@ -732,6 +732,406 @@ MODES.resonance = {
   },
 };
 
+/* ---------- 5. поле: подвижные электроды и следы потока ---------- */
+
+const MIRROR_RAY = [0, 1, 3, 2, 5, 4];
+const FIELD_MOVABLE = new Set([2, 3, 4, 5]);
+
+function fieldRest(index) {
+  const ray = SKELETON[index];
+  return { x: 0.5 + Math.cos(ray.a) * ray.len, y: 0.5 + Math.sin(ray.a) * ray.len };
+}
+
+function fieldReset() {
+  modeState.electrodes = SKELETON.map((ray, index) => ({ ...fieldRest(index), vx: 0, vy: 0 }));
+  modeState.particles = [];
+  SKELETON.forEach((ray, index) => {
+    for (let i = 0; i < 9; i += 1) {
+      modeState.particles.push({ ray: index, t: (i + Math.random() * 0.4) / 9, lane: Math.random() * 2 - 1 });
+    }
+  });
+  modeState.trails = [];
+  modeState.drag = -1;
+  modeState.clock = 0;
+  modeState.tick = 0;
+  modeState.stress = 0;
+  modeState.overload = false;
+  modeState.flare = 0;
+  modeState.shock = -1;
+}
+
+function pickFieldElectrode() {
+  let picked = -1;
+  let nearest = 0.075;
+  modeState.electrodes.forEach((electrode, index) => {
+    if (!FIELD_MOVABLE.has(index)) return;
+    const distance = Math.hypot(pointer.x - electrode.x, pointer.y - electrode.y);
+    if (distance >= nearest) return;
+    nearest = distance;
+    picked = index;
+  });
+  return picked;
+}
+
+function fieldGeometry(index, lane = 0) {
+  const electrode = modeState.electrodes[index];
+  const rest = fieldRest(index);
+  const dx = electrode.x - 0.5;
+  const dy = electrode.y - 0.5;
+  const length = Math.hypot(dx, dy) || 1;
+  const px = -dy / length;
+  const py = dx / length;
+  const drift = (electrode.x - rest.x) * px + (electrode.y - rest.y) * py;
+  const bend = lane * num('spread') + drift * 0.42;
+  return {
+    ex: electrode.x,
+    ey: electrode.y,
+    cx: 0.5 + dx * 0.5 + px * bend,
+    cy: 0.5 + dy * 0.5 + py * bend,
+  };
+}
+
+function fieldPoint(geometry, t) {
+  const u = 1 - t;
+  return {
+    x: u * u * 0.5 + 2 * u * t * geometry.cx + t * t * geometry.ex,
+    y: u * u * 0.5 + 2 * u * t * geometry.cy + t * t * geometry.ey,
+  };
+}
+
+function fieldTangent(geometry, t) {
+  return {
+    x: 2 * (1 - t) * (geometry.cx - 0.5) + 2 * t * (geometry.ex - geometry.cx),
+    y: 2 * (1 - t) * (geometry.cy - 0.5) + 2 * t * (geometry.ey - geometry.cy),
+  };
+}
+
+function drawFieldCurve(index, lane) {
+  const geometry = fieldGeometry(index, lane);
+  ctx.beginPath();
+  ctx.moveTo(0.5 * S, 0.5 * S);
+  ctx.quadraticCurveTo(geometry.cx * S, geometry.cy * S, geometry.ex * S, geometry.ey * S);
+  ctx.strokeStyle = 'rgba(22,22,22,.12)';
+  ctx.lineWidth = 0.002 * S;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+}
+
+MODES.field = {
+  label: 'поле',
+  note: 'Тяни один из четырёх диагональных электродов. Парный ответит с запаздыванием, потоки изогнутся и оставят след. Красный разряд возникает только при перегрузке поля.',
+  cursor: 'grab',
+  tools: [
+    { type: 'range', key: 'speed', label: 'ток', min: 0.08, max: 1.2, step: 0.02, value: 0.36 },
+    { type: 'range', key: 'spread', label: 'поле', min: 0, max: 0.055, step: 0.0025, value: 0.0225 },
+    { type: 'range', key: 'lag', label: 'запаздывание', min: 0, max: 1.2, step: 0.05, value: 0.45 },
+    { type: 'range', key: 'trip', label: 'пробой', min: 0.06, max: 0.3, step: 0.01, value: 0.16 },
+    { type: 'range', key: 'life', label: 'след', min: 0.2, max: 4, step: 0.1, value: 1.5 },
+    { type: 'toggle', key: 'sym', label: 'симметрия', value: true },
+    { type: 'toggle', key: 'trace', label: 'остаточный заряд', value: true },
+    { type: 'toggle', key: 'ghost', label: 'форма', value: false },
+    { type: 'button', label: 'разрядить', action: () => fieldReset() },
+  ],
+  setup() { fieldReset(); },
+  onDown() {
+    modeState.drag = pickFieldElectrode();
+    canvas.style.cursor = modeState.drag >= 0 ? 'grabbing' : 'grab';
+  },
+  onMove() {
+    if (!pointer.down || modeState.drag < 0) return;
+    const electrode = modeState.electrodes[modeState.drag];
+    electrode.x = clamp(pointer.x, 0.1, 0.9);
+    electrode.y = clamp(pointer.y, 0.1, 0.9);
+    electrode.vx = 0;
+    electrode.vy = 0;
+  },
+  onUp() {
+    modeState.drag = -1;
+    canvas.style.cursor = 'grab';
+  },
+  step() {
+    modeState.clock += STEP;
+    modeState.tick += 1;
+    const lag = num('lag');
+    const dragged = modeState.drag;
+
+    modeState.electrodes.forEach((electrode, index) => {
+      if (index === dragged && pointer.down) {
+        electrode.x = clamp(pointer.x, 0.1, 0.9);
+        electrode.y = clamp(pointer.y, 0.1, 0.9);
+        electrode.vx = 0;
+        electrode.vy = 0;
+        return;
+      }
+
+      let target = fieldRest(index);
+      const follows = dragged >= 0 && MIRROR_RAY[dragged] === index && on('sym');
+      if (follows) {
+        const leader = modeState.electrodes[dragged];
+        target = { x: 1 - leader.x, y: leader.y };
+      }
+      const stiffness = follows ? 34 / (1 + lag * 5) : 18;
+      const damping = follows ? 5.5 : 6.5;
+      electrode.vx += ((target.x - electrode.x) * stiffness - electrode.vx * damping) * STEP;
+      electrode.vy += ((target.y - electrode.y) * stiffness - electrode.vy * damping) * STEP;
+      electrode.x += electrode.vx * STEP;
+      electrode.y += electrode.vy * STEP;
+    });
+
+    modeState.stress = modeState.electrodes.reduce((best, electrode, index) => {
+      if (!FIELD_MOVABLE.has(index)) return best;
+      const rest = fieldRest(index);
+      return Math.max(best, Math.hypot(electrode.x - rest.x, electrode.y - rest.y));
+    }, 0);
+    const trip = num('trip');
+    if (modeState.stress >= trip && !modeState.overload) {
+      modeState.overload = true;
+      modeState.flare = 1;
+      modeState.shock = 0;
+    }
+    if (modeState.stress < trip * 0.62) modeState.overload = false;
+
+    modeState.particles.forEach((particle) => {
+      particle.t += num('speed') * STEP;
+      if (particle.t >= 1) {
+        particle.ray = OPPOSITE_RAY[particle.ray];
+        particle.t -= 1;
+        particle.lane *= -1;
+      }
+      if (!on('trace') || modeState.tick % 3) return;
+      const geometry = fieldGeometry(particle.ray, particle.lane);
+      const point = fieldPoint(geometry, 1 - particle.t);
+      modeState.trails.push({ ...point, born: modeState.clock });
+    });
+    const life = num('life');
+    modeState.trails = modeState.trails.filter((trail) => modeState.clock - trail.born < life);
+    if (modeState.trails.length > 720) modeState.trails.splice(0, modeState.trails.length - 720);
+
+    modeState.flare = Math.max(0, modeState.flare - STEP * 1.2);
+    if (modeState.shock >= 0) {
+      modeState.shock += STEP * 1.5;
+      if (modeState.shock > 1) modeState.shock = -1;
+    }
+  },
+  draw() {
+    if (on('ghost')) drawGhost();
+    const life = num('life');
+    modeState.trails.forEach((trail) => {
+      const alpha = 0.2 * (1 - (modeState.clock - trail.born) / life);
+      dot(trail.x, trail.y, `rgba(22,22,22,${alpha})`, 0.0026);
+    });
+
+    SKELETON.forEach((ray, index) => {
+      [-1, -0.5, 0, 0.5, 1].forEach((lane) => drawFieldCurve(index, lane));
+    });
+    modeState.particles.forEach((particle) => {
+      const geometry = fieldGeometry(particle.ray, particle.lane);
+      const t = 1 - particle.t;
+      const point = fieldPoint(geometry, t);
+      const tangent = fieldTangent(geometry, t);
+      const length = Math.hypot(tangent.x, tangent.y) || 1;
+      const dx = tangent.x / length * 0.011;
+      const dy = tangent.y / length * 0.011;
+      line(point.x - dx, point.y - dy, point.x + dx, point.y + dy, INK, 0.0045);
+    });
+
+    modeState.electrodes.forEach((electrode, index) => {
+      ctx.beginPath();
+      ctx.arc(electrode.x * S, electrode.y * S, (FIELD_MOVABLE.has(index) ? 0.014 : 0.009) * S, 0, Math.PI * 2);
+      ctx.strokeStyle = index === modeState.drag ? INK : MUTED;
+      ctx.lineWidth = (index === modeState.drag ? 0.003 : 0.002) * S;
+      ctx.stroke();
+    });
+
+    dot(0.5, 0.5, modeState.flare > 0 ? RED : INK, 0.008 + modeState.flare * 0.012);
+    if (modeState.shock >= 0) {
+      ctx.beginPath();
+      ctx.arc(0.5 * S, 0.5 * S, (0.025 + modeState.shock * 0.15) * S, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(224,33,15,${0.5 * (1 - modeState.shock)})`;
+      ctx.lineWidth = 0.0025 * S;
+      ctx.stroke();
+    }
+    drawStatus(`напряжение ${modeState.stress.toFixed(2)}`, modeState.overload);
+  },
+};
+
+/* ---------- 6. калейдоскоп: один штрих на шесть лучей ---------- */
+
+const KALEIDO_ORDER = [3, 0, 2, 4, 1, 5];
+
+function kaleidoSector(index) {
+  const rank = KALEIDO_ORDER.indexOf(index);
+  const angle = SKELETON[index].a;
+  let previous = SKELETON[KALEIDO_ORDER[(rank + 5) % 6]].a;
+  let next = SKELETON[KALEIDO_ORDER[(rank + 1) % 6]].a;
+  while (previous >= angle) previous -= Math.PI * 2;
+  while (next <= angle) next += Math.PI * 2;
+  return { rank, angle, negative: (angle - previous) / 2, positive: (next - angle) / 2 };
+}
+
+function nearestKaleidoRay() {
+  const angle = Math.atan2(pointer.y - 0.5, pointer.x - 0.5);
+  let picked = 0;
+  let nearest = Infinity;
+  SKELETON.forEach((ray, index) => {
+    const distance = Math.abs(wrap(angle - ray.a));
+    if (distance >= nearest) return;
+    nearest = distance;
+    picked = index;
+  });
+  return picked;
+}
+
+function kaleidoReset() {
+  modeState.strokes = [];
+  modeState.active = null;
+  modeState.clock = 0;
+  modeState.flare = 0;
+  modeState.shock = -1;
+}
+
+function addKaleidoPoint() {
+  const stroke = modeState.active;
+  if (!stroke) return;
+  const previous = stroke.points[stroke.points.length - 1];
+  if (previous && Math.hypot(pointer.x - previous.x, pointer.y - previous.y) < 0.004) return;
+
+  const ray = SKELETON[stroke.source];
+  const sector = kaleidoSector(stroke.source);
+  const dx = pointer.x - 0.5;
+  const dy = pointer.y - 0.5;
+  const distance = Math.hypot(dx, dy);
+  const offset = wrap(Math.atan2(dy, dx) - ray.a);
+  const span = offset < 0 ? sector.negative : sector.positive;
+  stroke.points.push({
+    x: pointer.x,
+    y: pointer.y,
+    r: Math.min(1.75, distance / ray.len),
+    u: clamp(offset / span, -1, 1),
+    time: modeState.clock,
+  });
+  if (stroke.points.length > 280) stroke.points.shift();
+
+  if (distance < 0.035 && (!previous || Math.hypot(previous.x - 0.5, previous.y - 0.5) > 0.055)) {
+    modeState.flare = 1;
+    modeState.shock = 0;
+  }
+}
+
+function mapKaleidoPoint(point, stroke, target) {
+  const sourceRank = kaleidoSector(stroke.source).rank;
+  const targetSector = kaleidoSector(target);
+  const step = (targetSector.rank - sourceRank + 6) % 6;
+  const u = on('mirror') && step % 2 ? -point.u : point.u;
+  const span = u < 0 ? targetSector.negative : targetSector.positive;
+  const angle = SKELETON[target].a + u * span;
+  const radius = point.r * SKELETON[target].len;
+  return { x: 0.5 + Math.cos(angle) * radius, y: 0.5 + Math.sin(angle) * radius };
+}
+
+function drawKaleidoGuides() {
+  KALEIDO_ORDER.forEach((index) => {
+    const sector = kaleidoSector(index);
+    const boundary = sector.angle - sector.negative;
+    line(0.5, 0.5, 0.5 + Math.cos(boundary) * 0.72, 0.5 + Math.sin(boundary) * 0.72, 'rgba(22,22,22,.075)', 0.0015);
+  });
+}
+
+function fillKaleidoSector(index) {
+  const sector = kaleidoSector(index);
+  ctx.beginPath();
+  ctx.moveTo(0.5 * S, 0.5 * S);
+  ctx.arc(0.5 * S, 0.5 * S, 0.72 * S, sector.angle - sector.negative, sector.angle + sector.positive);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(22,22,22,.025)';
+  ctx.fill();
+}
+
+function drawKaleidoStroke(stroke, target) {
+  const sourceRank = kaleidoSector(stroke.source).rank;
+  const targetRank = kaleidoSector(target).rank;
+  const around = Math.abs(targetRank - sourceRank);
+  const distance = Math.min(around, 6 - around);
+  const delay = distance * num('lag');
+  const life = num('life');
+  const visible = stroke.points.filter((point) => point.time + delay <= modeState.clock);
+  if (!visible.length) return;
+
+  if (visible.length === 1) {
+    const age = modeState.clock - visible[0].time - delay;
+    const alpha = 0.72 * clamp(1 - age / life, 0, 1);
+    const point = mapKaleidoPoint(visible[0], stroke, target);
+    dot(point.x, point.y, `rgba(22,22,22,${alpha})`, num('brush') * 0.5);
+    return;
+  }
+
+  for (let i = 1; i < visible.length; i += 1) {
+    const age = modeState.clock - visible[i].time - delay;
+    const alpha = 0.72 * clamp(1 - age / life, 0, 1);
+    if (alpha <= 0) continue;
+    const from = mapKaleidoPoint(visible[i - 1], stroke, target);
+    const to = mapKaleidoPoint(visible[i], stroke, target);
+    line(from.x, from.y, to.x, to.y, `rgba(22,22,22,${alpha})`, num('brush'));
+  }
+}
+
+MODES.kaleido = {
+  label: 'калейдоскоп',
+  note: 'Начни рисовать в любом секторе: первое касание выберет его, а штрих отразится в остальных пяти. Секторы привязаны к настоящим лучам «Ж», поэтому вертикаль остаётся короче диагоналей. Пересечение центра даёт красную вспышку.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'brush', label: 'штрих', min: 0.002, max: 0.024, step: 0.001, value: 0.007 },
+    { type: 'range', key: 'life', label: 'память', min: 1, max: 20, step: 0.5, value: 8 },
+    { type: 'range', key: 'lag', label: 'эхо', min: 0, max: 0.2, step: 0.01, value: 0.04 },
+    { type: 'toggle', key: 'mirror', label: 'зеркало', value: true },
+    { type: 'toggle', key: 'sectors', label: 'секторы', value: true },
+    { type: 'toggle', key: 'ghost', label: 'форма', value: true },
+    { type: 'button', label: 'смыть', action: () => kaleidoReset() },
+  ],
+  setup() { kaleidoReset(); },
+  onDown() {
+    const stroke = { source: nearestKaleidoRay(), points: [] };
+    modeState.active = stroke;
+    modeState.strokes.push(stroke);
+    if (modeState.strokes.length > 24) modeState.strokes.shift();
+    addKaleidoPoint();
+  },
+  onMove() { if (pointer.down) addKaleidoPoint(); },
+  onUp() { modeState.active = null; },
+  step() {
+    modeState.clock += STEP;
+    const life = num('life') + num('lag') * 3;
+    modeState.strokes = modeState.strokes.filter((stroke) => {
+      const last = stroke.points[stroke.points.length - 1];
+      return last && modeState.clock - last.time < life;
+    });
+    modeState.flare = Math.max(0, modeState.flare - STEP * 1.4);
+    if (modeState.shock >= 0) {
+      modeState.shock += STEP * 2;
+      if (modeState.shock > 1) modeState.shock = -1;
+    }
+  },
+  draw() {
+    if (modeState.active) fillKaleidoSector(modeState.active.source);
+    if (on('sectors')) drawKaleidoGuides();
+    if (on('ghost')) drawGhost();
+    modeState.strokes.forEach((stroke) => {
+      KALEIDO_ORDER.forEach((target) => drawKaleidoStroke(stroke, target));
+    });
+
+    dot(0.5, 0.5, modeState.flare > 0 ? RED : INK, 0.006 + modeState.flare * 0.01);
+    if (modeState.shock >= 0) {
+      ctx.beginPath();
+      ctx.arc(0.5 * S, 0.5 * S, (0.018 + modeState.shock * 0.1) * S, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(224,33,15,${0.45 * (1 - modeState.shock)})`;
+      ctx.lineWidth = 0.002 * S;
+      ctx.stroke();
+    }
+    const sector = modeState.active ? kaleidoSector(modeState.active.source).rank + 1 : 0;
+    drawStatus(sector ? `сектор ${sector} / 6` : `штрихов ${modeState.strokes.length}`, modeState.flare > 0);
+  },
+};
+
 /* ---------- панель ---------- */
 
 function renderTools(mode) {
