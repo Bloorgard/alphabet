@@ -98,7 +98,7 @@ const BEETLE_ARM = Math.hypot(BEETLE_ARM_X, BEETLE_ARM_Y);
 const BEETLE_WIDTH = 0.05;
 const BEETLE_MARK_LIFE = 12;
 const BEETLE_MARK_FADE = 4;
-const BEETLE_SETTLE_DELAY = 120;
+const BEETLE_SETTLE_DELAY = 5;
 const BEETLE_SETTLE_EPSILON = 0.003;
 const BEETLE_UR = Math.atan2(-BEETLE_ARM_Y, BEETLE_ARM_X);
 const BEETLE_UL = Math.atan2(-BEETLE_ARM_Y, -BEETLE_ARM_X);
@@ -218,7 +218,7 @@ function stepLegs() {
 
 MODES.beetle = {
   label: 'жук',
-  note: 'Буква идёт за курсором: стойка — тело, боковые ломаные — лапы. «Скорость» ускоряет и тело, и перебор лап; их вылет задаёт только «шаг». Красным остаётся след. Через две минуты тишины лапы возвращаются в спокойное положение.',
+  note: 'Буква идёт за курсором: стойка — тело, боковые ломаные — лапы. «Скорость» ускоряет и тело, и перебор лап; их вылет задаёт только «шаг». Красным остаётся след. Через пять секунд тишины лапы возвращаются в спокойное положение.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'скорость', min: 0.05, max: 2.4, step: 0.01, value: 1.2 },
