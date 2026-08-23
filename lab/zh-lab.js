@@ -90,19 +90,29 @@ const MODES = {};
 
 /* Рысь: две диагонали переставляются вместе, две держат вес.
    У шести лап тот же принцип превращается в насекомий треножник. */
+const BEETLE_STEM = 0.12;
+const BEETLE_HIP = 0.0428;
+const BEETLE_ARM_X = 0.1523;
+const BEETLE_ARM_Y = 0.1094;
+const BEETLE_ARM = Math.hypot(BEETLE_ARM_X, BEETLE_ARM_Y);
+const BEETLE_WIDTH = 0.05;
+const BEETLE_UR = Math.atan2(-BEETLE_ARM_Y, BEETLE_ARM_X);
+const BEETLE_UL = Math.atan2(-BEETLE_ARM_Y, -BEETLE_ARM_X);
+const BEETLE_DR = Math.atan2(BEETLE_ARM_Y, BEETLE_ARM_X);
+const BEETLE_DL = Math.atan2(BEETLE_ARM_Y, -BEETLE_ARM_X);
 const LEGS_4 = [
-  { a: UR, len: ARM, group: 0 },
-  { a: UL, len: ARM, group: 1 },
-  { a: DR, len: ARM, group: 1 },
-  { a: DL, len: ARM, group: 0 },
+  { a: BEETLE_UR, len: BEETLE_ARM, group: 0 },
+  { a: BEETLE_UL, len: BEETLE_ARM, group: 1 },
+  { a: BEETLE_DR, len: BEETLE_ARM, group: 1 },
+  { a: BEETLE_DL, len: BEETLE_ARM, group: 0 },
 ];
 const LEGS_6 = [
-  { a: UR, len: ARM, group: 0 },
-  { a: UL, len: ARM, group: 1 },
-  { a: 0, len: ARM * 0.76, group: 1 },
-  { a: Math.PI, len: ARM * 0.76, group: 0 },
-  { a: DR, len: ARM, group: 0 },
-  { a: DL, len: ARM, group: 1 },
+  { a: BEETLE_UR, len: BEETLE_ARM, group: 0 },
+  { a: BEETLE_UL, len: BEETLE_ARM, group: 1 },
+  { a: 0, len: BEETLE_ARM_X, group: 1 },
+  { a: Math.PI, len: BEETLE_ARM_X, group: 0 },
+  { a: BEETLE_DR, len: BEETLE_ARM, group: 0 },
+  { a: BEETLE_DL, len: BEETLE_ARM, group: 1 },
 ];
 
 function toWorld(vx, vy) {
@@ -125,6 +135,10 @@ function restPoint(leg) {
   return toWorld(Math.cos(leg.a) * leg.len, Math.sin(leg.a) * leg.len);
 }
 
+function hipPoint(leg) {
+  return toWorld(Math.sign(Math.cos(leg.a) || 1) * BEETLE_HIP, 0);
+}
+
 function stretch(leg) {
   const rest = restPoint(leg);
   return Math.hypot(leg.foot.x - rest.x, leg.foot.y - rest.y);
@@ -142,19 +156,25 @@ function beetleReset() {
 
 function liftGroup(group) {
   const lead = num('lead');
+  const stride = num('stride');
   const b = modeState.body;
+  const speed = Math.hypot(b.vx, b.vy);
+  const ahead = lead * stride * 4;
+  const dx = speed ? b.vx / speed * ahead : 0;
+  const dy = speed ? b.vy / speed * ahead : 0;
   modeState.legs.forEach((leg) => {
     if (leg.group !== group) return;
     const rest = restPoint(leg);
     leg.swing = 0;
     leg.from = { ...leg.foot };
-    leg.to = { x: rest.x + b.vx * lead, y: rest.y + b.vy * lead };
+    leg.to = { x: rest.x + dx, y: rest.y + dy };
   });
 }
 
 function stepLegs() {
   const stride = num('stride');
-  const swingTime = num('swing');
+  const bodySpeed = Math.hypot(modeState.body.vx, modeState.body.vy);
+  const swingTime = clamp(num('swing') * 0.3 / Math.max(0.08, bodySpeed), 0.04, 0.5);
   const legs = modeState.legs;
 
   if (!legs.some((leg) => leg.swing >= 0)) {
@@ -184,11 +204,11 @@ function stepLegs() {
 
 MODES.beetle = {
   label: 'жук',
-  note: 'Буква идёт за курсором: стойка — тело, диагонали — лапы. Лапа держится за своё место на бумаге, пока хватает вылета, потом переставляется вперёд. Краска — на лапах, которые сейчас в переносе.',
+  note: 'Буква идёт за курсором: стойка — тело, боковые ломаные — лапы. «Скорость» ускоряет и тело, и перебор лап; их вылет задаёт только «шаг». Краска — на лапах, которые сейчас в переносе.',
   cursor: 'crosshair',
   tools: [
-    { type: 'range', key: 'speed', label: 'скорость', min: 0.05, max: 0.8, step: 0.01, value: 0.3 },
-    { type: 'range', key: 'stride', label: 'шаг', min: 0.02, max: 0.2, step: 0.005, value: 0.085 },
+    { type: 'range', key: 'speed', label: 'скорость', min: 0.05, max: 1.2, step: 0.01, value: 0.3 },
+    { type: 'range', key: 'stride', label: 'шаг', min: 0.012, max: 0.12, step: 0.004, value: 0.048 },
     { type: 'range', key: 'swing', label: 'перенос', min: 0.05, max: 0.5, step: 0.01, value: 0.16 },
     { type: 'range', key: 'lead', label: 'упреждение', min: 0, max: 0.5, step: 0.01, value: 0.14 },
     { type: 'range', key: 'knee', label: 'излом', min: 0, max: 0.1, step: 0.005, value: 0 },
@@ -225,31 +245,41 @@ MODES.beetle = {
   },
   draw() {
     const b = modeState.body;
-    if (on('ghost')) drawGhost(b.x, b.y, b.rot);
     if (on('marks')) modeState.marks.forEach((mark) => dot(mark.x, mark.y, FAINT, 0.005));
 
-    const top = toWorld(Math.cos(UP) * STEM, Math.sin(UP) * STEM);
-    const bottom = toWorld(Math.cos(DOWN) * STEM, Math.sin(DOWN) * STEM);
-    line(top.x, top.y, bottom.x, bottom.y, INK, 0.016);
+    const top = toWorld(0, -BEETLE_STEM);
+    const bottom = toWorld(0, BEETLE_STEM);
+    if (on('ghost')) {
+      line(top.x, top.y, bottom.x, bottom.y, FAINT, BEETLE_WIDTH);
+      modeState.legs.forEach((leg) => {
+        const hip = hipPoint(leg);
+        const rest = restPoint(leg);
+        line(hip.x, hip.y, rest.x, rest.y, FAINT, BEETLE_WIDTH);
+      });
+    }
+    line(top.x, top.y, bottom.x, bottom.y, INK, BEETLE_WIDTH);
 
     const knee = num('knee');
     modeState.legs.forEach((leg) => {
       const swinging = leg.swing >= 0;
       const color = swinging && on('paint') ? RED : INK;
+      const side = Math.sign(Math.cos(leg.a) || 1);
+      const hip = hipPoint(leg);
       if (knee > 0.001) {
         const foot = toBody(leg.foot.x, leg.foot.y);
-        const length = Math.hypot(foot.x, foot.y) || 1;
+        const hipX = side * BEETLE_HIP;
+        const dx = foot.x - hipX;
+        const length = Math.hypot(dx, foot.y) || 1;
         let px = -foot.y / length;
-        let py = foot.x / length;
+        let py = dx / length;
         /* колено уходит наружу от оси тела, как у насекомого */
-        if (px * Math.sign(Math.cos(leg.a) || 1) < 0) { px = -px; py = -py; }
-        const bend = toWorld(foot.x / 2 + px * knee, foot.y / 2 + py * knee);
-        line(b.x, b.y, bend.x, bend.y, color, 0.013);
-        line(bend.x, bend.y, leg.foot.x, leg.foot.y, color, 0.013);
+        if (px * side < 0) { px = -px; py = -py; }
+        const bend = toWorld((hipX + foot.x) / 2 + px * knee, foot.y / 2 + py * knee);
+        line(hip.x, hip.y, bend.x, bend.y, color, BEETLE_WIDTH);
+        line(bend.x, bend.y, leg.foot.x, leg.foot.y, color, BEETLE_WIDTH);
       } else {
-        line(b.x, b.y, leg.foot.x, leg.foot.y, color, 0.013);
+        line(hip.x, hip.y, leg.foot.x, leg.foot.y, color, BEETLE_WIDTH);
       }
-      if (!swinging) dot(leg.foot.x, leg.foot.y, color, 0.007);
     });
 
     const carried = modeState.legs.filter((leg) => leg.swing < 0).length;
