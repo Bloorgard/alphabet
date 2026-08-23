@@ -206,11 +206,11 @@ function stepLegs() {
 
 MODES.beetle = {
   label: 'жук',
-  note: 'Буква идёт за курсором: стойка — тело, боковые ломаные — лапы. «Скорость» ускоряет и тело, и перебор лап; их вылет задаёт только «шаг». Краска — на лапах, которые сейчас в переносе.',
+  note: 'Буква идёт за курсором: стойка — тело, боковые ломаные — лапы. «Скорость» ускоряет и тело, и перебор лап; их вылет задаёт только «шаг». Красным остаётся след.',
   cursor: 'crosshair',
   tools: [
-    { type: 'range', key: 'speed', label: 'скорость', min: 0.05, max: 1.2, step: 0.01, value: 0.3 },
-    { type: 'range', key: 'stride', label: 'шаг', min: 0.012, max: 0.12, step: 0.004, value: 0.048 },
+    { type: 'range', key: 'speed', label: 'скорость', min: 0.05, max: 2.4, step: 0.01, value: 1.2 },
+    { type: 'range', key: 'stride', label: 'шаг', min: 0.012, max: 0.24, step: 0.004, value: 0.12 },
     { type: 'range', key: 'swing', label: 'перенос', min: 0.05, max: 0.5, step: 0.01, value: 0.16 },
     { type: 'range', key: 'lead', label: 'упреждение', min: 0, max: 0.5, step: 0.01, value: 0.14 },
     { type: 'range', key: 'knee', label: 'излом', min: 0, max: 0.1, step: 0.005, value: 0 },
@@ -218,7 +218,6 @@ MODES.beetle = {
     { type: 'toggle', key: 'turn', label: 'поворот', value: true },
     { type: 'toggle', key: 'flee', label: 'от курсора', value: false },
     { type: 'toggle', key: 'marks', label: 'след', value: false },
-    { type: 'toggle', key: 'paint', label: 'краска', value: true },
     { type: 'toggle', key: 'ghost', label: 'форма', value: false },
     { type: 'button', label: 'вернуть', action: () => beetleReset() },
   ],
@@ -246,9 +245,8 @@ MODES.beetle = {
     stepLegs();
 
     const marksVisible = on('marks');
-    const fadeTime = marksVisible ? 0.18 : 1.4;
-    modeState.marksOpacity += (Number(marksVisible) - modeState.marksOpacity)
-      * (1 - Math.exp(-STEP / fadeTime));
+    if (marksVisible) modeState.marksOpacity = 1;
+    else modeState.marksOpacity *= Math.exp(-STEP / 1.4);
     modeState.marks.forEach((mark) => { mark.age += STEP; });
     modeState.marks = modeState.marks.filter((mark) => mark.age < BEETLE_MARK_LIFE);
     if (!marksVisible && modeState.marksOpacity < 0.002) modeState.marks = [];
@@ -258,8 +256,8 @@ MODES.beetle = {
     if (modeState.marksOpacity > 0.001) {
       modeState.marks.forEach((mark) => {
         const ageOpacity = clamp((BEETLE_MARK_LIFE - mark.age) / BEETLE_MARK_FADE, 0, 1);
-        const alpha = 0.16 * modeState.marksOpacity * ageOpacity;
-        dot(mark.x, mark.y, `rgba(22,22,22,${alpha})`, BEETLE_WIDTH / 2);
+        const alpha = modeState.marksOpacity * ageOpacity;
+        dot(mark.x, mark.y, `rgba(224,33,15,${alpha})`, BEETLE_WIDTH / 2);
       });
     }
 
@@ -277,8 +275,6 @@ MODES.beetle = {
 
     const knee = num('knee');
     modeState.legs.forEach((leg) => {
-      const swinging = leg.swing >= 0;
-      const color = swinging && on('paint') ? RED : INK;
       const side = Math.sign(Math.cos(leg.a) || 1);
       const hip = hipPoint(leg);
       if (knee > 0.001) {
@@ -291,10 +287,10 @@ MODES.beetle = {
         /* колено уходит наружу от оси тела, как у насекомого */
         if (px * side < 0) { px = -px; py = -py; }
         const bend = toWorld((hipX + foot.x) / 2 + px * knee, foot.y / 2 + py * knee);
-        line(hip.x, hip.y, bend.x, bend.y, color, BEETLE_WIDTH);
-        line(bend.x, bend.y, leg.foot.x, leg.foot.y, color, BEETLE_WIDTH);
+        line(hip.x, hip.y, bend.x, bend.y, INK, BEETLE_WIDTH);
+        line(bend.x, bend.y, leg.foot.x, leg.foot.y, INK, BEETLE_WIDTH);
       } else {
-        line(hip.x, hip.y, leg.foot.x, leg.foot.y, color, BEETLE_WIDTH);
+        line(hip.x, hip.y, leg.foot.x, leg.foot.y, INK, BEETLE_WIDTH);
       }
     });
 
