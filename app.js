@@ -5,6 +5,7 @@ import { mountG } from './letters/g.js?v=2';
 import { mountD } from './letters/d.js?v=2';
 import { mountE } from './letters/e.js?v=4';
 import { mountYo } from './letters/yo.js?v=8';
+import { mountZh } from './letters/zh.js?v=3';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',
@@ -24,7 +25,8 @@ const READY = new Map([
   ['Г', mountG],
   ['Д', mountD],
   ['Е', mountE],
-  ['Ё', mountYo]
+  ['Ё', mountYo],
+  ['Ж', mountZh]
 ]);
 
 const grid = document.querySelector('#letter-grid');
