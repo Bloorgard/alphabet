@@ -96,6 +96,8 @@ const BEETLE_ARM_X = 0.1523;
 const BEETLE_ARM_Y = 0.1094;
 const BEETLE_ARM = Math.hypot(BEETLE_ARM_X, BEETLE_ARM_Y);
 const BEETLE_WIDTH = 0.05;
+const BEETLE_MARK_LIFE = 12;
+const BEETLE_MARK_FADE = 4;
 const BEETLE_UR = Math.atan2(-BEETLE_ARM_Y, BEETLE_ARM_X);
 const BEETLE_UL = Math.atan2(-BEETLE_ARM_Y, -BEETLE_ARM_X);
 const BEETLE_DR = Math.atan2(BEETLE_ARM_Y, BEETLE_ARM_X);
@@ -152,6 +154,7 @@ function beetleReset() {
   }));
   modeState.legs.forEach((leg) => { leg.foot = restPoint(leg); });
   modeState.marks = [];
+  modeState.marksOpacity = on('marks') ? 1 : 0;
 }
 
 function liftGroup(group) {
@@ -197,8 +200,7 @@ function stepLegs() {
     };
     if (t < 1) return;
     leg.swing = -1;
-    modeState.marks.push({ x: leg.foot.x, y: leg.foot.y });
-    if (modeState.marks.length > 80) modeState.marks.shift();
+    if (on('marks')) modeState.marks.push({ x: leg.foot.x, y: leg.foot.y, age: 0 });
   });
 }
 
@@ -242,10 +244,24 @@ MODES.beetle = {
     b.rot = wrap(b.rot + clamp(turn, -4.8 * STEP, 4.8 * STEP));
 
     stepLegs();
+
+    const marksVisible = on('marks');
+    const fadeTime = marksVisible ? 0.18 : 1.4;
+    modeState.marksOpacity += (Number(marksVisible) - modeState.marksOpacity)
+      * (1 - Math.exp(-STEP / fadeTime));
+    modeState.marks.forEach((mark) => { mark.age += STEP; });
+    modeState.marks = modeState.marks.filter((mark) => mark.age < BEETLE_MARK_LIFE);
+    if (!marksVisible && modeState.marksOpacity < 0.002) modeState.marks = [];
   },
   draw() {
     const b = modeState.body;
-    if (on('marks')) modeState.marks.forEach((mark) => dot(mark.x, mark.y, FAINT, 0.005));
+    if (modeState.marksOpacity > 0.001) {
+      modeState.marks.forEach((mark) => {
+        const ageOpacity = clamp((BEETLE_MARK_LIFE - mark.age) / BEETLE_MARK_FADE, 0, 1);
+        const alpha = 0.16 * modeState.marksOpacity * ageOpacity;
+        dot(mark.x, mark.y, `rgba(22,22,22,${alpha})`, BEETLE_WIDTH / 2);
+      });
+    }
 
     const top = toWorld(0, -BEETLE_STEM);
     const bottom = toWorld(0, BEETLE_STEM);
