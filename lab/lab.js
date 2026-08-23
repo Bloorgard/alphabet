@@ -12,7 +12,7 @@ const labSlug = (location.pathname.split('/').pop() || '').replace(/\.html?$/, '
 
 /* ---------- цвета ---------- */
 
-const LAB_GROUNDS = {
+const labGrounds = {
   paper: { mark: [22, 22, 22], field: [241, 237, 229], muted: '#8b877f' },
   ink: { mark: [241, 237, 229], field: [22, 22, 22], muted: 'rgba(241,237,229,.45)' },
 };
@@ -28,14 +28,14 @@ function labRgba(rgb, alpha) { return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alph
 
 /* Цвет метки и цвет поля. Всё, что рисуют механики, берётся отсюда:
    написанная руками rgba не переключится вместе с фоном. */
-function ink(alpha = 1) { return labRgba(LAB_GROUNDS[ground].mark, alpha); }
-function paper(alpha = 1) { return labRgba(LAB_GROUNDS[ground].field, alpha); }
+function ink(alpha = 1) { return labRgba(labGrounds[ground].mark, alpha); }
+function paper(alpha = 1) { return labRgba(labGrounds[ground].field, alpha); }
 
 function setGround(name) {
-  ground = name in LAB_GROUNDS ? name : 'paper';
+  ground = name in labGrounds ? name : 'paper';
   INK = ink(1);
   PAPER = paper(1);
-  MUTED = LAB_GROUNDS[ground].muted;
+  MUTED = labGrounds[ground].muted;
   FAINT = ink(0.16);
   GHOST = ink(0.09);
   document.body.dataset.ground = ground;
@@ -438,21 +438,21 @@ if (labBare) {
 
 /* ---------- запуск ---------- */
 
-function frame(now) {
-  const elapsed = (now - frame.last) / 1000;
-  frame.last = now;
+function labFrame(now) {
+  const elapsed = (now - labFrame.last) / 1000;
+  labFrame.last = now;
   if (!paused) {
-    frame.debt = Math.min(0.1, frame.debt + elapsed);
-    while (frame.debt >= STEP) {
+    labFrame.debt = Math.min(0.1, labFrame.debt + elapsed);
+    while (labFrame.debt >= STEP) {
       labStep();
-      frame.debt -= STEP;
+      labFrame.debt -= STEP;
     }
   }
   labDraw();
-  requestAnimationFrame(frame);
+  requestAnimationFrame(labFrame);
 }
-frame.last = performance.now();
-frame.debt = 0;
+labFrame.last = performance.now();
+labFrame.debt = 0;
 
 function startLab(config) {
   labConfig = config;
@@ -488,7 +488,7 @@ function startLab(config) {
   }
 
   new ResizeObserver(resize).observe(canvas);
-  requestAnimationFrame(frame);
+  requestAnimationFrame(labFrame);
 }
 
 /* Файл буквы грузится отсюда, а не тегом на странице: так стаб одинаков для всех
