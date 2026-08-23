@@ -959,6 +959,7 @@ MODES.field = {
 
 const KALEIDO_STEP = Math.PI / 3;
 const KALEIDO_START = -Math.PI / 2;
+const KALEIDO_STRETCH = (ARM_Y / ARM_X) / Math.tan(Math.PI / 6);
 const KALEIDO_COPIES = [
   { turn: 0, mirror: false },
   { turn: 0, mirror: true },
@@ -969,7 +970,7 @@ const KALEIDO_COPIES = [
 ];
 
 function kaleidoSectorAt(x, y) {
-  const angle = Math.atan2(y - 0.5, x - 0.5);
+  const angle = Math.atan2((y - 0.5) / KALEIDO_STRETCH, x - 0.5);
   const normalized = (angle - KALEIDO_START + Math.PI * 2) % (Math.PI * 2);
   return Math.min(5, Math.floor(normalized / KALEIDO_STEP));
 }
@@ -1007,18 +1008,24 @@ function addKaleidoPoint() {
 function mapKaleidoPoint(point, copy) {
   const transform = KALEIDO_COPIES[copy];
   let dx = point.x - 0.5;
-  const dy = point.y - 0.5;
+  const dy = (point.y - 0.5) / KALEIDO_STRETCH;
   if (transform.mirror) dx = -dx;
   const angle = transform.turn * Math.PI * 2 / 3;
   const c = Math.cos(angle);
   const s = Math.sin(angle);
-  return { x: 0.5 + dx * c - dy * s, y: 0.5 + dx * s + dy * c };
+  return {
+    x: 0.5 + dx * c - dy * s,
+    y: 0.5 + (dx * s + dy * c) * KALEIDO_STRETCH,
+  };
 }
 
 function drawKaleidoGuides() {
   for (let index = 0; index < 6; index += 1) {
     const boundary = KALEIDO_START + index * KALEIDO_STEP;
-    line(0.5, 0.5, 0.5 + Math.cos(boundary) * 0.72, 0.5 + Math.sin(boundary) * 0.72, 'rgba(22,22,22,.075)', 0.0015);
+    const dx = Math.cos(boundary);
+    const dy = Math.sin(boundary) * KALEIDO_STRETCH;
+    const length = Math.hypot(dx, dy);
+    line(0.5, 0.5, 0.5 + dx / length * 0.72, 0.5 + dy / length * 0.72, 'rgba(22,22,22,.075)', 0.0015);
   }
 }
 
@@ -1026,7 +1033,13 @@ function fillKaleidoSector(index) {
   const start = KALEIDO_START + index * KALEIDO_STEP;
   ctx.beginPath();
   ctx.moveTo(0.5 * S, 0.5 * S);
-  ctx.arc(0.5 * S, 0.5 * S, 0.72 * S, start, start + KALEIDO_STEP);
+  for (let step = 0; step <= 12; step += 1) {
+    const angle = start + KALEIDO_STEP * step / 12;
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle) * KALEIDO_STRETCH;
+    const length = Math.hypot(dx, dy);
+    ctx.lineTo((0.5 + dx / length * 0.72) * S, (0.5 + dy / length * 0.72) * S);
+  }
   ctx.closePath();
   ctx.fillStyle = 'rgba(22,22,22,.025)';
   ctx.fill();
@@ -1058,7 +1071,7 @@ function drawKaleidoStroke(stroke, copy) {
 
 MODES.kaleido = {
   label: 'калейдоскоп',
-  note: 'Начни рисовать в любом из шести равных секторов. Вертикаль «Ж» — главная ось: каждый штрих сразу получает точную зеркальную пару. Остальные пары приходят эхом после поворота на 120°. Пересечение центра даёт красную вспышку.',
+  note: 'Начни рисовать в любом секторе. Вертикаль и две диагонали «Ж» сами служат осями зеркала: каждый штрих получает пару по ту сторону линии. Пары приходят эхом, но симметрия не ломается. Пересечение центра даёт красную вспышку.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'brush', label: 'штрих', min: 0.002, max: 0.024, step: 0.001, value: 0.007 },
