@@ -1861,6 +1861,186 @@ MODES.boa = {
   },
 };
 
+/* ---------- 10. удав по дуге: то же тело, снятое с сетки ---------- */
+
+/* У сеточного удава буква получается ортогональной: клетка воюет с дугой, и
+   горловину пришлось делать мелкой, иначе читается Э. Здесь механика та же —
+   длина не меняется, яблоко становится шишкой, шишка уходит к хвосту, — но
+   тело проложено по самой прописи. Форма достаётся буквой, а не сеткой.
+
+   Укуса себя тут нет намеренно: З в горловине подходит к себе вплотную, и
+   правильно написанная буква убивала бы игрока. */
+
+const COIL_N = 48;
+const coil = { pts: [], dir: 0, seg: 0.03, lumps: [], apple: null, dead: null, done: false, started: false };
+
+function coilLay() {
+  /* Голова там, где З дописывается, хвост — где начата. */
+  coil.pts = resample(PRINT_PATH, COIL_N).reverse().map((point) => ({ x: point.x, y: point.y }));
+  coil.seg = PRINT_PATH.length / (COIL_N - 1);
+  const head = coil.pts[0];
+  const next = coil.pts[1] || head;
+  coil.dir = Math.atan2(head.y - next.y, head.x - next.x);
+}
+
+function coilApple() {
+  for (let tries = 0; tries < 200; tries += 1) {
+    const x = 0.08 + Math.random() * 0.84;
+    const y = 0.08 + Math.random() * 0.84;
+    if (coil.pts.every((point) => Math.hypot(point.x - x, point.y - y) > coil.seg * 2.2)) {
+      coil.apple = { x, y };
+      return;
+    }
+  }
+  coil.apple = null;
+}
+
+function coilReset() {
+  coilLay();
+  coil.lumps = [];
+  coil.apple = null;
+  coil.dead = null;
+  coil.done = false;
+  coil.started = false;
+  coilApple();
+}
+
+/* Считаем накрытую пропись, а не тело: свернувшийся вдвое удав по телу дал бы
+   сто процентов, хотя половина буквы осталась бы пустой. */
+function coilCovered() {
+  const checks = 40;
+  let hit = 0;
+  for (let i = 0; i < checks; i += 1) {
+    const mark = pointAt(PRINT_PATH, i / (checks - 1));
+    if (coil.pts.some((point) => Math.hypot(point.x - mark.x, point.y - mark.y) < coil.seg)) hit += 1;
+  }
+  return hit / checks;
+}
+
+function coilAt(pos) {
+  const last = coil.pts.length - 1;
+  const i = clamp(Math.floor(pos), 0, last);
+  const j = Math.min(i + 1, last);
+  const t = clamp(pos - i, 0, 1);
+  return { x: lerp(coil.pts[i].x, coil.pts[j].x, t), y: lerp(coil.pts[i].y, coil.pts[j].y, t) };
+}
+
+function coilAdvance() {
+  if (coil.dead || coil.done) return;
+
+  const speed = num('speed') * STEP;
+  const turn = num('turn') * STEP;
+  const head = coil.pts[0];
+
+  if (pointer.seen) {
+    const want = Math.atan2(pointer.y - head.y, pointer.x - head.x);
+    coil.dir += clamp(wrapAngle(want - coil.dir), -turn, turn);
+  }
+
+  const x = head.x + Math.cos(coil.dir) * speed;
+  const y = head.y + Math.sin(coil.dir) * speed;
+  if (x < 0 || y < 0 || x > 1 || y > 1) {
+    coil.dead = { x: clamp(x, 0, 1), y: clamp(y, 0, 1) };
+    return;
+  }
+  head.x = x;
+  head.y = y;
+
+  /* Тело идёт следом: каждая точка держит свой отрезок до предыдущей. */
+  for (let i = 1; i < coil.pts.length; i += 1) {
+    const a = coil.pts[i - 1];
+    const b = coil.pts[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const d = Math.hypot(dx, dy) || 1;
+    b.x = a.x + (dx / d) * coil.seg;
+    b.y = a.y + (dy / d) * coil.seg;
+  }
+
+  /* Шишка едет к хвосту тем же ходом, что и тело, и упирается в соседа. */
+  const rate = speed / coil.seg;
+  const last = coil.pts.length - 1;
+  coil.lumps.forEach((lump, index) => {
+    const ahead = index ? coil.lumps[index - 1].pos - 1 : last;
+    lump.pos = Math.min(lump.pos + rate, ahead);
+  });
+
+  if (coil.apple && Math.hypot(head.x - coil.apple.x, head.y - coil.apple.y) < coil.seg) {
+    if (coil.lumps.length <= last) coil.lumps.push({ pos: 0 });
+    coilApple();
+  }
+
+  if (coil.lumps.length > last && coilCovered() > 0.999) coil.done = true;
+}
+
+MODES.coil = {
+  label: 'удав по дуге',
+  note: 'Тот же удав, но тело проложено по прописи, а не по клеткам: форму даёт сама буква. Веди курсором — голова поворачивает за ним, тело идёт следом. Яблоко становится шишкой, шишка уходит к хвосту, и буква наливается с конца. Себя тут кусать нельзя: в горловине З подходит к себе вплотную.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'speed', label: 'ход', min: 0.1, max: 0.8, step: 0.05, value: 0.35 },
+    { type: 'range', key: 'turn', label: 'поворот', min: 1, max: 8, step: 0.5, value: 3.5 },
+    { type: 'toggle', key: 'trace', label: 'пропись', value: true },
+    { type: 'toggle', key: 'paint', label: 'краска', value: true },
+    { type: 'button', label: 'заново', action: () => coilReset() },
+  ],
+  setup() { coilReset(); },
+  onMove() { coil.started = true; },
+  onKey(event, down) {
+    if (!down) return;
+    if (event.code === 'ArrowLeft') coil.dir -= 0.25;
+    else if (event.code === 'ArrowRight') coil.dir += 0.25;
+    else return;
+    event.preventDefault();
+    coil.started = true;
+  },
+  step() {
+    if (!coil.started) return;
+    coilAdvance();
+  },
+  draw() {
+    if (on('trace')) drawSamples(PRINT_PATH, ink(0.09), 0.05);
+
+    ctx.save();
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 0.025 * S;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    coil.pts.forEach((point, index) => {
+      if (index) ctx.lineTo(point.x * S, point.y * S);
+      else ctx.moveTo(point.x * S, point.y * S);
+    });
+    ctx.stroke();
+    ctx.restore();
+
+    for (const lump of coil.lumps) {
+      const point = coilAt(lump.pos);
+      dot(point.x, point.y, INK, 0.025);
+    }
+
+    const head = coil.pts[0];
+    dot(head.x, head.y, INK, 0.025);
+    for (const side of [-1, 1]) {
+      dot(
+        head.x + Math.cos(coil.dir) * 0.009 - Math.sin(coil.dir) * side * 0.009,
+        head.y + Math.sin(coil.dir) * 0.009 + Math.cos(coil.dir) * side * 0.009,
+        PAPER,
+        0.005,
+      );
+    }
+
+    if (coil.apple && !coil.dead) dot(coil.apple.x, coil.apple.y, on('paint') ? RED : INK, 0.017);
+    if (coil.dead && on('paint')) dot(coil.dead.x, coil.dead.y, RED, 0.025);
+
+    const full = Math.round((coil.lumps.length / coil.pts.length) * 100);
+    const share = Math.round(coilCovered() * 100);
+    if (coil.dead) drawStatus('край', true);
+    else if (coil.done) drawStatus('буква налита', false);
+    else drawStatus(`налито ${full}% · буква ${share}%`, false);
+  },
+};
+
 startLab({
   title: 'З · две дуги и горловина',
   modes: MODES,
