@@ -1475,11 +1475,11 @@ MODES.snake = {
    по себе же. Змейка так не умеет, ей нужны две параллельные нитки, и середина
    буквы получается двойной. Поэтому заход держим неглубоким — на треть ширины:
    глубокая полка режет букву пополам, и вместо З читается Э. */
-const BOA_GRID = 21;
+const BOA_GRID = 20;
 const BOA_TURNS = [
-  [8, 3], [16, 3], [16, 7],
-  [15, 7], [15, 8], [13, 8], [13, 10],
-  [16, 10], [16, 18], [6, 18],
+  [7, 3], [15, 3], [15, 7],
+  [14, 7], [14, 8], [12, 8], [12, 10],
+  [15, 10], [15, 17], [5, 17],
 ];
 
 function boaRoute(grid) {
@@ -1640,20 +1640,42 @@ function boaAlong(spine, along) {
   return spine.at(-1);
 }
 
-/* Толщина вдоль тела: линия, из которой холмами поднимаются голова и шишки.
-   Холм гауссов, поэтому переход в линию гладкий, а соседние шишки сходятся
-   перетяжкой, а не режут друг друга дугой. */
+/* Толщина вдоль тела. Шишка — настоящий шар, а не гауссов холм: у холма бока
+   пологие, и соседние шишки сливаются в колбасу. Шары же сходятся узкой
+   вогнутой перетяжкой, а с линией сопрягаются мягким максимумом — он даёт
+   галтель у основания вместо стыка поперёк хода. */
 const BOA_LINE = 0.28;
-const BOA_BULGE = 0.6;
-const BOA_SPREAD = 0.5;
+const BOA_BALL = 0.62;
+const BOA_HEAD = 0.72;
+const BOA_MELT = 0.07;
+
+function boaSmax(a, b, k) {
+  const mix = clamp(0.5 + (0.5 * (a - b)) / k, 0, 1);
+  return lerp(b, a, mix) + k * mix * (1 - mix);
+}
+
+function boaBall(radius, offset) {
+  const rest = radius * radius - offset * offset;
+  return rest > 0 ? Math.sqrt(rest) : 0;
+}
 
 function boaRadius(along, t) {
-  let hill = Math.exp(-((along / BOA_SPREAD) ** 2));
+  let ball = boaBall(BOA_HEAD, along);
   for (const lump of boa.lumps) {
     const at = lump.stuck ? lump.pos : lump.pos + t;
-    hill = Math.max(hill, Math.exp(-(((along - at) / BOA_SPREAD) ** 2)));
+    ball = Math.max(ball, boaBall(BOA_BALL, along - at));
   }
-  return BOA_LINE + (BOA_BULGE - BOA_LINE) * hill;
+  return boaSmax(ball, BOA_LINE, BOA_MELT);
+}
+
+/* Куда смотреть: на яблоко, а без него — по ходу. */
+function boaGaze(head) {
+  const target = boa.apple;
+  if (!target) return { x: boa.dir[0], y: boa.dir[1] };
+  const dx = target.x - head.x;
+  const dy = target.y - head.y;
+  const away = Math.hypot(dx, dy);
+  return away < 0.001 ? { x: boa.dir[0], y: boa.dir[1] } : { x: dx / away, y: dy / away };
 }
 
 MODES.boa = {
@@ -1661,9 +1683,11 @@ MODES.boa = {
   note: 'Длина тела не меняется и равна контуру З: змейка это и есть буква. Тонкая — ещё не буква, а её след. Яблоко становится шишкой, шишка уходит к хвосту, и буква наливается с конца. Яблоки падают в стороне, так что за каждым надо сойти с буквы и уложиться в неё заново.',
   cursor: 'crosshair',
   tools: [
-    { type: 'range', key: 'grid', label: 'сетка', min: 15, max: 29, step: 2, value: 21 },
+    { type: 'range', key: 'grid', label: 'сетка', min: 12, max: 28, step: 4, value: 20 },
     { type: 'range', key: 'speed', label: 'темп', min: 2, max: 14, step: 1, value: 6 },
+    { type: 'range', key: 'ease', label: 'плавность', min: 0, max: 1, step: 0.1, value: 0.7 },
     { type: 'toggle', key: 'trace', label: 'пропись', value: true },
+    { type: 'toggle', key: 'cells', label: 'клетки', value: false },
     { type: 'toggle', key: 'wrap', label: 'края', value: false },
     { type: 'toggle', key: 'paint', label: 'краска', value: true },
     { type: 'button', label: 'заново', action: () => boaReset() },
@@ -1698,10 +1722,20 @@ MODES.boa = {
   draw() {
     const size = 1 / boa.grid;
     const mid = (value) => (value + 0.5) * size;
-    /* доля хода: тело едет непрерывно, а решения принимает по клеткам */
-    const t = boa.started && !boa.dead && !boa.done ? clamp(boa.tick, 0, 1) : 0;
+    /* Доля хода со сглаживанием: внутри хода змейка трогается и тормозит, так что
+       клетки на глаз читаются, а рывка нет. Ползунок доводит вплоть до старого
+       щелчка по клеткам — на быстрой игре целиться по нему проще. */
+    const running = boa.started && !boa.dead && !boa.done;
+    const raw = running ? clamp(boa.tick, 0, 1) : 0;
+    const t = raw * raw * (3 - 2 * raw) * num('ease');
     const spine = boaSpine(t);
     const tail = spine.at(-1).s;
+
+    if (on('cells')) {
+      for (let y = 0; y < boa.grid; y += 1) {
+        for (let x = 0; x < boa.grid; x += 1) dot(mid(x), mid(y), ink(0.07), size * 0.06);
+      }
+    }
 
     if (on('trace')) {
       const body = new Set(boa.cells.map((cell) => snakeKey(cell.x, cell.y)));
@@ -1710,10 +1744,10 @@ MODES.boa = {
       }
     }
 
-    /* тело ведём кистью переменного радиуса: шишка вырастает из линии холмом,
-       а не садится на неё отдельным кругом со стыком поперёк хода */
+    /* тело ведём кистью переменного радиуса: шаг мельче галтели, иначе на
+       крутом боку шара кисть оставит ступеньки */
     ctx.fillStyle = INK;
-    for (let along = 0; along <= tail; along += 0.1) {
+    for (let along = 0; along <= tail; along += 0.04) {
       const point = boaAlong(spine, along);
       if (!point) continue;
       const radius = boaRadius(along, t);
@@ -1724,16 +1758,39 @@ MODES.boa = {
 
     const head = spine[0];
     if (head) {
-      /* глаза смотрят по ходу и разведены поперёк него */
+      const gaze = boaGaze(head);
       const [dx, dy] = boa.dir;
-      const eye = size * 0.17;
+
+      /* язык раздвоенной вилкой, вынесен за край головы по ходу */
+      ctx.fillStyle = INK;
+      const root = BOA_HEAD * 0.86;
+      const long = 0.85;
+      const wide = 0.22;
+      const fork = (from, to) => {
+        const ax = mid(head.x) + dx * from;
+        const ay = mid(head.y) + dy * from;
+        const bx = mid(head.x) + dx * to;
+        const by = mid(head.y) + dy * to;
+        ctx.beginPath();
+        ctx.moveTo((ax + dy * wide * size) * S, (ay - dx * wide * size) * S);
+        ctx.lineTo((ax - dy * wide * size) * S, (ay + dx * wide * size) * S);
+        ctx.lineTo(bx * S, by * S);
+        ctx.closePath();
+        ctx.fill();
+      };
+      fork((root + long / 2) * size, root * size);
+      fork((root + long) * size, (root + long / 2) * size);
+
+      /* глаза поперёк хода, зрачки следят за яблоком */
+      const spread = BOA_HEAD * 0.42 * size;
+      const shift = BOA_HEAD * 0.18 * size;
+      const white = size * 0.2;
+      const pupil = size * 0.085;
       for (const side of [-1, 1]) {
-        dot(
-          mid(head.x) + dx * eye + dy * side * eye,
-          mid(head.y) + dy * eye - dx * side * eye,
-          PAPER,
-          size * 0.09,
-        );
+        const ex = mid(head.x) + dx * shift + dy * side * spread;
+        const ey = mid(head.y) + dy * shift - dx * side * spread;
+        dot(ex, ey, PAPER, white);
+        dot(ex + gaze.x * (white - pupil), ey + gaze.y * (white - pupil), INK, pupil);
       }
     }
 
