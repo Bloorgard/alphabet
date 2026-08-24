@@ -163,11 +163,15 @@
     footer { grid-template-columns: 1fr; }
     #note { justify-self: start; text-align: left; }
   }
+
+  .back { color: var(--muted); text-decoration: none; letter-spacing: .08em; }
+  .back:hover { color: var(--ink); }
 </style>
 </head>
 <body>
 <header>
-  <div class="identity"><b>З · две дуги и горловина</b></div>
+  <div class="identity">
+    <a class="back" href="./">полигоны</a><b>З · две дуги и горловина</b></div>
   <nav class="modes" id="modes" aria-label="Механика"></nav>
 </header>
 

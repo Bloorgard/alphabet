@@ -22,10 +22,14 @@
   .tools button { border: 1px solid rgba(22,22,22,.18); padding: 5px 9px; background: none; color: var(--muted); font: inherit; text-transform: uppercase; letter-spacing: .08em; cursor: pointer; }
   .tools button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--paper); }
   #note { color: var(--muted); text-transform: none; letter-spacing: .02em; }
+
+  .back { color: var(--muted); text-decoration: none; letter-spacing: .08em; }
+  .back:hover { color: var(--ink); }
 </style>
 </head>
 <body>
 <header>
+  <a class="back" href="./">полигоны</a>
   <b>Б / полигон механик</b>
   <div class="modes" id="modes"></div>
 </header>

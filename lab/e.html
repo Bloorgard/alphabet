@@ -189,11 +189,15 @@
     footer { grid-template-columns: 1fr; }
     #note { justify-self: start; text-align: left; }
   }
+
+  .back { color: var(--muted); text-decoration: none; letter-spacing: .08em; }
+  .back:hover { color: var(--ink); }
 </style>
 </head>
 <body>
 <header>
   <div class="identity">
+    <a class="back" href="./">полигоны</a>
     <b>Е / Ё · три линии</b>
     <div class="variant" id="variant" aria-label="Вариант буквы">
       <button type="button" data-variant="Е" aria-pressed="true">Е</button>
