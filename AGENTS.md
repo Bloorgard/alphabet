@@ -87,7 +87,7 @@ Tab по-прежнему переставляет фокус между пол�
 <body class="lab">
 <header>
   <div class="identity">
-    <a class="back" href="./">полигоны</a>
+    <a class="back" href="index.html">полигоны</a>
     <b id="identity"></b>
     <div class="variant" id="variant" hidden aria-label="Вариант буквы"></div>
   </div>
