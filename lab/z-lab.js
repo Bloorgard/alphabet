@@ -1477,9 +1477,9 @@ MODES.snake = {
    глубокая полка режет букву пополам, и вместо З читается Э. */
 const BOA_GRID = 20;
 const BOA_TURNS = [
-  [7, 3], [15, 3], [15, 7],
-  [14, 7], [14, 8], [12, 8], [12, 10],
-  [15, 10], [15, 17], [5, 17],
+  [6, 2], [16, 2], [16, 7],
+  [15, 7], [15, 8], [13, 8], [13, 10],
+  [16, 10], [16, 18], [4, 18],
 ];
 
 function boaRoute(grid) {
@@ -1605,9 +1605,28 @@ function boaAdvance() {
   if (boa.lumps.length > limit && boaCovered() === boa.letter) boa.done = true;
 }
 
-/* Осевая тела с учётом доли хода: голова выдвинута вперёд, хвост подтянут,
-   середина стоит. Отсюда плавность — по клеткам змейка думает, а едет между ними.
-   `s` у точки — расстояние от головы в клетках, `gap` метит заворот через край. */
+/* Углы клеточной ломаной срезаются по Чайкину: змейка живая, и на прямых углах
+   она выглядит гнутой проволокой. Вместе с точками ведём и `s` — место в теле,
+   к которому привязаны шишки, — иначе после сглаживания они бы поехали. */
+function boaSmooth(points, passes = 2) {
+  let list = points;
+  for (let pass = 0; pass < passes; pass += 1) {
+    const out = [list[0]];
+    for (let i = 0; i < list.length - 1; i += 1) {
+      const a = list[i];
+      const b = list[i + 1];
+      if (b.gap) { out.push(b); continue; }
+      const cut = (mix) => ({
+        x: lerp(a.x, b.x, mix), y: lerp(a.y, b.y, mix), s: lerp(a.s, b.s, mix), gap: false,
+      });
+      out.push(cut(0.25), cut(0.75));
+    }
+    out.push(list.at(-1));
+    list = out;
+  }
+  return list;
+}
+
 function boaSpine(t) {
   const cells = boa.cells;
   const head = cells[0];
@@ -1624,7 +1643,7 @@ function boaSpine(t) {
     last.y = lerp(last.y, before.y, t);
     last.s -= t;
   }
-  return points;
+  return boaSmooth(points);
 }
 
 function boaAlong(spine, along) {
@@ -1644,10 +1663,12 @@ function boaAlong(spine, along) {
    пологие, и соседние шишки сливаются в колбасу. Шары же сходятся узкой
    вогнутой перетяжкой, а с линией сопрягаются мягким максимумом — он даёт
    галтель у основания вместо стыка поперёк хода. */
-const BOA_LINE = 0.28;
-const BOA_BALL = 0.62;
-const BOA_HEAD = 0.72;
-const BOA_MELT = 0.07;
+const BOA_LINE = 0.26;
+const BOA_BALL = 0.5;
+const BOA_HEAD = 0.56;
+const BOA_MELT = 0.06;
+/* хвост сходит на нет: без этого змейка обрывается круглым штампом */
+const BOA_TAIL = 1.6;
 
 function boaSmax(a, b, k) {
   const mix = clamp(0.5 + (0.5 * (a - b)) / k, 0, 1);
@@ -1659,13 +1680,15 @@ function boaBall(radius, offset) {
   return rest > 0 ? Math.sqrt(rest) : 0;
 }
 
-function boaRadius(along, t) {
+function boaRadius(along, t, tail) {
   let ball = boaBall(BOA_HEAD, along);
   for (const lump of boa.lumps) {
     const at = lump.stuck ? lump.pos : lump.pos + t;
     ball = Math.max(ball, boaBall(BOA_BALL, along - at));
   }
-  return boaSmax(ball, BOA_LINE, BOA_MELT);
+  const thick = boaSmax(ball, BOA_LINE, BOA_MELT);
+  const left = clamp((tail - along) / BOA_TAIL, 0, 1);
+  return thick * (0.22 + 0.78 * Math.sqrt(left));
 }
 
 /* Куда смотреть: на яблоко, а без него — по ходу. */
@@ -1680,7 +1703,7 @@ function boaGaze(head) {
 
 MODES.boa = {
   label: 'удав',
-  note: 'Длина тела не меняется и равна контуру З: змейка это и есть буква. Тонкая — ещё не буква, а её след. Яблоко становится шишкой, шишка уходит к хвосту, и буква наливается с конца. Яблоки падают в стороне, так что за каждым надо сойти с буквы и уложиться в неё заново.',
+  note: 'Длина тела не меняется и равна контуру З: змейка это и есть буква, а тонкая — только её след. Яблоко становится шишкой, шишка уходит к хвосту, и буква наливается с конца. Яблоко встаёт на клетку буквы, свободную от тела: чтобы поесть, надо с буквы сойти и уложиться в неё заново. Стрелки или ведение по кадру.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'grid', label: 'сетка', min: 12, max: 28, step: 4, value: 20 },
@@ -1722,9 +1745,6 @@ MODES.boa = {
   draw() {
     const size = 1 / boa.grid;
     const mid = (value) => (value + 0.5) * size;
-    /* Доля хода со сглаживанием: внутри хода змейка трогается и тормозит, так что
-       клетки на глаз читаются, а рывка нет. Ползунок доводит вплоть до старого
-       щелчка по клеткам — на быстрой игре целиться по нему проще. */
     const running = boa.started && !boa.dead && !boa.done;
     const raw = running ? clamp(boa.tick, 0, 1) : 0;
     const t = raw * raw * (3 - 2 * raw) * num('ease');
@@ -1733,15 +1753,29 @@ MODES.boa = {
 
     if (on('cells')) {
       for (let y = 0; y < boa.grid; y += 1) {
-        for (let x = 0; x < boa.grid; x += 1) dot(mid(x), mid(y), ink(0.07), size * 0.06);
+        for (let x = 0; x < boa.grid; x += 1) dot(mid(x), mid(y), ink(0.06), size * 0.03);
       }
     }
 
+    /* пропись — та же буква той же гнутой линией, только вполсилы: видно,
+       куда укладываться, и это разметка, а не крошка по клеткам */
     if (on('trace')) {
-      const body = new Set(boa.cells.map((cell) => snakeKey(cell.x, cell.y)));
-      for (const cell of boa.route) {
-        if (!body.has(snakeKey(cell.x, cell.y))) dot(mid(cell.x), mid(cell.y), ink(0.12), size * 0.16);
-      }
+      const line = boaSmooth(boa.route.map((cell, index) => (
+        { x: cell.x, y: cell.y, s: index, gap: false }
+      )));
+      ctx.save();
+      ctx.strokeStyle = ink(0.11);
+      ctx.lineWidth = BOA_LINE * 1.2 * size * S;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      line.forEach((point, index) => {
+        const at = [mid(point.x) * S, mid(point.y) * S];
+        if (index) ctx.lineTo(at[0], at[1]);
+        else ctx.moveTo(at[0], at[1]);
+      });
+      ctx.stroke();
+      ctx.restore();
     }
 
     /* тело ведём кистью переменного радиуса: шаг мельче галтели, иначе на
@@ -1750,7 +1784,7 @@ MODES.boa = {
     for (let along = 0; along <= tail; along += 0.04) {
       const point = boaAlong(spine, along);
       if (!point) continue;
-      const radius = boaRadius(along, t);
+      const radius = boaRadius(along, t, tail);
       ctx.beginPath();
       ctx.arc(mid(point.x) * S, mid(point.y) * S, radius * size * S, 0, Math.PI * 2);
       ctx.fill();
@@ -1760,51 +1794,70 @@ MODES.boa = {
     if (head) {
       const gaze = boaGaze(head);
       const [dx, dy] = boa.dir;
+      const hx = mid(head.x);
+      const hy = mid(head.y);
 
-      /* язык раздвоенной вилкой, вынесен за край головы по ходу */
-      ctx.fillStyle = INK;
-      const root = BOA_HEAD * 0.86;
-      const long = 0.85;
-      const wide = 0.22;
-      const fork = (from, to) => {
-        const ax = mid(head.x) + dx * from;
-        const ay = mid(head.y) + dy * from;
-        const bx = mid(head.x) + dx * to;
-        const by = mid(head.y) + dy * to;
-        ctx.beginPath();
-        ctx.moveTo((ax + dy * wide * size) * S, (ay - dx * wide * size) * S);
-        ctx.lineTo((ax - dy * wide * size) * S, (ay + dx * wide * size) * S);
-        ctx.lineTo(bx * S, by * S);
-        ctx.closePath();
-        ctx.fill();
-      };
-      fork((root + long / 2) * size, root * size);
-      fork((root + long) * size, (root + long / 2) * size);
+      /* язык показывается изредка и ненадолго — змея, а не вилка на палке */
+      const beat = (performance.now() / 1000) % 2.1;
+      if (!boa.dead && beat < 0.26) {
+        const out = (beat < 0.13 ? beat : 0.26 - beat) / 0.13;
+        ctx.save();
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = size * 0.055 * S;
+        ctx.lineCap = 'round';
+        for (const side of [-1, 1]) {
+          const long = (BOA_HEAD + 0.5 * out) * size;
+          const fork = 0.16 * out * size;
+          ctx.beginPath();
+          ctx.moveTo((hx + dx * BOA_HEAD * size * 0.8) * S, (hy + dy * BOA_HEAD * size * 0.8) * S);
+          ctx.quadraticCurveTo(
+            (hx + dx * long * 0.7) * S,
+            (hy + dy * long * 0.7) * S,
+            (hx + dx * long + dy * side * fork) * S,
+            (hy + dy * long - dx * side * fork) * S,
+          );
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
 
       /* глаза поперёк хода, зрачки следят за яблоком */
-      const spread = BOA_HEAD * 0.42 * size;
-      const shift = BOA_HEAD * 0.18 * size;
-      const white = size * 0.2;
-      const pupil = size * 0.085;
+      const spread = BOA_HEAD * 0.46 * size;
+      const shift = BOA_HEAD * 0.2 * size;
+      const white = size * 0.17;
+      const pupil = size * 0.075;
       for (const side of [-1, 1]) {
-        const ex = mid(head.x) + dx * shift + dy * side * spread;
-        const ey = mid(head.y) + dy * shift - dx * side * spread;
+        const ex = hx + dx * shift + dy * side * spread;
+        const ey = hy + dy * shift - dx * side * spread;
         dot(ex, ey, PAPER, white);
-        dot(ex + gaze.x * (white - pupil), ey + gaze.y * (white - pupil), INK, pupil);
+        if (boa.dead) {
+          /* закрытые глаза: змейка приехала */
+          ctx.save();
+          ctx.strokeStyle = INK;
+          ctx.lineWidth = size * 0.05 * S;
+          ctx.lineCap = 'round';
+          for (const turn of [-1, 1]) {
+            const arm = white * 0.62;
+            ctx.beginPath();
+            ctx.moveTo((ex - arm) * S, (ey - arm * turn) * S);
+            ctx.lineTo((ex + arm) * S, (ey + arm * turn) * S);
+            ctx.stroke();
+          }
+          ctx.restore();
+        } else {
+          dot(ex + gaze.x * (white - pupil), ey + gaze.y * (white - pupil), INK, pupil);
+        }
       }
     }
 
     if (boa.apple && !boa.dead) {
-      dot(mid(boa.apple.x), mid(boa.apple.y), on('paint') ? RED : INK, size * 0.34);
+      dot(mid(boa.apple.x), mid(boa.apple.y), on('paint') ? RED : INK, size * 0.3);
     }
 
-    if (boa.dead && on('paint')) dot(mid(boa.dead.x), mid(boa.dead.y), RED, size * 0.5);
-
     const full = Math.round((boa.lumps.length / Math.max(1, boa.cells.length)) * 100);
-    const share = Math.round((boaCovered() / boa.letter) * 100);
-    if (boa.dead) drawStatus(boa.dead.wall ? 'край' : 'укус', true);
+    if (boa.dead) drawStatus(boa.dead.wall ? 'край' : 'укус', on('paint'));
     else if (boa.done) drawStatus('буква налита', false);
-    else drawStatus(`налито ${full}% · буква ${share}%`, false);
+    else drawStatus(`налито ${full}%`, false);
   },
 };
 
