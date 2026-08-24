@@ -1467,20 +1467,25 @@ MODES.snake = {
 
 /* Углы буквы с эскиза: З, собранная прямыми ходами по сетке. Растр кривой дал бы
    лесенку, а змейка пишет своими средствами — отрезком и поворотом. */
-/* У печатной З середина — точка возврата: линия входит туда и выходит обратно
+/* Углы буквы — целыми клетками базовой сетки 21x21, как их видно на экране и
+   как их удобно нарисовать в макете. Другая сетка получает то же начертание
+   пересчётом.
+
+   У печатной З середина — точка возврата: линия входит туда и выходит обратно
    по себе же. Змейка так не умеет, ей нужны две параллельные нитки, и середина
    буквы получается двойной. Поэтому заход держим неглубоким — на треть ширины:
    глубокая полка режет букву пополам, и вместо З читается Э. */
+const BOA_GRID = 21;
 const BOA_TURNS = [
-  [0.364, 0.140], [0.773, 0.140], [0.773, 0.320],
-  [0.700, 0.320], [0.700, 0.390], [0.620, 0.390], [0.620, 0.470],
-  [0.773, 0.470], [0.773, 0.844], [0.300, 0.844],
+  [8, 3], [16, 3], [16, 7],
+  [15, 7], [15, 8], [13, 8], [13, 10],
+  [16, 10], [16, 18], [6, 18],
 ];
 
 function boaRoute(grid) {
   const nodes = BOA_TURNS.map(([x, y]) => ({
-    x: clamp(Math.round(x * grid), 0, grid - 1),
-    y: clamp(Math.round(y * grid), 0, grid - 1),
+    x: clamp(Math.round((x / BOA_GRID) * grid), 0, grid - 1),
+    y: clamp(Math.round((y / BOA_GRID) * grid), 0, grid - 1),
   }));
   const cells = [];
   const put = (x, y) => {
@@ -1515,14 +1520,12 @@ function boaLay() {
   if (!boa.dir[0] && !boa.dir[1]) boa.dir = [-1, 0];
 }
 
+/* яблоко падает только на саму букву, на клетку, которую тело сейчас не занимает:
+   пока змейка лежит в З целиком, класть яблоко некуда — оно появится, как только
+   она сойдёт с буквы, и позовёт вернуться ровно туда, где её не хватает */
 function boaApple() {
   const taken = new Set(boa.cells.map((cell) => snakeKey(cell.x, cell.y)));
-  const free = [];
-  for (let y = 0; y < boa.grid; y += 1) {
-    for (let x = 0; x < boa.grid; x += 1) {
-      if (!taken.has(snakeKey(x, y))) free.push({ x, y });
-    }
-  }
+  const free = boa.route.filter((cell) => !taken.has(snakeKey(cell.x, cell.y)));
   boa.apple = free.length ? free[Math.floor(Math.random() * free.length)] : null;
 }
 
@@ -1586,15 +1589,71 @@ function boaAdvance() {
   boa.lumps.forEach((lump, index) => {
     const ahead = index ? boa.lumps[index - 1].pos - 1 : limit;
     lump.pos = Math.min(lump.pos + 1, ahead);
+    /* доехавшая шишка дальше едет вместе с телом, а не отстаёт от него:
+       на отрисовке это разные движения */
+    lump.stuck = lump.pos >= ahead;
   });
 
   /* одно яблоко — одна шишка */
   if (boa.apple && boa.apple.x === x && boa.apple.y === y) {
-    if (boa.lumps.length <= limit) boa.lumps.push({ pos: 0 });
+    if (boa.lumps.length <= limit) boa.lumps.push({ pos: 0, stuck: false });
     boaApple();
   }
+  /* на букве могло не быть свободной клетки — пробуем каждый ход */
+  if (!boa.apple) boaApple();
 
   if (boa.lumps.length > limit && boaCovered() === boa.letter) boa.done = true;
+}
+
+/* Осевая тела с учётом доли хода: голова выдвинута вперёд, хвост подтянут,
+   середина стоит. Отсюда плавность — по клеткам змейка думает, а едет между ними.
+   `s` у точки — расстояние от головы в клетках, `gap` метит заворот через край. */
+function boaSpine(t) {
+  const cells = boa.cells;
+  const head = cells[0];
+  const points = [{ x: head.x + boa.dir[0] * t, y: head.y + boa.dir[1] * t, s: 0, gap: false }];
+  cells.forEach((cell, index) => {
+    const prev = index ? cells[index - 1] : head;
+    const gap = Math.abs(cell.x - prev.x) + Math.abs(cell.y - prev.y) > 1;
+    points.push({ x: cell.x, y: cell.y, s: t + index, gap });
+  });
+  const last = points.at(-1);
+  const before = cells[cells.length - 2];
+  if (before && !last.gap) {
+    last.x = lerp(last.x, before.x, t);
+    last.y = lerp(last.y, before.y, t);
+    last.s -= t;
+  }
+  return points;
+}
+
+function boaAlong(spine, along) {
+  if (along <= 0) return spine[0];
+  for (let i = 1; i < spine.length; i += 1) {
+    if (spine[i].s < along) continue;
+    if (spine[i].gap) return null;
+    const back = spine[i - 1];
+    const span = spine[i].s - back.s;
+    const mix = span > 0.000001 ? (along - back.s) / span : 0;
+    return { x: lerp(back.x, spine[i].x, mix), y: lerp(back.y, spine[i].y, mix) };
+  }
+  return spine.at(-1);
+}
+
+/* Толщина вдоль тела: линия, из которой холмами поднимаются голова и шишки.
+   Холм гауссов, поэтому переход в линию гладкий, а соседние шишки сходятся
+   перетяжкой, а не режут друг друга дугой. */
+const BOA_LINE = 0.28;
+const BOA_BULGE = 0.6;
+const BOA_SPREAD = 0.5;
+
+function boaRadius(along, t) {
+  let hill = Math.exp(-((along / BOA_SPREAD) ** 2));
+  for (const lump of boa.lumps) {
+    const at = lump.stuck ? lump.pos : lump.pos + t;
+    hill = Math.max(hill, Math.exp(-(((along - at) / BOA_SPREAD) ** 2)));
+  }
+  return BOA_LINE + (BOA_BULGE - BOA_LINE) * hill;
 }
 
 MODES.boa = {
@@ -1639,6 +1698,10 @@ MODES.boa = {
   draw() {
     const size = 1 / boa.grid;
     const mid = (value) => (value + 0.5) * size;
+    /* доля хода: тело едет непрерывно, а решения принимает по клеткам */
+    const t = boa.started && !boa.dead && !boa.done ? clamp(boa.tick, 0, 1) : 0;
+    const spine = boaSpine(t);
+    const tail = spine.at(-1).s;
 
     if (on('trace')) {
       const body = new Set(boa.cells.map((cell) => snakeKey(cell.x, cell.y)));
@@ -1647,31 +1710,20 @@ MODES.boa = {
       }
     }
 
-    /* тело одной линией со скруглёнными углами; на завороте через край
-       рвём линию, иначе она прочертит весь кадр насквозь */
-    ctx.save();
-    ctx.strokeStyle = INK;
-    ctx.lineWidth = size * 0.58 * S;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    boa.cells.forEach((cell, index) => {
-      const prev = boa.cells[index - 1];
-      const jump = prev && Math.abs(prev.x - cell.x) + Math.abs(prev.y - cell.y) > 1;
-      if (!index || jump) ctx.moveTo(mid(cell.x) * S, mid(cell.y) * S);
-      else ctx.lineTo(mid(cell.x) * S, mid(cell.y) * S);
-    });
-    ctx.stroke();
-    ctx.restore();
-
-    for (const lump of boa.lumps) {
-      const cell = boa.cells[lump.pos];
-      if (cell) dot(mid(cell.x), mid(cell.y), INK, size * 0.5);
+    /* тело ведём кистью переменного радиуса: шишка вырастает из линии холмом,
+       а не садится на неё отдельным кругом со стыком поперёк хода */
+    ctx.fillStyle = INK;
+    for (let along = 0; along <= tail; along += 0.1) {
+      const point = boaAlong(spine, along);
+      if (!point) continue;
+      const radius = boaRadius(along, t);
+      ctx.beginPath();
+      ctx.arc(mid(point.x) * S, mid(point.y) * S, radius * size * S, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    const head = boa.cells[0];
+    const head = spine[0];
     if (head) {
-      dot(mid(head.x), mid(head.y), INK, size * 0.5);
       /* глаза смотрят по ходу и разведены поперёк него */
       const [dx, dy] = boa.dir;
       const eye = size * 0.17;
