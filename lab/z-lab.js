@@ -1,32 +1,8 @@
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-const modesBar = document.getElementById('modes');
-const toolsBar = document.getElementById('tools');
-const note = document.getElementById('note');
-const stage = document.getElementById('stage');
+/* З — две дуги и горловина.
 
-const INK = '#161616';
-const RED = '#e0210f';
-const MUTED = '#8b877f';
-const FAINT = 'rgba(22,22,22,.16)';
-const GHOST = 'rgba(22,22,22,.09)';
-const STEP = 1 / 60;
-
-let S = 600;
-let dpr = 1;
-let current = '';
-let modeState = {};
-const toolValues = {};
-const pointer = {
-  x: 0.5, y: 0.5, px: 0.5, py: 0.5,
-  down: false, seen: false, pressure: 0.5,
-};
-
-function clamp(value, min, max) { return value < min ? min : value > max ? max : value; }
-function lerp(a, b, t) { return a + (b - a) * t; }
-function slot(key) { return `${current}:${key}`; }
-function num(key) { return Number(toolValues[slot(key)]); }
-function on(key) { return Boolean(toolValues[slot(key)]); }
+   Семь механик на общей геометрии: печатная З задана двумя кубическими кривыми,
+   рукописная з — четырьмя. Стык дуг у З — настоящий залом, а не сглаженный
+   переход, и механики, которые считают кривизну, обязаны это учитывать. */
 
 function cubic(curve, t) {
   const u = 1 - t;
@@ -117,31 +93,6 @@ function drawSamples(path, color = FAINT, width = 0.008, dash = []) {
   });
   ctx.stroke();
   ctx.restore();
-}
-
-function dot(x, y, color, radius = 0.008) {
-  ctx.beginPath();
-  ctx.arc(x * S, y * S, radius * S, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.fill();
-}
-
-function line(x1, y1, x2, y2, color = INK, width = 0.008) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width * S;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(x1 * S, y1 * S);
-  ctx.lineTo(x2 * S, y2 * S);
-  ctx.stroke();
-}
-
-function drawStatus(text, hot = false) {
-  ctx.fillStyle = hot ? RED : MUTED;
-  ctx.font = `${Math.round(S * 0.022)}px 'DM Mono', ui-monospace, monospace`;
-  ctx.textAlign = 'right';
-  ctx.fillText(text, S * 0.96, S * 0.06);
-  ctx.textAlign = 'left';
 }
 
 const MODES = {};
@@ -346,7 +297,7 @@ MODES.orbit = {
       const hot = on('paint') && near && (a.hot > 0.15 || b.hot > 0.15);
       const age = i / modeState.trail.length;
       const alpha = near ? 0.22 + age * 0.72 : 0.02;
-      line(a.x, a.y, b.x, b.y, hot ? RED : `rgba(22,22,22,${alpha})`, near ? 0.005 : 0.0015);
+      line(a.x, a.y, b.x, b.y, hot ? RED : ink(alpha), near ? 0.005 : 0.0015);
     }
 
     const ball = modeState.ball;
@@ -1304,132 +1255,8 @@ MODES.ratchet = {
   },
 };
 
-/* ---------- панель ---------- */
-
-function renderTools(mode) {
-  toolsBar.innerHTML = '';
-  for (const tool of mode.tools) {
-    if (tool.type === 'button') {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = tool.label;
-      button.addEventListener('click', tool.action);
-      toolsBar.append(button);
-      continue;
-    }
-    const key = slot(tool.key);
-    const value = key in toolValues ? toolValues[key] : tool.value;
-    toolValues[key] = value;
-    if (tool.type === 'toggle') {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = tool.label;
-      button.setAttribute('aria-pressed', String(value));
-      button.addEventListener('click', () => {
-        toolValues[key] = !toolValues[key];
-        button.setAttribute('aria-pressed', String(toolValues[key]));
-      });
-      toolsBar.append(button);
-      continue;
-    }
-    const label = document.createElement('label');
-    const input = document.createElement('input');
-    const output = document.createElement('output');
-    input.type = 'range';
-    input.min = tool.min;
-    input.max = tool.max;
-    input.step = tool.step;
-    input.value = value;
-    output.value = String(value);
-    input.addEventListener('input', () => {
-      toolValues[key] = Number(input.value);
-      output.value = input.value;
-    });
-    label.append(tool.label, input, output);
-    toolsBar.append(label);
-  }
-}
-
-function setMode(name) {
-  current = name;
-  const mode = MODES[name];
-  modeState = {};
-  renderTools(mode);
-  mode.setup?.();
-  canvas.style.cursor = mode.cursor || 'default';
-  note.textContent = mode.note;
-  const names = Object.keys(MODES);
-  stage.dataset.index = `${String(names.indexOf(name) + 1).padStart(2, '0')} / ${String(names.length).padStart(2, '0')}`;
-  for (const button of modesBar.children) {
-    button.setAttribute('aria-pressed', String(button.dataset.mode === name));
-  }
-}
-
-Object.entries(MODES).forEach(([name, mode]) => {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.dataset.mode = name;
-  button.textContent = mode.label;
-  button.setAttribute('aria-pressed', 'false');
-  button.addEventListener('click', () => setMode(name));
-  modesBar.append(button);
+startLab({
+  title: 'З · две дуги и горловина',
+  modes: MODES,
+  start: 'zator',
 });
-
-/* ---------- сцена ---------- */
-
-function resize() {
-  const bounds = canvas.getBoundingClientRect();
-  S = Math.max(1, bounds.width);
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = Math.round(S * dpr);
-  canvas.height = Math.round(S * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-}
-
-function track(event) {
-  const bounds = canvas.getBoundingClientRect();
-  pointer.px = pointer.x;
-  pointer.py = pointer.y;
-  pointer.x = (event.clientX - bounds.left) / S;
-  pointer.y = (event.clientY - bounds.top) / S;
-  pointer.pressure = event.pointerType === 'mouse' ? 0.5 : event.pressure || 0.5;
-  pointer.seen = true;
-}
-
-canvas.addEventListener('pointerdown', (event) => {
-  track(event);
-  pointer.px = pointer.x;
-  pointer.py = pointer.y;
-  pointer.down = true;
-  try { canvas.setPointerCapture(event.pointerId); } catch (error) { /* Safari may reject capture */ }
-  MODES[current].onDown?.(event);
-});
-
-canvas.addEventListener('pointermove', (event) => {
-  track(event);
-  MODES[current].onMove?.(event);
-});
-
-window.addEventListener('pointerup', () => {
-  pointer.down = false;
-  MODES[current].onUp?.();
-});
-
-let last = performance.now();
-let debt = 0;
-function frame(now) {
-  debt = Math.min(0.1, debt + (now - last) / 1000);
-  last = now;
-  while (debt >= STEP) {
-    MODES[current].step?.();
-    debt -= STEP;
-  }
-  ctx.clearRect(0, 0, S, S);
-  MODES[current].draw();
-  requestAnimationFrame(frame);
-}
-
-resize();
-setMode('zator');
-new ResizeObserver(resize).observe(canvas);
-requestAnimationFrame(frame);
