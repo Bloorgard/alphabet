@@ -1457,6 +1457,248 @@ MODES.snake = {
   },
 };
 
+/* ---------- 9. удав: змейка ростом ровно в букву ---------- */
+
+/* Длина тела здесь не растёт и равна контуру З: змейка это и есть буква,
+   ни клеткой больше. Тонкая — ещё не буква, а её след; съеденное яблоко
+   становится шишкой, шишка уходит по телу к хвосту и остаётся там, и буква
+   наливается с конца. Яблоки падают в стороне, поэтому за каждым приходится
+   сойти с буквы и уложиться в неё заново. */
+
+/* Углы буквы с эскиза: З, собранная прямыми ходами по сетке. Растр кривой дал бы
+   лесенку, а змейка пишет своими средствами — отрезком и поворотом. */
+/* У печатной З середина — точка возврата: линия входит туда и выходит обратно
+   по себе же. Змейка так не умеет, ей нужны две параллельные нитки, и середина
+   буквы получается двойной. Поэтому заход держим неглубоким — на треть ширины:
+   глубокая полка режет букву пополам, и вместо З читается Э. */
+const BOA_TURNS = [
+  [0.364, 0.140], [0.773, 0.140], [0.773, 0.320],
+  [0.700, 0.320], [0.700, 0.390], [0.620, 0.390], [0.620, 0.470],
+  [0.773, 0.470], [0.773, 0.844], [0.300, 0.844],
+];
+
+function boaRoute(grid) {
+  const nodes = BOA_TURNS.map(([x, y]) => ({
+    x: clamp(Math.round(x * grid), 0, grid - 1),
+    y: clamp(Math.round(y * grid), 0, grid - 1),
+  }));
+  const cells = [];
+  const put = (x, y) => {
+    const last = cells.at(-1);
+    if (last && last.x === x && last.y === y) return;
+    cells.push({ x, y });
+  };
+  put(nodes[0].x, nodes[0].y);
+  for (const node of nodes.slice(1)) {
+    const from = cells.at(-1);
+    let { x, y } = from;
+    const dx = Math.sign(node.x - x);
+    const dy = Math.sign(node.y - y);
+    while (x !== node.x) { x += dx; put(x, y); }
+    while (y !== node.y) { y += dy; put(x, y); }
+  }
+  return cells;
+}
+
+const boa = {
+  grid: 21, route: [], routeSet: new Set(), letter: 0,
+  cells: [], dir: [1, 0], queue: [], lumps: [], apple: null,
+  dead: null, done: false, tick: 0, started: false,
+};
+
+function boaLay() {
+  /* тело кладётся по букве от её конца: голова там, где З дописывается */
+  boa.cells = boa.route.slice().reverse().map((cell) => ({ x: cell.x, y: cell.y }));
+  const head = boa.cells[0];
+  const next = boa.cells[1] || head;
+  boa.dir = [Math.sign(head.x - next.x), Math.sign(head.y - next.y)];
+  if (!boa.dir[0] && !boa.dir[1]) boa.dir = [-1, 0];
+}
+
+function boaApple() {
+  const taken = new Set(boa.cells.map((cell) => snakeKey(cell.x, cell.y)));
+  const free = [];
+  for (let y = 0; y < boa.grid; y += 1) {
+    for (let x = 0; x < boa.grid; x += 1) {
+      if (!taken.has(snakeKey(x, y))) free.push({ x, y });
+    }
+  }
+  boa.apple = free.length ? free[Math.floor(Math.random() * free.length)] : null;
+}
+
+function boaReset() {
+  const grid = Math.round(num('grid'));
+  boa.grid = grid;
+  boa.route = boaRoute(grid);
+  boa.routeSet = new Set(boa.route.map((cell) => snakeKey(cell.x, cell.y)));
+  boa.letter = boa.routeSet.size;
+  boa.lumps = [];
+  boa.queue = [];
+  boa.dead = null;
+  boa.done = false;
+  boa.tick = 0;
+  boa.started = false;
+  boaLay();
+  boaApple();
+}
+
+function boaCovered() {
+  const body = new Set(boa.cells.map((cell) => snakeKey(cell.x, cell.y)));
+  let covered = 0;
+  for (const key of boa.routeSet) if (body.has(key)) covered += 1;
+  return covered;
+}
+
+function boaAdvance() {
+  if (boa.dead || boa.done) return;
+  const turn = boa.queue.shift();
+  if (turn && !(turn[0] === -boa.dir[0] && turn[1] === -boa.dir[1])) boa.dir = turn;
+
+  const head = boa.cells[0];
+  let x = head.x + boa.dir[0];
+  let y = head.y + boa.dir[1];
+  const grid = boa.grid;
+
+  if (on('wrap')) {
+    x = (x + grid) % grid;
+    y = (y + grid) % grid;
+  } else if (x < 0 || y < 0 || x >= grid || y >= grid) {
+    boa.dead = { x: clamp(x, 0, grid - 1), y: clamp(y, 0, grid - 1), wall: true };
+    return;
+  }
+
+  /* хвост уходит этим же ходом, и клетка под ним свободна */
+  const bitten = boa.cells.some((cell, index) => (
+    cell.x === x && cell.y === y && index < boa.cells.length - 1
+  ));
+  if (bitten) {
+    boa.dead = { x, y, wall: false };
+    return;
+  }
+
+  boa.cells.unshift({ x, y });
+  boa.cells.pop();
+
+  /* Шишка идёт к хвосту, пока не упрётся в ту, что доехала раньше. Предел —
+     именно зазор до соседа впереди, а не итоговое место у хвоста: иначе шишки
+     прибавляют по клетке одновременно и едут стопкой в одной клетке. */
+  const limit = boa.cells.length - 1;
+  boa.lumps.forEach((lump, index) => {
+    const ahead = index ? boa.lumps[index - 1].pos - 1 : limit;
+    lump.pos = Math.min(lump.pos + 1, ahead);
+  });
+
+  /* одно яблоко — одна шишка */
+  if (boa.apple && boa.apple.x === x && boa.apple.y === y) {
+    if (boa.lumps.length <= limit) boa.lumps.push({ pos: 0 });
+    boaApple();
+  }
+
+  if (boa.lumps.length > limit && boaCovered() === boa.letter) boa.done = true;
+}
+
+MODES.boa = {
+  label: 'удав',
+  note: 'Длина тела не меняется и равна контуру З: змейка это и есть буква. Тонкая — ещё не буква, а её след. Яблоко становится шишкой, шишка уходит к хвосту, и буква наливается с конца. Яблоки падают в стороне, так что за каждым надо сойти с буквы и уложиться в неё заново.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'grid', label: 'сетка', min: 15, max: 29, step: 2, value: 21 },
+    { type: 'range', key: 'speed', label: 'темп', min: 2, max: 14, step: 1, value: 6 },
+    { type: 'toggle', key: 'trace', label: 'пропись', value: true },
+    { type: 'toggle', key: 'wrap', label: 'края', value: false },
+    { type: 'toggle', key: 'paint', label: 'краска', value: true },
+    { type: 'button', label: 'заново', action: () => boaReset() },
+  ],
+  setup() { boaReset(); },
+  onTool(key) { if (key === 'grid') boaReset(); },
+  onKey(event, down) {
+    if (!down) return;
+    const turn = SNAKE_KEYS[event.key];
+    if (!turn) return;
+    event.preventDefault();
+    if (boa.queue.length < 2) boa.queue.push(turn);
+    boa.started = true;
+  },
+  onUp() {
+    const dx = pointer.x - pointer.px;
+    const dy = pointer.y - pointer.py;
+    if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return;
+    const turn = Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
+    if (boa.queue.length < 2) boa.queue.push(turn);
+    boa.started = true;
+  },
+  step() {
+    if (!boa.started || boa.dead || boa.done) return;
+    boa.tick += STEP * num('speed');
+    while (boa.tick >= 1) {
+      boa.tick -= 1;
+      boaAdvance();
+      if (boa.dead || boa.done) return;
+    }
+  },
+  draw() {
+    const size = 1 / boa.grid;
+    const mid = (value) => (value + 0.5) * size;
+
+    if (on('trace')) {
+      const body = new Set(boa.cells.map((cell) => snakeKey(cell.x, cell.y)));
+      for (const cell of boa.route) {
+        if (!body.has(snakeKey(cell.x, cell.y))) dot(mid(cell.x), mid(cell.y), ink(0.12), size * 0.16);
+      }
+    }
+
+    /* тело одной линией со скруглёнными углами; на завороте через край
+       рвём линию, иначе она прочертит весь кадр насквозь */
+    ctx.save();
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = size * 0.58 * S;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    boa.cells.forEach((cell, index) => {
+      const prev = boa.cells[index - 1];
+      const jump = prev && Math.abs(prev.x - cell.x) + Math.abs(prev.y - cell.y) > 1;
+      if (!index || jump) ctx.moveTo(mid(cell.x) * S, mid(cell.y) * S);
+      else ctx.lineTo(mid(cell.x) * S, mid(cell.y) * S);
+    });
+    ctx.stroke();
+    ctx.restore();
+
+    for (const lump of boa.lumps) {
+      const cell = boa.cells[lump.pos];
+      if (cell) dot(mid(cell.x), mid(cell.y), INK, size * 0.5);
+    }
+
+    const head = boa.cells[0];
+    if (head) {
+      dot(mid(head.x), mid(head.y), INK, size * 0.5);
+      /* глаза смотрят по ходу и разведены поперёк него */
+      const [dx, dy] = boa.dir;
+      const eye = size * 0.17;
+      for (const side of [-1, 1]) {
+        dot(
+          mid(head.x) + dx * eye + dy * side * eye,
+          mid(head.y) + dy * eye - dx * side * eye,
+          PAPER,
+          size * 0.09,
+        );
+      }
+    }
+
+    if (boa.apple && !boa.dead) {
+      dot(mid(boa.apple.x), mid(boa.apple.y), on('paint') ? RED : INK, size * 0.34);
+    }
+
+    if (boa.dead && on('paint')) dot(mid(boa.dead.x), mid(boa.dead.y), RED, size * 0.5);
+
+    const full = Math.round((boa.lumps.length / Math.max(1, boa.cells.length)) * 100);
+    const share = Math.round((boaCovered() / boa.letter) * 100);
+    if (boa.dead) drawStatus(boa.dead.wall ? 'край' : 'укус', true);
+    else if (boa.done) drawStatus('буква налита', false);
+    else drawStatus(`налито ${full}% · буква ${share}%`, false);
+  },
+};
+
 startLab({
   title: 'З · две дуги и горловина',
   modes: MODES,
