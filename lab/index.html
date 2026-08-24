@@ -6,7 +6,7 @@
 <title>Полигоны — буквальный челлендж</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="lab.css" id="lab-css">
 <script>
   const labStamp = Date.now();
@@ -14,125 +14,190 @@
 </script>
 <style>
   body.index {
-    padding: 18px 20px 60px;
+    --sans: 'Manrope', system-ui, sans-serif;
+    padding: 30px 20px 60px;
     text-transform: uppercase;
   }
 
-  .index-head {
+  .sheet { max-width: 1180px; margin: 0 auto; }
+
+  .index-head { margin-bottom: 22px; }
+
+  .index-head .row {
     display: flex;
     align-items: baseline;
-    justify-content: space-between;
-    gap: 18px;
-    flex-wrap: wrap;
-    margin-bottom: 26px;
+    gap: 16px;
+    margin-bottom: 14px;
   }
 
-  .index-head b {
-    font-size: 14px;
-    font-weight: 500;
-    letter-spacing: -.02em;
-    text-transform: none;
+  .index-head h1 {
+    margin: 0;
+    font: 500 15px/1 var(--mono);
+    letter-spacing: .02em;
   }
 
   .index-head a {
+    margin-left: auto;
     color: var(--muted);
     text-decoration: none;
   }
 
   .index-head a:hover { color: var(--ink); }
 
-  .index-head .count { color: var(--muted); }
+  /* Пройденное — не подпись, а линия: доля алфавита видна, а не читается. */
+  .bar { position: relative; height: 1px; background: var(--line); }
+  .bar span { position: absolute; left: 0; top: -1px; height: 3px; background: var(--ink); }
 
-  .cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 20px;
+  .legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 10px;
+    color: var(--muted);
   }
 
-  .card {
+  .legend span:last-child { margin-left: auto; }
+
+  .grid {
     display: grid;
-    gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+    border-top: 1px solid var(--line);
+    border-left: 1px solid var(--line);
+  }
+
+  .cell {
+    position: relative;
+    aspect-ratio: 1;
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
     color: inherit;
     text-decoration: none;
   }
 
-  .frame {
-    position: relative;
-    aspect-ratio: 1;
-    border: 1px solid var(--line);
-    display: grid;
-    place-items: center;
-    overflow: hidden;
-    background:
-      linear-gradient(90deg, transparent 49.9%, var(--grid) 50%, transparent 50.1%),
-      linear-gradient(transparent 49.9%, var(--grid) 50%, transparent 50.1%);
+  .cell .big {
+    font: 500 44px/1 var(--sans);
+    letter-spacing: -.03em;
+    text-transform: none;
   }
 
-  .card:hover .frame { border-color: var(--ink); }
+  .cell .num,
+  .cell .when,
+  .cell .runs {
+    position: absolute;
+    font-size: 10px;
+    color: var(--muted);
+  }
 
-  /* Плитка не перехватывает клик: карточка целиком остаётся ссылкой. */
-  .frame iframe {
+  .cell .num { top: 7px; left: 8px; }
+  .cell .when { bottom: 7px; left: 8px; }
+  .cell .runs { bottom: 7px; right: 8px; }
+
+  /* Пустая клетка — не дырка, а назначенный день: буква бледная, дата своя. */
+  .cell.empty .big { color: var(--line); }
+  .cell.empty .num,
+  .cell.empty .when { color: rgba(22, 22, 22, .22); }
+
+  .cell.made:hover { background: var(--ink); color: var(--paper); }
+  .cell.made:hover .num,
+  .cell.made:hover .when,
+  .cell.made:hover .runs { color: rgba(241, 237, 229, .55); }
+
+  /* Живая сцена ждёт наведения: тридцати трёх сцен разом не бывает. */
+  .cell .live {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity .18s;
+  }
+
+  .cell .live iframe {
     width: 100%;
     height: 100%;
     border: 0;
     pointer-events: none;
+    display: block;
   }
 
-  /* Полигон на старом шелле плитку не умеет — вместо неё сама буква. */
-  .glyph {
-    font-size: 76px;
-    font-weight: 500;
-    color: var(--line);
-    text-transform: none;
-    user-select: none;
-  }
+  .cell.made:hover .live { opacity: 1; }
 
-  .meta {
-    display: grid;
-    gap: 5px;
-  }
+  /* Букву прячем только там, где под ней есть сцена: иначе на ховере
+     остаётся пустой чёрный квадрат. */
+  .cell.alive:hover .big { opacity: 0; }
 
-  .head {
+  /* Строка чтения: клетка молчит, а перебранные механики читаются здесь. */
+  .reading {
+    min-height: 42px;
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 8px;
+    gap: 4px 10px;
   }
 
-  .head b {
-    font-size: 13px;
-    font-weight: 500;
+  .reading b {
+    font: 500 12px/1.4 var(--mono);
+    letter-spacing: .06em;
+  }
+
+  .reading .runs-list {
+    font: 400 13px/1.4 var(--sans);
+    letter-spacing: 0;
     text-transform: none;
-    letter-spacing: -.02em;
-  }
-
-  .head .date { margin-left: auto; color: var(--muted); }
-
-  .list, .chosen {
     color: var(--muted);
-    text-transform: none;
-    letter-spacing: .02em;
   }
 
-  .chosen b {
-    font-weight: 400;
-    color: var(--ink);
+  .reading .run:not(:last-child)::after {
+    content: '·';
+    margin: 0 7px;
+    color: var(--line);
   }
+
+  .reading .run.won { color: var(--ink); font-weight: 600; }
+
+  .reading .run .won-mark {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    margin-left: 6px;
+    vertical-align: 3px;
+    border-radius: 50%;
+    background: var(--ink);
+  }
+
+  .reading .idle { color: var(--muted); }
 
   @media (max-width: 760px) {
-    body.index { padding: 12px 12px 40px; }
-    .cards { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+    body.index { padding: 16px 12px 40px; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
+    .cell .big { font-size: 32px; }
+    .cell .when { display: none; }
   }
 </style>
 </head>
 <body class="index">
+<div class="sheet">
 
-<header class="index-head">
-  <b>Полигоны</b>
-  <span class="count" id="count"></span>
-  <a href="../index.html">на алфавит</a>
-</header>
+  <header class="index-head">
+    <div class="row">
+      <h1>Полигоны</h1>
+      <a href="../index.html">на алфавит</a>
+    </div>
+    <div class="bar"><span id="bar"></span></div>
+    <div class="legend">
+      <span id="done"></span>
+      <span id="next"></span>
+    </div>
+  </header>
 
-<main class="cards" id="cards"></main>
+  <main class="grid" id="grid"></main>
+
+  <div class="reading" id="reading"></div>
+
+</div>
 
 <script src="labs.js"></script>
 <script>
@@ -148,60 +213,100 @@
   const dateOf = (letter) => new Date(START + LETTERS.indexOf(letter) * DAY)
     .toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
-  const cards = document.getElementById('cards');
-  const order = [...LABS].sort((a, b) => LETTERS.indexOf(a.letter) - LETTERS.indexOf(b.letter));
-
-  document.getElementById('count').textContent = `${LABS.length} из ${LETTERS.length} букв`;
-
-  for (const lab of order) {
-    const card = document.createElement('a');
-    card.className = 'card';
-    card.href = `${lab.slug}.html`;
-
-    const frame = document.createElement('div');
-    frame.className = 'frame';
-    if (lab.tile) frame.dataset.tile = lab.slug;
-    else frame.innerHTML = `<span class="glyph">${lab.letter}</span>`;
-
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.innerHTML = `
-      <span class="head"><b>${lab.letter} · ${lab.title}</b><span class="date">${dateOf(lab.letter)}</span></span>
-      <span class="list">${lab.mechanics.join(' · ')}</span>
-      <span class="chosen">${lab.chosen ? `в букве: <b>${lab.chosen}</b>` : 'механика ещё не выбрана'}</span>
-    `;
-
-    card.append(frame, meta);
-    cards.append(card);
-  }
-
-  /* Плитка грузится, когда доезжает до экрана, и стоит замершей.
-     Живёт только под курсором — тридцати трёх сцен разом не бывает. */
-  const wake = (frame, run) => {
-    const view = frame.querySelector('iframe')?.contentWindow;
-    view?.postMessage(run ? 'lab:run' : 'lab:hold', '*');
+  const plural = (n, one, few, many) => {
+    const ten = n % 10;
+    const hundred = n % 100;
+    if (hundred >= 11 && hundred <= 14) return many;
+    if (ten === 1) return one;
+    if (ten >= 2 && ten <= 4) return few;
+    return many;
   };
+  const count = (n, ...forms) => `${n} ${plural(n, ...forms)}`;
 
-  const watcher = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      const frame = entry.target;
-      const view = document.createElement('iframe');
-      view.loading = 'lazy';
-      view.setAttribute('tabindex', '-1');
-      view.setAttribute('aria-hidden', 'true');
-      view.src = `${frame.dataset.tile}.html?bare`;
-      frame.append(view);
-      watcher.unobserve(frame);
-    }
-  }, { rootMargin: '200px' });
+  const byLetter = new Map(LABS.map((lab) => [lab.letter, lab]));
+  const runs = LABS.reduce((sum, lab) => sum + lab.mechanics.length, 0);
+  const ahead = LETTERS.find((letter) => !byLetter.has(letter));
 
-  for (const frame of document.querySelectorAll('[data-tile]')) {
-    watcher.observe(frame);
-    const card = frame.closest('.card');
-    card.addEventListener('pointerenter', () => wake(frame, true));
-    card.addEventListener('pointerleave', () => wake(frame, false));
+  document.getElementById('bar').style.width = `${(LABS.length / LETTERS.length) * 100}%`;
+  document.getElementById('done').textContent =
+    `${LABS.length} из ${LETTERS.length} · ${count(runs, 'механика', 'механики', 'механик')} перебрано`;
+  document.getElementById('next').textContent = ahead ? `дальше ${ahead} · ${dateOf(ahead)}` : 'алфавит пройден';
+
+  /* ---------- строка чтения ---------- */
+
+  const reading = document.getElementById('reading');
+  const idle = ahead
+    ? `<span class="idle">наведи на букву — здесь встанут её механики</span>`
+    : `<span class="idle">алфавит пройден</span>`;
+
+  function read(lab) {
+    if (!lab) { reading.innerHTML = idle; return; }
+    const list = lab.mechanics.map((name) => {
+      const won = name === lab.chosen;
+      return `<span class="run${won ? ' won' : ''}">${name}${won ? '<i class="won-mark"></i>' : ''}</span>`;
+    }).join('');
+    reading.innerHTML = `
+      <b>${lab.letter} · ${lab.title}</b>
+      <span class="runs-list">${list}</span>`;
   }
+  read(null);
+
+  /* ---------- сетка ---------- */
+
+  const grid = document.getElementById('grid');
+
+  LETTERS.forEach((letter, index) => {
+    const lab = byLetter.get(letter);
+    const cell = document.createElement(lab ? 'a' : 'div');
+    cell.className = `cell ${lab ? 'made' : 'empty'}`;
+    if (lab) cell.href = `${lab.slug}.html`;
+
+    cell.innerHTML = `
+      <span class="num">${String(index + 1).padStart(2, '0')}</span>
+      <span class="big">${letter}</span>
+      <span class="when">${dateOf(letter)}</span>
+      ${lab ? `<span class="runs">${lab.mechanics.length}</span>` : ''}`;
+
+    if (!lab) { grid.append(cell); return; }
+
+    grid.append(cell);
+
+    let live = null;
+    if (lab.tile) {
+      cell.classList.add('alive');
+      live = document.createElement('div');
+      live.className = 'live';
+      cell.append(live);
+    }
+
+    /* Кадр рождается по первому наведению и в этот миг ещё не загружен —
+       команду держим намерением и доигрываем, когда он оживёт. */
+    let want = false;
+    const tell = () => live?.firstChild?.contentWindow
+      ?.postMessage(want ? 'lab:run' : 'lab:hold', '*');
+
+    cell.addEventListener('pointerenter', () => {
+      read(lab);
+      want = true;
+      if (!live) return;
+      if (!live.firstChild) {
+        const view = document.createElement('iframe');
+        view.loading = 'lazy';
+        view.setAttribute('tabindex', '-1');
+        view.setAttribute('aria-hidden', 'true');
+        view.addEventListener('load', tell);
+        view.src = `${lab.slug}.html?bare`;
+        live.append(view);
+      }
+      tell();
+    });
+
+    cell.addEventListener('pointerleave', () => {
+      read(null);
+      want = false;
+      tell();
+    });
+  });
 </script>
 </body>
 </html>
