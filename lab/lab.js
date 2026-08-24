@@ -209,7 +209,7 @@ function labWriteHash() {
       const value = toolValues[labToolKey(tool)];
       parts.push(`${tool.key}=${tool.type === 'toggle' ? Number(Boolean(value)) : value}`);
     }
-    if (ground !== 'paper') parts.push(`bg=${ground}`);
+    if (ground !== (labConfig.ground || 'paper')) parts.push(`bg=${ground}`);
     history.replaceState(null, '', `#${parts.join('&')}`);
   }, 250);
 }
@@ -231,7 +231,7 @@ window.addEventListener('hashchange', () => {
   if (!labStarted || labBare) return;
   const saved = labReadHash();
   if (!(saved.mode in labModes)) return;
-  setGround(saved.bg || 'paper');
+  setGround(saved.bg || labConfig.ground || 'paper');
   labSeedFromHash(saved.mode, saved.values);
   setMode(saved.mode);
 });
@@ -379,6 +379,12 @@ canvas.addEventListener('pointermove', (event) => {
   labModes[current].onMove?.(event);
 });
 
+canvas.addEventListener('dblclick', (event) => {
+  if (!labStarted) return;
+  track(event);
+  labModes[current].onDouble?.(event);
+});
+
 window.addEventListener('pointerup', () => {
   if (!labStarted) return;
   pointer.down = false;
@@ -464,8 +470,7 @@ function startLab(config) {
   labBuildGlobals();
 
   const saved = labReadHash();
-  if (saved.bg) setGround(saved.bg);
-  else setGround('paper');
+  setGround(saved.bg || config.ground || 'paper');
 
   resize();
 

@@ -4,6 +4,11 @@
 
 const LABS = [
   {
+    slug: 'a', letter: 'А', title: 'свет и преграда', tile: true,
+    mechanics: ['свет'],
+    chosen: 'свет',
+  },
+  {
     slug: 'b', letter: 'Б', title: 'полигон механик', tile: false,
     mechanics: ['наполнение', 'тряска', 'магнит формы', 'сжатие'],
     chosen: 'наполнение',
