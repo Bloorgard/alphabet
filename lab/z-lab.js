@@ -1255,6 +1255,208 @@ MODES.ratchet = {
   },
 };
 
+/* ---------- 8. змейка: разворот, которого змейка не умеет ---------- */
+
+/* Печатная З ломается в горловине на 132° — почти назад. Змейке ход назад
+   запрещён самой игрой, поэтому пройти букву по прописи нельзя: горловину
+   приходится обходить петлёй. Петля в середине — это и есть рукописная з,
+   и достаётся она не рисованием, а ограничением механики. */
+
+const SNAKE_KEYS = {
+  ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+};
+
+const snake = {
+  grid: 21, route: [], routeSet: new Set(), letter: 0, cells: [], len: 4,
+  dir: [1, 0], queue: [], dead: null, done: false, tick: 0, started: false,
+};
+
+function snakeKey(x, y) { return y * 64 + x; }
+
+/* Буква, разложенная по клеткам и сшитая по четырём сторонам: диагональный
+   переход змейке не пройти, поэтому между клетками наискось ставится ещё одна.
+   Повторы в пути не выбрасываем: в горловине З возвращается в уже пройденную
+   клетку, и без этого возврата путь рвался бы ровно на самом интересном месте. */
+function snakeRoute(grid) {
+  const cells = [];
+  const put = (x, y) => {
+    const last = cells.at(-1);
+    if (last && last.x === x && last.y === y) return;
+    cells.push({ x, y });
+  };
+  let prev = null;
+  for (const sample of PRINT_PATH.samples) {
+    const x = clamp(Math.floor(sample.x * grid), 0, grid - 1);
+    const y = clamp(Math.floor(sample.y * grid), 0, grid - 1);
+    if (prev && prev.x !== x && prev.y !== y) put(x, prev.y);
+    put(x, y);
+    prev = { x, y };
+  }
+  return cells;
+}
+
+function snakeReset() {
+  const grid = Math.round(num('grid'));
+  snake.grid = grid;
+  snake.route = snakeRoute(grid);
+  snake.routeSet = new Set(snake.route.map((cell) => snakeKey(cell.x, cell.y)));
+  snake.letter = snake.routeSet.size;
+  const head = snake.route[0];
+  const next = snake.route[1] || head;
+  snake.cells = [{ x: head.x, y: head.y }];
+  snake.dir = [Math.sign(next.x - head.x) || 1, Math.sign(next.y - head.y)];
+  snake.len = 4;
+  snake.queue = [];
+  snake.dead = null;
+  snake.done = false;
+  snake.tick = 0;
+  snake.started = false;
+}
+
+function snakeBody() {
+  return new Set(snake.cells.map((cell) => snakeKey(cell.x, cell.y)));
+}
+
+function snakeCovered() {
+  const body = snakeBody();
+  let covered = 0;
+  for (const key of snake.routeSet) if (body.has(key)) covered += 1;
+  return covered;
+}
+
+/* Еда стоит на первой клетке буквы, которую тело ещё не накрыло: так она сама
+   ведёт по порядку письма. Нет такой клетки — буква написана целиком. */
+function snakeFood() {
+  const body = snakeBody();
+  return snake.route.find((cell) => !body.has(snakeKey(cell.x, cell.y))) || null;
+}
+
+function snakeAdvance() {
+  const turn = snake.queue.shift();
+  if (turn && !(turn[0] === -snake.dir[0] && turn[1] === -snake.dir[1])) snake.dir = turn;
+
+  const head = snake.cells[0];
+  let x = head.x + snake.dir[0];
+  let y = head.y + snake.dir[1];
+  const grid = snake.grid;
+
+  if (on('wrap')) {
+    x = (x + grid) % grid;
+    y = (y + grid) % grid;
+  } else if (x < 0 || y < 0 || x >= grid || y >= grid) {
+    snake.dead = { x: clamp(x, 0, grid - 1), y: clamp(y, 0, grid - 1), wall: true };
+    return;
+  }
+
+  /* хвост за этот же ход уходит, и клетка под ним свободна */
+  const tail = snake.cells.length >= snake.len ? snake.cells.at(-1) : null;
+  const bitten = snake.cells.some((cell, index) => (
+    cell.x === x && cell.y === y && !(tail && index === snake.cells.length - 1)
+  ));
+  if (bitten) {
+    snake.dead = { x, y, wall: false };
+    return;
+  }
+
+  const food = snakeFood();
+  snake.cells.unshift({ x, y });
+  if (food && food.x === x && food.y === y) snake.len += Math.round(num('grow'));
+  while (snake.cells.length > snake.len) snake.cells.pop();
+
+  /* буква держится ровно один ход: следующий шаг уводит хвост и разрушает её,
+     поэтому на полном покрытии змейка встаёт и написанное остаётся */
+  if (snakeCovered() === snake.letter) snake.done = true;
+}
+
+function snakeCell(x, y, color, scale = 0.92) {
+  const size = S / snake.grid;
+  const inset = size * (1 - scale) / 2;
+  ctx.fillStyle = color;
+  ctx.fillRect(x * size + inset, y * size + inset, size * scale, size * scale);
+}
+
+MODES.snake = {
+  label: 'змейка',
+  note: 'Змейка пишет З: еда сама встаёт на следующую клетку буквы. Ход назад игра не даёт, а печатная З в горловине разворачивается почти назад — пройти её напрямую нельзя, только обойти петлёй. Петля в середине и есть рукописная з. Стрелки или ведение по кадру.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'grid', label: 'сетка', min: 15, max: 29, step: 2, value: 21 },
+    { type: 'range', key: 'speed', label: 'темп', min: 2, max: 14, step: 1, value: 6 },
+    { type: 'range', key: 'grow', label: 'рост', min: 1, max: 6, step: 1, value: 1 },
+    { type: 'toggle', key: 'trace', label: 'пропись', value: true },
+    { type: 'toggle', key: 'wrap', label: 'края', value: false },
+    { type: 'toggle', key: 'paint', label: 'краска', value: true },
+    { type: 'button', label: 'заново', action: () => snakeReset() },
+  ],
+  setup() { snakeReset(); },
+  onTool(key) { if (key === 'grid') snakeReset(); },
+  onKey(event, down) {
+    if (!down) return;
+    const turn = SNAKE_KEYS[event.key];
+    if (!turn) return;
+    event.preventDefault();
+    if (snake.queue.length < 2) snake.queue.push(turn);
+    snake.started = true;
+  },
+  onUp() {
+    /* ведение пальцем: направление берём у самого жеста */
+    const dx = pointer.x - pointer.px;
+    const dy = pointer.y - pointer.py;
+    if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return;
+    const turn = Math.abs(dx) > Math.abs(dy)
+      ? [Math.sign(dx), 0]
+      : [0, Math.sign(dy)];
+    if (snake.queue.length < 2) snake.queue.push(turn);
+    snake.started = true;
+  },
+  step() {
+    if (!snake.started || snake.dead || snake.done) return;
+    snake.tick += STEP * num('speed');
+    while (snake.tick >= 1) {
+      snake.tick -= 1;
+      snakeAdvance();
+      if (snake.dead) return;
+    }
+  },
+  draw() {
+    const body = snakeBody();
+    if (on('trace')) {
+      for (const cell of snake.route) {
+        if (!body.has(snakeKey(cell.x, cell.y))) snakeCell(cell.x, cell.y, ink(0.1));
+      }
+    }
+
+    /* клетка буквы под телом — полная, лишнее вне буквы — мельче: буква
+       проявляется плотностью, а не второй краской */
+    for (const cell of snake.cells) {
+      const inLetter = snake.routeSet.has(snakeKey(cell.x, cell.y));
+      snakeCell(cell.x, cell.y, INK, inLetter ? 0.92 : 0.52);
+    }
+
+    const head = snake.cells[0];
+    if (head) {
+      const size = 1 / snake.grid;
+      dot((head.x + 0.5) * size, (head.y + 0.5) * size, PAPER, size * 0.18);
+    }
+
+    const food = snakeFood();
+    if (food && !snake.dead && !snake.done) {
+      const size = 1 / snake.grid;
+      dot((food.x + 0.5) * size, (food.y + 0.5) * size, INK, size * 0.3);
+    }
+
+    if (snake.dead && on('paint')) snakeCell(snake.dead.x, snake.dead.y, RED);
+
+    /* считаем по клеткам буквы, а не по длине пути: горловину путь проходит
+       дважды, и по нему доля вышла бы заниженной */
+    let covered = 0;
+    for (const key of snake.routeSet) if (body.has(key)) covered += 1;
+    const share = Math.round((covered / snake.letter) * 100);
+    if (snake.dead) drawStatus(snake.dead.wall ? 'край' : 'укус', true);
+    else drawStatus(snake.done ? 'буква написана' : `буква ${share}%`, false);
+  },
+};
+
 startLab({
   title: 'З · две дуги и горловина',
   modes: MODES,
