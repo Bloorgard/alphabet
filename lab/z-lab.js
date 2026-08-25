@@ -2806,7 +2806,7 @@ function sketch2Reset() {
   sketch2.segment = SKETCH2_BODY.length / (count - 1);
   sketch2.trail = sketch2.points.map((point) => ({ ...point }));
   sketch2.dir = Math.PI;
-  sketch2.apple = { x: 507.125 / 1200, y: 999.875 / 1200 };
+  sketch2.apple = { x: 470 / 1200, y: 999.875 / 1200 };
   sketch2.eaten = 0;
   sketch2.zone = 0;
   sketch2.started = false;
@@ -2832,7 +2832,7 @@ function sketch2TrailAt(distance, distances) {
 }
 
 function sketch2FollowTrail() {
-  const keep = SKETCH2_BODY.length + 0.22;
+  const keep = SKETCH2_BODY.length + 0.35;
   const distances = [0];
   for (let index = 1; index < sketch2.trail.length; index += 1) {
     const point = sketch2.trail[index];
