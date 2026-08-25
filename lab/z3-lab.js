@@ -3071,7 +3071,7 @@ MODES.sketch2 = {
   cursor: 'default',
   tools: [
     { type: 'range', key: 'copies', label: 'копии', min: 1, max: 10, step: 1, value: 1 },
-    { type: 'range', key: 'speed', label: 'скорость', min: 0.5, max: 6, step: 0.5, value: 2.5 },
+    { type: 'range', key: 'speed', label: 'скорость', min: 0.5, max: 6, step: 0.5, value: 4 },
     { type: 'range', key: 'rounding', label: 'радиус поворота', min: 0, max: 120, step: 5, value: 40 },
   ],
   setup() {
