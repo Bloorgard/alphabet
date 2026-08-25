@@ -2041,6 +2041,723 @@ MODES.coil = {
   },
 };
 
+/* ---------- 11. рост: змейка вырастает в букву ---------- */
+
+/* Классическая змейка, откалиброванная под букву: каждое яблоко удлиняет тело
+   ровно на свой кусок прописи, поэтому к последнему яблоку змея по длине равна
+   З. Она не рисует букву и не наливает её — она в неё вырастает.
+
+   Букву задаёт не точность, а обстановка. Блоки стоят в чашах З: обошёл
+   верхний — получил верхнюю дугу, обошёл нижний — нижнюю. Яблоки зреют по
+   очереди, иначе игрок разворачивается за отставшим и ломает след.
+
+   Тело идёт по следу головы, поэтому буква выходит почерком игрока: кривовато
+   обошёл — вышла рукописная з с характером, а не промах. */
+
+const GROW_SEG = 0.012;
+
+const grow = {
+  trail: [], len: 0, dir: 0, apples: [], next: 0,
+  blocks: [], dead: null, done: false, started: false,
+};
+
+/* У З нет замкнутых просветов — обе чаши открыты влево. Поэтому крупные блоки
+   стоят не «внутри», а в центрах кривизны дуг: обходя такой блок, змея выписывает
+   ровно свою дугу. Центры и радиусы подогнаны окружностью по точкам прописи.
+   Мелкие держат поле и не дают срезать напрямик. */
+function growBlocks() {
+  return [
+    { x: 0.493, y: 0.312, r: 0.070, big: true },
+    { x: 0.525, y: 0.639, r: 0.078, big: true },
+    { x: 0.120, y: 0.120, r: 0.055 },
+    { x: 0.130, y: 0.620, r: 0.065 },
+    { x: 0.930, y: 0.380, r: 0.060 },
+    { x: 0.900, y: 0.900, r: 0.050 },
+  ];
+}
+
+function growReset() {
+  const count = Math.round(num('apples'));
+  grow.apples = [];
+  /* Первое яблоко не в начале прописи: там стоит сама змея. */
+  for (let i = 1; i <= count; i += 1) {
+    const mark = pointAt(PRINT_PATH, i / count);
+    grow.apples.push({ x: mark.x, y: mark.y });
+  }
+  grow.blocks = growBlocks();
+  grow.next = 0;
+  grow.dead = null;
+  grow.done = false;
+  grow.started = false;
+
+  const start = pointAt(PRINT_PATH, 0);
+  grow.dir = Math.atan2(start.ty, start.tx);
+  grow.len = PRINT_PATH.length / count * 0.35;
+  grow.trail = [{ x: start.x, y: start.y }];
+  for (let i = 1; i < 6; i += 1) {
+    grow.trail.push({
+      x: start.x - Math.cos(grow.dir) * GROW_SEG * i,
+      y: start.y - Math.sin(grow.dir) * GROW_SEG * i,
+    });
+  }
+}
+
+function growBodyCount() {
+  return Math.max(2, Math.round(grow.len / GROW_SEG));
+}
+
+function growHitsBlock(x, y, pad) {
+  return grow.blocks.some((b) => Math.hypot(x - b.x, y - b.y) < b.r + pad);
+}
+
+/* Накрытая пропись — мягкая оценка почерка, а не пропуск дальше. */
+function growCovered() {
+  const checks = 40;
+  const body = grow.trail.slice(0, growBodyCount());
+  let hit = 0;
+  for (let i = 0; i < checks; i += 1) {
+    const mark = pointAt(PRINT_PATH, i / (checks - 1));
+    if (body.some((p) => Math.hypot(p.x - mark.x, p.y - mark.y) < 0.05)) hit += 1;
+  }
+  return hit / checks;
+}
+
+function growAdvance() {
+  if (grow.dead || grow.done) return;
+
+  const speed = num('speed') * STEP;
+  const turn = num('turn') * STEP;
+  const head = grow.trail[0];
+
+  if (pointer.seen) {
+    const want = Math.atan2(pointer.y - head.y, pointer.x - head.x);
+    grow.dir += clamp(wrapAngle(want - grow.dir), -turn, turn);
+  }
+
+  const x = head.x + Math.cos(grow.dir) * speed;
+  const y = head.y + Math.sin(grow.dir) * speed;
+
+  if (x < 0.01 || y < 0.01 || x > 0.99 || y > 0.99) {
+    grow.dead = { x: clamp(x, 0, 1), y: clamp(y, 0, 1), why: 'край' };
+    return;
+  }
+  if (growHitsBlock(x, y, 0.022)) {
+    grow.dead = { x, y, why: 'блок' };
+    return;
+  }
+
+  /* Голова живая и ходит свободно; узел закрепляется, когда она отошла от
+     предыдущего на шаг. Мерить от самой головы нельзя — она движется вместе
+     с меркой, и узлы не закрепляются никогда. */
+  head.x = x;
+  head.y = y;
+  const anchor = grow.trail[1];
+  if (!anchor || Math.hypot(x - anchor.x, y - anchor.y) >= GROW_SEG) {
+    grow.trail.unshift({ x, y });
+  }
+
+  /* След держим на всю будущую длину: хвост вытягивается в прошлое, и подрезка
+     по текущему телу выбросила бы историю раньше, чем змея до неё дорастёт. */
+  const room = Math.round((PRINT_PATH.length * 1.4) / GROW_SEG) + 60;
+  while (grow.trail.length > room) grow.trail.pop();
+
+  if (on('bite')) {
+    const live = grow.trail.slice(10, body);
+    if (live.some((p) => Math.hypot(p.x - x, p.y - y) < 0.024)) {
+      grow.dead = { x, y, why: 'укус' };
+      return;
+    }
+  }
+
+  const apple = grow.apples[grow.next];
+  if (apple && Math.hypot(x - apple.x, y - apple.y) < 0.038) {
+    grow.len += PRINT_PATH.length / grow.apples.length;
+    grow.next += 1;
+    if (grow.next >= grow.apples.length) grow.done = true;
+  }
+}
+
+MODES.grow = {
+  label: 'рост',
+  note: 'Змейка вырастает в букву: каждое яблоко удлиняет тело ровно на свой кусок прописи, и к последнему яблоку змея по длине равна З. Блоки стоят в просветах буквы — обошёл верхний и нижний, получил две дуги. Яблоки зреют по очереди. Веди курсором; буква выйдет твоим почерком.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'speed', label: 'ход', min: 0.1, max: 0.9, step: 0.05, value: 0.3 },
+    /* Горловина З ломается почти назад: радиус разворота (ход/поворот) должен
+       быть заметно меньше прохода, иначе змею сносит в блок. */
+    { type: 'range', key: 'turn', label: 'поворот', min: 2, max: 14, step: 0.5, value: 9 },
+    { type: 'range', key: 'apples', label: 'яблок', min: 4, max: 12, step: 1, value: 7 },
+    { type: 'toggle', key: 'bite', label: 'укус', value: false },
+    { type: 'toggle', key: 'trace', label: 'пропись', value: false },
+    { type: 'toggle', key: 'paint', label: 'краска', value: true },
+    { type: 'button', label: 'заново', action: () => growReset() },
+  ],
+  setup() { growReset(); },
+  onTool(key) { if (key === 'apples') growReset(); },
+  onMove() { grow.started = true; },
+  step() {
+    if (!grow.started) return;
+    growAdvance();
+  },
+  draw() {
+    if (on('trace')) drawSamples(PRINT_PATH, ink(0.08), 0.05);
+
+    /* Блоки — поле, а не метка: светлый тон чернил, не вторая краска. */
+    for (const b of grow.blocks) {
+      ctx.fillStyle = ink(b.big ? 0.075 : 0.05);
+      ctx.beginPath();
+      ctx.arc(b.x * S, b.y * S, b.r * S, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    grow.apples.forEach((apple, index) => {
+      if (index < grow.next) return;
+      const ripe = index === grow.next;
+      dot(apple.x, apple.y, ripe ? (on('paint') ? RED : INK) : 'transparent', 0.021);
+      if (!ripe) {
+        ctx.strokeStyle = ink(0.3);
+        ctx.lineWidth = 0.005 * S;
+        ctx.beginPath();
+        ctx.arc(apple.x * S, apple.y * S, 0.021 * S, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      /* Листик чернильный: краска в кадре одна, и она у спелого яблока. */
+      ctx.fillStyle = ink(ripe ? 0.55 : 0.3);
+      ctx.beginPath();
+      ctx.moveTo(apple.x * S, (apple.y - 0.021) * S);
+      ctx.quadraticCurveTo((apple.x + 0.016) * S, (apple.y - 0.036) * S, (apple.x + 0.019) * S, (apple.y - 0.019) * S);
+      ctx.quadraticCurveTo((apple.x + 0.008) * S, (apple.y - 0.018) * S, apple.x * S, (apple.y - 0.021) * S);
+      ctx.fill();
+    });
+
+    const body = grow.trail.slice(0, growBodyCount());
+    ctx.save();
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 0.048 * S;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    body.forEach((point, index) => {
+      if (index) ctx.lineTo(point.x * S, point.y * S);
+      else ctx.moveTo(point.x * S, point.y * S);
+    });
+    ctx.stroke();
+    ctx.restore();
+
+    const head = body[0];
+    dot(head.x, head.y, INK, 0.029);
+    for (const side of [-1, 1]) {
+      dot(
+        head.x + Math.cos(grow.dir) * 0.010 - Math.sin(grow.dir) * side * 0.010,
+        head.y + Math.sin(grow.dir) * 0.010 + Math.cos(grow.dir) * side * 0.010,
+        PAPER,
+        0.005,
+      );
+    }
+
+    if (grow.dead && on('paint')) dot(grow.dead.x, grow.dead.y, RED, 0.026);
+
+    const share = Math.round(growCovered() * 100);
+    if (grow.dead) drawStatus(grow.dead.why, true);
+    else if (grow.done) drawStatus(`буква написана · почерк ${share}%`, false);
+    else drawStatus(`яблок ${grow.next} / ${grow.apples.length}`, false);
+  },
+};
+
+/* ---------- 12. эскиз 1: классическая змейка по макету ---------- */
+
+const SKETCH1_BODY = (() => {
+  const commands = [
+    ['L', 840, 220],
+    ['C', 856.569, 220, 870, 233.431, 870, 250],
+    ['L', 870, 420],
+    ['C', 870, 436.569, 856.569, 450, 840, 450],
+    ['L', 784.178, 450],
+    ['C', 767.934, 450, 754.641, 462.929, 754.19, 479.167],
+    ['L', 753.31, 510.833],
+    ['C', 752.859, 527.071, 739.566, 540, 723.322, 540],
+    ['L', 620, 540],
+    ['C', 603.431, 540, 590, 553.431, 590, 570],
+    ['L', 590, 640],
+    ['C', 590, 656.569, 603.431, 670, 620, 670],
+    ['L', 840, 670],
+    ['C', 856.568, 670, 870, 683.431, 870, 700],
+    ['L', 870, 972],
+    ['C', 870, 988.569, 856.569, 1002, 840, 1002],
+    ['L', 439, 1002],
+  ];
+  const samples = [];
+  let from = [470, 220];
+  let length = 0;
+  const put = (x, y) => {
+    const point = { x: x / 1200, y: y / 1200 };
+    if (samples.length) length += Math.hypot(point.x - samples.at(-1).x, point.y - samples.at(-1).y);
+    samples.push({ ...point, length });
+  };
+  put(...from);
+  for (const command of commands) {
+    const cubicCommand = command[0] === 'C';
+    const to = cubicCommand ? command.slice(5, 7) : command.slice(1, 3);
+    const distance = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    const steps = Math.max(2, Math.ceil(distance / 8));
+    for (let i = 1; i <= steps; i += 1) {
+      const t = i / steps;
+      if (!cubicCommand) {
+        put(lerp(from[0], to[0], t), lerp(from[1], to[1], t));
+        continue;
+      }
+      const u = 1 - t;
+      const x = u ** 3 * from[0] + 3 * u * u * t * command[1]
+        + 3 * u * t * t * command[3] + t ** 3 * command[5];
+      const y = u ** 3 * from[1] + 3 * u * u * t * command[2]
+        + 3 * u * t * t * command[4] + t ** 3 * command[6];
+      put(x, y);
+    }
+    from = to;
+  }
+  samples.forEach((point) => { point.u = point.length / length; });
+  return { samples, length };
+})();
+
+const SKETCH1_BLOCKS = [
+  { x: 600 / 1200, y: 380 / 1200, r: 100 / 1200 },
+  { x: 600 / 1200, y: 840 / 1200, r: 100 / 1200 },
+  { x: 710 / 1200, y: 610 / 1200, r: 30 / 1200 },
+  { x: 490 / 1200, y: 610 / 1200, r: 30 / 1200 },
+];
+
+/* Шесть невидимых зон со схемы. Их порядок ведёт голову вокруг всей формы:
+   верх → правый верх → горловина → правый низ → низ → левая сторона. */
+const SKETCH1_APPLE_ZONES = [
+  [[0.27, 0.06], [0.90, 0.08], [0.63, 0.265], [0.52, 0.225], [0.42, 0.275]],
+  [[0.91, 0.09], [0.94, 0.58], [0.61, 0.455], [0.61, 0.295]],
+  [[0.43, 0.435], [0.58, 0.435], [0.54, 0.51], [0.57, 0.585], [0.44, 0.585], [0.47, 0.51]],
+  [[0.61, 0.545], [0.72, 0.50], [0.94, 0.60], [0.94, 0.93], [0.61, 0.98]],
+  [[0.38, 0.81], [0.58, 0.81], [0.58, 0.98], [0.25, 0.98]],
+  [[0.12, 0.005], [0.39, 0.26], [0.35, 0.45], [0.40, 0.77], [0.26, 0.89], [0.12, 0.94], [0.08, 0.48]],
+];
+
+const sketch1 = {
+  points: [], segment: 0, dir: Math.PI, apple: null,
+  dots: [], eaten: 0, best: 0, zone: 0, dead: null,
+  full: false, finishing: false, started: false, mouseTarget: false,
+};
+
+function sketch1Ink() { return on('night') ? PAPER : INK; }
+function sketch1Paper() { return on('night') ? INK : PAPER; }
+
+function sketch1Reset() {
+  const count = Math.round(SKETCH1_BODY.length / 0.009) + 1;
+  sketch1.points = resample(SKETCH1_BODY, count).reverse();
+  sketch1.segment = SKETCH1_BODY.length / (count - 1);
+  sketch1.dir = Math.PI;
+  sketch1.dots = [];
+  sketch1.eaten = 0;
+  sketch1.zone = 0;
+  sketch1.dead = null;
+  sketch1.full = false;
+  sketch1.finishing = false;
+  sketch1.started = false;
+  sketch1.mouseTarget = false;
+  sketch1Apple();
+}
+
+function sketch1DotLayout() {
+  const inset = (38 / 1200) / sketch1.segment;
+  const gap = (70 / 1200) / sketch1.segment;
+  const headClear = (70 / 1200) / sketch1.segment;
+  const tail = sketch1.points.length - 1 - inset;
+  const capacity = Math.max(1, Math.floor((tail - headClear) / gap) + 1);
+  return { gap, headClear, tail, capacity };
+}
+
+function sketch1Finish() {
+  sketch1.full = true;
+  sketch1.finishing = false;
+  sketch1.apple = null;
+  sketch1.best = Math.max(sketch1.best, sketch1.eaten);
+}
+
+function sketch1InZone(point, zone) {
+  let inside = false;
+  for (let i = 0, j = zone.length - 1; i < zone.length; j = i, i += 1) {
+    const a = zone[i];
+    const b = zone[j];
+    const crosses = (a[1] > point.y) !== (b[1] > point.y)
+      && point.x < ((b[0] - a[0]) * (point.y - a[1])) / (b[1] - a[1]) + a[0];
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function sketch1Apple() {
+  const index = sketch1.zone % SKETCH1_APPLE_ZONES.length;
+  const zone = SKETCH1_APPLE_ZONES[index];
+  const xs = zone.map((point) => point[0]);
+  const ys = zone.map((point) => point[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  let best = null;
+
+  for (let tries = 0; tries < 360; tries += 1) {
+    const apple = { x: lerp(minX, maxX, Math.random()), y: lerp(minY, maxY, Math.random()), zone: index + 1 };
+    if (!sketch1InZone(apple, zone)) continue;
+    const bodyGap = Math.min(...sketch1.points.map((point) => Math.hypot(point.x - apple.x, point.y - apple.y)));
+    const blockGap = Math.min(...SKETCH1_BLOCKS.map((block) => Math.hypot(block.x - apple.x, block.y - apple.y) - block.r));
+    const score = Math.min(bodyGap, blockGap);
+    if (!best || score > best.score) best = { apple, score };
+    const clearBody = bodyGap > 0.058;
+    const clearBlocks = blockGap > 0.038;
+    if (clearBody && clearBlocks) {
+      sketch1.apple = apple;
+      sketch1.zone = (index + 1) % SKETCH1_APPLE_ZONES.length;
+      return;
+    }
+  }
+  sketch1.apple = best?.apple || null;
+  sketch1.zone = (index + 1) % SKETCH1_APPLE_ZONES.length;
+}
+
+function sketch1Advance() {
+  if (sketch1.dead || sketch1.full) return;
+  const head = sketch1.points[0];
+  const speed = num('speed') * STEP;
+  const turn = num('turn') * STEP;
+  const radius = 30 / 1200;
+  if (on('mouse') && pointer.seen && sketch1.mouseTarget) {
+    const dx = pointer.x - head.x;
+    const dy = pointer.y - head.y;
+    if (Math.hypot(dx, dy) <= radius * 2.2) {
+      sketch1.mouseTarget = false;
+    } else {
+      const want = Math.atan2(dy, dx);
+      sketch1.dir += clamp(wrapAngle(want - sketch1.dir), -turn, turn);
+    }
+  }
+
+  const x = head.x + Math.cos(sketch1.dir) * speed;
+  const y = head.y + Math.sin(sketch1.dir) * speed;
+  const out = x < radius || y < radius || x > 1 - radius || y > 1 - radius;
+  const block = SKETCH1_BLOCKS.some((item) => Math.hypot(x - item.x, y - item.y) < radius + item.r);
+  const bite = on('bite') && sketch1.points.slice(9).some((point) => Math.hypot(x - point.x, y - point.y) < radius * 1.6);
+  if (out || block || bite) {
+    sketch1.dead = { x: clamp(x, radius, 1 - radius), y: clamp(y, radius, 1 - radius), why: out ? 'край' : block ? 'круг' : 'укус' };
+    sketch1.best = Math.max(sketch1.best, sketch1.eaten);
+    return;
+  }
+
+  head.x = x;
+  head.y = y;
+  /* Голова разбивается о круг, но тело только обтекает его. Несколько проходов
+     по цепочке возвращают длину звеньев после выталкивания и не дают хвосту
+     прорезать препятствие насквозь. */
+  for (let pass = 0; pass < 4; pass += 1) {
+    for (let i = 1; i < sketch1.points.length; i += 1) {
+      const front = sketch1.points[i - 1];
+      const point = sketch1.points[i];
+      const dx = point.x - front.x;
+      const dy = point.y - front.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      point.x = front.x + (dx / distance) * sketch1.segment;
+      point.y = front.y + (dy / distance) * sketch1.segment;
+
+      for (const item of SKETCH1_BLOCKS) {
+        const bx = point.x - item.x;
+        const by = point.y - item.y;
+        const away = Math.hypot(bx, by);
+        const limit = item.r + radius;
+        if (away >= limit) continue;
+        const normalX = away > 0.000001 ? bx / away : -dy / distance;
+        const normalY = away > 0.000001 ? by / away : dx / distance;
+        point.x = item.x + normalX * limit;
+        point.y = item.y + normalY * limit;
+      }
+    }
+  }
+
+  /* Метка идёт к хвосту ровно на столько звеньев, на сколько тело прошло через
+     голову. В мировых координатах она сначала почти стоит на месте. Дошедшие
+     до хвоста образуют ровную цепочку и едут дальше вместе с ним. */
+  const layout = sketch1DotLayout();
+  const dotRate = speed / sketch1.segment;
+  sketch1.dots.forEach((mark, index) => {
+    const limit = index ? Math.max(0, sketch1.dots[index - 1].pos - layout.gap) : layout.tail;
+    mark.pos = Math.max(mark.pos, Math.min(mark.pos + dotRate, limit));
+  });
+
+  if (sketch1.finishing) {
+    const last = sketch1.dots[sketch1.dots.length - 1];
+    if (last && last.pos >= layout.headClear - 0.001) sketch1Finish();
+    return;
+  }
+
+  if (sketch1.apple && Math.hypot(x - sketch1.apple.x, y - sketch1.apple.y) < radius * 2.05) {
+    sketch1.eaten += 1;
+    if (sketch1.dots.length < layout.capacity) sketch1.dots.push({ pos: 0 });
+    if (!on('endless') && sketch1.dots.length >= layout.capacity) {
+      sketch1.finishing = true;
+      sketch1.apple = null;
+    } else {
+      sketch1Apple();
+    }
+  }
+}
+
+function sketch1At(pos) {
+  const last = sketch1.points.length - 1;
+  const i = clamp(Math.floor(pos), 0, last);
+  const j = Math.min(i + 1, last);
+  const mix = clamp(pos - i, 0, 1);
+  return {
+    x: lerp(sketch1.points[i].x, sketch1.points[j].x, mix),
+    y: lerp(sketch1.points[i].y, sketch1.points[j].y, mix),
+  };
+}
+
+function sketch1DrawApple() {
+  if (!sketch1.apple || sketch1.dead) return;
+  const apple = sketch1.apple;
+  const radius = 30 / 1200;
+  const leafScale = radius / 40.125;
+  dot(apple.x, apple.y, on('paint') ? RED : sketch1Ink(), radius);
+  ctx.fillStyle = sketch1Ink();
+  ctx.beginPath();
+  ctx.moveTo((apple.x + 26.75 * leafScale) * S, (apple.y - 66.875 * leafScale) * S);
+  ctx.bezierCurveTo(
+    (apple.x + 11.9764 * leafScale) * S,
+    (apple.y - 66.875 * leafScale) * S,
+    apple.x * S,
+    (apple.y - 54.8986 * leafScale) * S,
+    apple.x * S,
+    (apple.y - 40.125 * leafScale) * S,
+  );
+  ctx.bezierCurveTo(
+    (apple.x + 14.7736 * leafScale) * S,
+    (apple.y - 40.125 * leafScale) * S,
+    (apple.x + 26.75 * leafScale) * S,
+    (apple.y - 52.1014 * leafScale) * S,
+    (apple.x + 26.75 * leafScale) * S,
+    (apple.y - 66.875 * leafScale) * S,
+  );
+  ctx.closePath();
+  ctx.fill();
+}
+
+function sketch1DrawFace() {
+  const head = sketch1.points[0];
+  const dx = Math.cos(sketch1.dir);
+  const dy = Math.sin(sketch1.dir);
+  const normalX = dy;
+  const normalY = -dx;
+  const local = (x, y) => ({
+    x: head.x + dx * (70 - x) / 1200 + normalX * (y - 30) / 1200,
+    y: head.y + dy * (70 - x) / 1200 + normalY * (y - 30) / 1200,
+  });
+  const tongue = [
+    [[30.0012, 27.1715], [24.8291, 21.9994], [35.1726, 22.0001]],
+    [[10.0012, 27.1715], [4.82906, 21.9994], [15.1726, 22.0001]],
+    [[35.1712, 38.0005], [24.8284, 37.9991], [29.9991, 32.8284]],
+    [[15.1712, 38.0005], [4.82837, 37.9991], [9.99908, 32.8284]],
+  ];
+
+  let tongueVisible = false;
+  if (sketch1.apple && !sketch1.dead) {
+    const ax = sketch1.apple.x - head.x;
+    const ay = sketch1.apple.y - head.y;
+    const distance = Math.hypot(ax, ay) || 1;
+    const facing = (ax * dx + ay * dy) / distance;
+    tongueVisible = facing > 0.15 && distance < 0.14;
+  }
+
+  if (tongueVisible) {
+    ctx.save();
+    ctx.fillStyle = sketch1Ink();
+    ctx.strokeStyle = sketch1Ink();
+    ctx.lineWidth = 4 / 1200 * S;
+    ctx.lineJoin = 'miter';
+    for (const triangle of tongue) {
+      ctx.beginPath();
+      triangle.forEach(([x, y], index) => {
+        const point = local(x, y);
+        if (index) ctx.lineTo(point.x * S, point.y * S);
+        else ctx.moveTo(point.x * S, point.y * S);
+      });
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  for (const y of [20, 40]) {
+    const eye = local(70, y);
+    ctx.beginPath();
+    ctx.arc(eye.x * S, eye.y * S, 5.071 / 1200 * S, 0, Math.PI * 2);
+    ctx.fillStyle = sketch1.dead ? sketch1Paper() : sketch1Ink();
+    ctx.fill();
+    ctx.strokeStyle = sketch1Paper();
+    ctx.lineWidth = 4 / 1200 * S;
+    ctx.stroke();
+
+    if (sketch1.dead) {
+      const cross = [
+        [64.6562, y + 5.6562, 75.97, y - 5.6575],
+        [64.6562, y - 5.6562, 75.97, y + 5.6575],
+      ];
+      ctx.strokeStyle = sketch1Ink();
+      ctx.lineWidth = 4 / 1200 * S;
+      ctx.lineJoin = 'round';
+      for (const [x1, y1, x2, y2] of cross) {
+        const start = local(x1, y1);
+        const end = local(x2, y2);
+        ctx.beginPath();
+        ctx.moveTo(start.x * S, start.y * S);
+        ctx.lineTo(end.x * S, end.y * S);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+function sketch1DrawResult() {
+  if (!sketch1.dead && !sketch1.full) return;
+  const lines = [];
+  if (sketch1.full) lines.push('спасибо, что покормили змею.');
+  lines.push(`собрано яблок: ${sketch1.eaten}`);
+  lines.push(`лучший результат: ${sketch1.best}`);
+
+  ctx.save();
+  ctx.fillStyle = MUTED;
+  ctx.font = `${Math.round(S * 0.022)}px 'DM Mono', ui-monospace, monospace`;
+  ctx.textAlign = 'right';
+  lines.forEach((text, index) => ctx.fillText(text, S * 0.96, S * (0.06 + index * 0.032)));
+  ctx.restore();
+}
+
+MODES.sketch1 = {
+  label: 'эскиз 1',
+  note: 'Классическая змейка в точной позе из макета: голова разбивается о круги, а тело и хвост огибают их. Яблоки по очереди обходят шесть зон вокруг формы. Съеденное яблоко становится светлой точкой и уходит к хвосту. Наполни тело или играй без конца. После финала кликни в любом месте кадра, чтобы начать новую партию.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'speed', label: 'ход', min: 0.08, max: 0.55, step: 0.01, value: 0.24 },
+    { type: 'range', key: 'turn', label: 'поворот', min: 1, max: 10, step: 0.5, value: 5 },
+    { type: 'toggle', key: 'mouse', label: 'мышь', value: true },
+    { type: 'toggle', key: 'bite', label: 'укус', value: true },
+    { type: 'toggle', key: 'paint', label: 'краска', value: true },
+    { type: 'toggle', key: 'night', label: 'ночь', value: false },
+    { type: 'toggle', key: 'endless', label: 'бесконечная игра', value: false },
+    { type: 'button', label: 'заново', action: () => sketch1Reset() },
+  ],
+  setup() {
+    sketch1.best = 0;
+    sketch1Reset();
+  },
+  onTool(key) {
+    if (key === 'mouse' && !on('mouse')) {
+      sketch1.mouseTarget = false;
+      pointer.seen = false;
+    }
+    if (key === 'endless' && !sketch1.dead) {
+      if (on('endless') && (sketch1.full || sketch1.finishing)) {
+        sketch1.full = false;
+        sketch1.finishing = false;
+        sketch1Apple();
+      } else if (!on('endless') && sketch1.dots.length >= sketch1DotLayout().capacity) {
+        sketch1.full = false;
+        sketch1.finishing = true;
+        sketch1.apple = null;
+      }
+    }
+  },
+  onDown() {
+    if (sketch1.dead || sketch1.full) {
+      const mouse = on('mouse');
+      sketch1Reset();
+      sketch1.started = true;
+      sketch1.mouseTarget = mouse;
+      if (!mouse) pointer.seen = false;
+      return;
+    }
+    if (!on('mouse')) return;
+    sketch1.started = true;
+    sketch1.mouseTarget = true;
+  },
+  onMove() {
+    if (on('mouse') && sketch1.started) sketch1.mouseTarget = true;
+  },
+  onKey(event, down) {
+    if (!down) return;
+    const directions = {
+      ArrowLeft: Math.PI,
+      ArrowRight: 0,
+      ArrowUp: -Math.PI / 2,
+      ArrowDown: Math.PI / 2,
+    };
+    if (!(event.code in directions)) return;
+    const next = directions[event.code];
+    if (Math.abs(wrapAngle(next - sketch1.dir)) < Math.PI * 0.75) sketch1.dir = next;
+    sketch1.started = true;
+    sketch1.mouseTarget = false;
+    pointer.seen = false;
+    event.preventDefault();
+  },
+  step() {
+    if (sketch1.started) sketch1Advance();
+  },
+  draw() {
+    if (on('night')) {
+      ctx.fillStyle = sketch1Paper();
+      ctx.fillRect(0, 0, S, S);
+      ctx.save();
+      ctx.strokeStyle = MUTED;
+      ctx.globalAlpha = 0.1;
+      ctx.lineWidth = Math.max(0.5, S / 1200);
+      ctx.beginPath();
+      ctx.moveTo(S * 0.5, 0);
+      ctx.lineTo(S * 0.5, S);
+      ctx.moveTo(0, S * 0.5);
+      ctx.lineTo(S, S * 0.5);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.strokeStyle = sketch1Ink();
+    ctx.lineWidth = Math.max(0.75, S / 1200);
+    for (const block of SKETCH1_BLOCKS) {
+      ctx.beginPath();
+      ctx.arc(block.x * S, block.y * S, block.r * S, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = sketch1Ink();
+    ctx.lineWidth = 60 / 1200 * S;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    sketch1.points.forEach((point, index) => {
+      if (index) ctx.lineTo(point.x * S, point.y * S);
+      else ctx.moveTo(point.x * S, point.y * S);
+    });
+    ctx.stroke();
+    ctx.restore();
+
+    for (const mark of sketch1.dots) {
+      const point = sketch1At(mark.pos);
+      dot(point.x, point.y, sketch1Paper(), 20 / 1200);
+    }
+
+    sketch1DrawApple();
+    sketch1DrawFace();
+    if (sketch1.dead || sketch1.full) sketch1DrawResult();
+    else if (sketch1.started) drawStatus(`яблок ${sketch1.eaten}`);
+  },
+};
+
 startLab({
   title: 'З · две дуги и горловина',
   modes: MODES,

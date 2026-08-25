@@ -208,7 +208,10 @@ body.lab[data-bare] .stage::before { display: none; }
 
 @media (max-width: 760px) {
   body.lab { padding: 12px; gap: 12px; }
-  body.lab header { grid-template-columns: auto auto; gap: 10px; }
+  body.lab header { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  body.lab header .identity { grid-area: 1 / 1; }
+  body.lab header .globals { grid-area: 2 / 1; justify-self: start; }
+  body.lab header .modes { grid-area: 3 / 1; }
   .modes { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 3px; }
   .modes button { flex: 0 0 auto; }
   body.lab { --col: min(100%, 70vh); }
