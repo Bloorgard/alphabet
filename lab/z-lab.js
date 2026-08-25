@@ -2763,6 +2763,323 @@ MODES.sketch1 = {
   },
 };
 
+/* ---------- 13. эскиз 2: тонкие слои по макету ---------- */
+
+const SKETCH2_FIELD = '#000000';
+const SKETCH2_LINE = '#ffffff';
+const SKETCH2_BLOCK = '#3300ff';
+const SKETCH2_APPLE = '#ff0000';
+const SKETCH2_STROKE = 10;
+const SKETCH2_LAYER_STEP = SKETCH2_STROKE * 2;
+const SKETCH2_GRID_ORIGIN = { x: 647 / 1200, y: 1037 / 1200 };
+const SKETCH2_PATH_DATA = 'M497.5 255H840C856.569 255 870 268.431 870 285V455C870 471.569 856.569 485 840 485H783.948C767.796 485 754.543 497.788 753.967 513.929L753.533 526.071C752.957 542.212 739.704 555 723.552 555H620C603.431 555 590 568.431 590 585V675C590 691.569 603.431 705 620 705H840C856.568 705 870 718.431 870 735V1007C870 1023.57 856.569 1037 840 1037H647';
+
+const SKETCH2_BODY = (() => {
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', SKETCH2_PATH_DATA);
+  const pixelLength = path.getTotalLength();
+  const count = Math.ceil(pixelLength / 6);
+  const samples = [];
+  for (let index = 0; index <= count; index += 1) {
+    const length = pixelLength * index / count;
+    const point = path.getPointAtLength(length);
+    samples.push({ x: point.x / 1200, y: point.y / 1200, length: length / 1200, u: index / count });
+  }
+  return { samples, length: pixelLength / 1200 };
+})();
+
+const SKETCH2_BLOCKS = [
+  { x: 597, y: 372, r: 95 },
+  { x: 597, y: 814, r: 95 },
+  { x: 497, y: 596, r: 25 },
+  { x: 684, y: 596, r: 25 },
+];
+
+const sketch2 = {
+  points: [], segment: 0, dir: Math.PI, apple: null,
+  trail: [], pendingDir: null, eaten: 0, zone: 0, started: false, dead: false,
+};
+
+function sketch2Reset() {
+  const count = Math.round(SKETCH2_BODY.length / 0.009) + 1;
+  sketch2.points = resample(SKETCH2_BODY, count).reverse();
+  sketch2.segment = SKETCH2_BODY.length / (count - 1);
+  sketch2.trail = sketch2.points.map((point) => ({ ...point }));
+  sketch2.dir = Math.PI;
+  sketch2.apple = { x: 507.125 / 1200, y: 999.875 / 1200 };
+  sketch2.eaten = 0;
+  sketch2.zone = 0;
+  sketch2.started = false;
+  sketch2.dead = false;
+  sketch2.pendingDir = null;
+}
+
+function sketch2TrailAt(distance, distances) {
+  const target = clamp(distance, 0, distances.at(-1));
+  let low = 0;
+  let high = distances.length - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >> 1;
+    if (distances[middle] < target) low = middle;
+    else high = middle;
+  }
+  const span = Math.max(0.000001, distances[high] - distances[low]);
+  const mix = clamp((target - distances[low]) / span, 0, 1);
+  return {
+    x: lerp(sketch2.trail[low].x, sketch2.trail[high].x, mix),
+    y: lerp(sketch2.trail[low].y, sketch2.trail[high].y, mix),
+  };
+}
+
+function sketch2FollowTrail() {
+  const keep = SKETCH2_BODY.length + 0.22;
+  const distances = [0];
+  for (let index = 1; index < sketch2.trail.length; index += 1) {
+    const point = sketch2.trail[index];
+    const previous = sketch2.trail[index - 1];
+    distances.push(distances.at(-1) + Math.hypot(point.x - previous.x, point.y - previous.y));
+    if (distances.at(-1) >= keep) {
+      sketch2.trail.length = index + 1;
+      distances.length = index + 1;
+      break;
+    }
+  }
+
+  sketch2.points.forEach((point, index) => {
+    const distance = index * sketch2.segment;
+    const exact = sketch2TrailAt(distance, distances);
+    point.x = exact.x;
+    point.y = exact.y;
+  });
+}
+
+function sketch2DrawBody(offset) {
+  const radius = num('rounding') / 1200;
+  const reach = radius / sketch2.segment;
+  const last = sketch2.points.length - 1;
+  const at = (position) => {
+    const value = clamp(position, 0, last);
+    const low = Math.floor(value);
+    const high = Math.min(low + 1, last);
+    const mix = value - low;
+    return {
+      x: lerp(sketch2.points[low].x, sketch2.points[high].x, mix),
+      y: lerp(sketch2.points[low].y, sketch2.points[high].y, mix),
+    };
+  };
+  const points = sketch2.points.map((point, index) => {
+    if (!reach) return { x: point.x * S, y: point.y * S + offset };
+    const before = at(index - reach);
+    const after = at(index + reach);
+    const influence = Math.min(1, index / reach, (last - index) / reach);
+    return {
+      x: lerp(point.x, (before.x + point.x * 2 + after.x) / 4, influence) * S,
+      y: lerp(point.y, (before.y + point.y * 2 + after.y) / 4, influence) * S + offset,
+    };
+  });
+
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  if (!radius) {
+    for (let index = 1; index < points.length; index += 1) ctx.lineTo(points[index].x, points[index].y);
+  } else {
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const point = points[index];
+      const next = points[index + 1];
+      ctx.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
+    }
+    ctx.lineTo(points.at(-1).x, points.at(-1).y);
+  }
+  ctx.stroke();
+}
+
+function sketch2PlaceApple() {
+  const zone = SKETCH1_APPLE_ZONES[sketch2.zone % SKETCH1_APPLE_ZONES.length];
+  const xs = zone.map((point) => point[0]);
+  const ys = zone.map((point) => point[1]);
+  const copies = Math.round(num('copies'));
+  const blocks = SKETCH2_BLOCKS.flatMap((block) => Array.from({ length: copies }, (_, index) => ({
+    x: block.x / 1200,
+    y: (block.y - index * SKETCH2_LAYER_STEP) / 1200,
+    r: block.r / 1200,
+  })));
+  let best = null;
+
+  for (let tries = 0; tries < 360; tries += 1) {
+    const apple = {
+      x: lerp(Math.min(...xs), Math.max(...xs), Math.random()),
+      y: lerp(Math.min(...ys), Math.max(...ys), Math.random()),
+    };
+    if (!sketch1InZone(apple, zone)) continue;
+    const bodyGap = Math.min(...sketch2.points.map((point) => Math.hypot(point.x - apple.x, point.y - apple.y)));
+    const blockGap = Math.min(...blocks.map((block) => Math.hypot(block.x - apple.x, block.y - apple.y) - block.r));
+    if (blockGap > 0.045 && (!best || bodyGap > best.score)) best = { apple, score: bodyGap };
+    if (bodyGap > 0.058 && blockGap > 0.045) {
+      sketch2.apple = apple;
+      sketch2.zone = (sketch2.zone + 1) % SKETCH1_APPLE_ZONES.length;
+      return;
+    }
+  }
+  sketch2.apple = best?.apple || { x: 0.08, y: 0.08 };
+  sketch2.zone = (sketch2.zone + 1) % SKETCH1_APPLE_ZONES.length;
+}
+
+function sketch2AppleClear() {
+  if (!sketch2.apple) return true;
+  const copies = Math.round(num('copies'));
+  return SKETCH2_BLOCKS.every((block) => Array.from({ length: copies }, (_, index) => index).every((index) => (
+    Math.hypot(
+      sketch2.apple.x - block.x / 1200,
+      sketch2.apple.y - (block.y - index * SKETCH2_LAYER_STEP) / 1200,
+    ) - block.r / 1200 > 0.045
+  )));
+}
+
+function sketch2Advance() {
+  if (!sketch2.started || sketch2.dead) return;
+  const head = sketch2.points[0];
+  const speed = num('speed') * 0.04 * STEP;
+  const radius = 5 / 1200;
+  let x = head.x;
+  let y = head.y;
+  let remaining = speed;
+  let corner = null;
+
+  if (sketch2.pendingDir !== null) {
+    const horizontal = Math.abs(Math.cos(sketch2.dir)) > 0.5;
+    const axis = horizontal ? 'x' : 'y';
+    const current = horizontal ? x : y;
+    const origin = SKETCH2_GRID_ORIGIN[axis];
+    const direction = horizontal ? Math.sign(Math.cos(sketch2.dir)) : Math.sign(Math.sin(sketch2.dir));
+    const grid = SKETCH2_LAYER_STEP / 1200;
+    const relative = (current - origin) / grid;
+    const nearest = Math.round(relative);
+    const aligned = Math.abs(relative - nearest) < 0.0001;
+    const target = aligned
+      ? current
+      : origin + (direction > 0 ? Math.ceil(relative) : Math.floor(relative)) * grid;
+    const distance = Math.max(0, (target - current) * direction);
+    if (distance <= remaining) {
+      x += Math.cos(sketch2.dir) * distance;
+      y += Math.sin(sketch2.dir) * distance;
+      corner = { x, y };
+      remaining -= distance;
+      sketch2.dir = sketch2.pendingDir;
+      sketch2.pendingDir = null;
+    }
+  }
+
+  x += Math.cos(sketch2.dir) * remaining;
+  y += Math.sin(sketch2.dir) * remaining;
+  const out = x < radius || y < radius || x > 1 - radius || y > 1 - radius;
+  const block = SKETCH2_BLOCKS.some((item) => (
+    Math.hypot(x - item.x / 1200, y - item.y / 1200) < radius + item.r / 1200
+  ));
+  const bite = sketch2.points.slice(12).some((point) => Math.hypot(x - point.x, y - point.y) < radius * 1.8);
+  if (out || block || bite) {
+    sketch2.dead = true;
+    return;
+  }
+
+  head.x = x;
+  head.y = y;
+  if (corner && Math.hypot(corner.x - x, corner.y - y) > 0.000001) sketch2.trail.unshift(corner);
+  sketch2.trail.unshift({ x, y });
+  sketch2FollowTrail();
+
+  if (sketch2.apple && Math.hypot(x - sketch2.apple.x, y - sketch2.apple.y) < 50 / 1200) {
+    sketch2.eaten += 1;
+    sketch2PlaceApple();
+  }
+}
+
+function sketch2DrawApple(scale) {
+  const x = sketch2.apple.x * 1200;
+  const y = sketch2.apple.y * 1200;
+  ctx.fillStyle = SKETCH2_APPLE;
+  ctx.beginPath();
+  ctx.arc(x * scale, y * scale, 40.125 * scale, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = SKETCH2_LINE;
+  ctx.beginPath();
+  ctx.moveTo((x + 26.75) * scale, (y - 66.875) * scale);
+  ctx.bezierCurveTo((x + 11.976) * scale, (y - 66.875) * scale, x * scale, (y - 54.899) * scale, x * scale, (y - 40.125) * scale);
+  ctx.bezierCurveTo((x + 14.774) * scale, (y - 40.125) * scale, (x + 26.75) * scale, (y - 52.101) * scale, (x + 26.75) * scale, (y - 66.875) * scale);
+  ctx.closePath();
+  ctx.fill();
+}
+
+MODES.sketch2 = {
+  label: 'эскиз 2',
+  note: 'Классическая змейка в тонкой многослойной графике. Управляй стрелками и собирай яблоки; счёт пока не меняет рисунок. Повороты фиксируются на сетке 20 px, а радиус сглаживает только отображение точного маршрута. После столкновения нажми любую стрелку, чтобы начать заново.',
+  cursor: 'default',
+  tools: [
+    { type: 'range', key: 'copies', label: 'копии', min: 1, max: 10, step: 1, value: 1 },
+    { type: 'range', key: 'speed', label: 'скорость', min: 0.5, max: 6, step: 0.5, value: 2.5 },
+    { type: 'range', key: 'rounding', label: 'радиус поворота', min: 0, max: 120, step: 5, value: 40 },
+  ],
+  setup() {
+    sketch2Reset();
+  },
+  onTool(key) {
+    if (key === 'copies' && !sketch2AppleClear()) sketch2PlaceApple();
+  },
+  onKey(event, down) {
+    if (!down) return;
+    const directions = {
+      ArrowLeft: Math.PI,
+      ArrowRight: 0,
+      ArrowUp: -Math.PI / 2,
+      ArrowDown: Math.PI / 2,
+    };
+    if (!(event.code in directions)) return;
+    if (sketch2.dead) sketch2Reset();
+    const next = directions[event.code];
+    if (!sketch2.started) {
+      sketch2.dir = next;
+      sketch2.pendingDir = null;
+    } else if (Math.abs(wrapAngle(next - sketch2.dir)) < Math.PI * 0.75) {
+      if (Math.abs(wrapAngle(next - sketch2.dir)) < 0.01) sketch2.pendingDir = null;
+      else sketch2.pendingDir = next;
+    }
+    sketch2.started = true;
+    event.preventDefault();
+  },
+  step: sketch2Advance,
+  draw() {
+    const scale = S / 1200;
+    const copies = Math.round(num('copies'));
+    ctx.fillStyle = SKETCH2_FIELD;
+    ctx.fillRect(0, 0, S, S);
+
+    for (let index = 0; index < copies; index += 1) {
+      for (const block of SKETCH2_BLOCKS) {
+        ctx.fillStyle = SKETCH2_FIELD;
+        ctx.strokeStyle = SKETCH2_BLOCK;
+        ctx.lineWidth = SKETCH2_STROKE * scale;
+        ctx.beginPath();
+        ctx.arc(block.x * scale, (block.y - index * SKETCH2_LAYER_STEP) * scale, block.r * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      ctx.save();
+      ctx.strokeStyle = SKETCH2_LINE;
+      ctx.lineWidth = SKETCH2_STROKE * scale;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      sketch2DrawBody(-index * SKETCH2_LAYER_STEP * scale);
+      ctx.restore();
+
+      if (!index) sketch2DrawApple(scale);
+    }
+
+    if (sketch2.dead) drawStatus('столкновение · стрелка — заново');
+    else if (sketch2.started) drawStatus(`яблок ${sketch2.eaten}`);
+  },
+};
+
 startLab({
   title: 'З · две дуги и горловина',
   modes: MODES,
