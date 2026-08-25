@@ -3643,7 +3643,7 @@ MODES.sketch3 = {
 };
 
 startLab({
-  title: 'З · многослойная рисовалка',
-  modes: MODES,
-  start: 'sketch3',
+  title: 'З · многослойная змейка',
+  modes: { sketch2: MODES.sketch2 },
+  start: 'sketch2',
 });
