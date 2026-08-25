@@ -2801,12 +2801,12 @@ const sketch2 = {
 };
 
 function sketch2Reset() {
-  const count = Math.round(SKETCH2_BODY.length / 0.009) + 1;
+  const count = Math.round(SKETCH2_BODY.length / 0.005) + 1;
   sketch2.points = resample(SKETCH2_BODY, count).reverse();
   sketch2.segment = SKETCH2_BODY.length / (count - 1);
   sketch2.trail = sketch2.points.map((point) => ({ ...point }));
   sketch2.dir = Math.PI;
-  sketch2.apple = { x: 507.125 / 1200, y: 999.875 / 1200 };
+  sketch2.apple = { x: 470 / 1200, y: 999.875 / 1200 };
   sketch2.eaten = 0;
   sketch2.zone = 0;
   sketch2.started = false;
@@ -2855,28 +2855,11 @@ function sketch2FollowTrail() {
 
 function sketch2DrawBody(offset) {
   const radius = num('rounding') / 1200;
-  const reach = radius / sketch2.segment;
   const last = sketch2.points.length - 1;
-  const at = (position) => {
-    const value = clamp(position, 0, last);
-    const low = Math.floor(value);
-    const high = Math.min(low + 1, last);
-    const mix = value - low;
-    return {
-      x: lerp(sketch2.points[low].x, sketch2.points[high].x, mix),
-      y: lerp(sketch2.points[low].y, sketch2.points[high].y, mix),
-    };
-  };
-  const points = sketch2.points.map((point, index) => {
-    if (!reach) return { x: point.x * S, y: point.y * S + offset };
-    const before = at(index - reach);
-    const after = at(index + reach);
-    const influence = Math.min(1, index / reach, (last - index) / reach);
-    return {
-      x: lerp(point.x, (before.x + point.x * 2 + after.x) / 4, influence) * S,
-      y: lerp(point.y, (before.y + point.y * 2 + after.y) / 4, influence) * S + offset,
-    };
-  });
+  const points = sketch2.points.map((point) => ({
+    x: point.x * S,
+    y: point.y * S + offset,
+  }));
 
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
