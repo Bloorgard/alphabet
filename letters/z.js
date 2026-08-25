@@ -7,7 +7,7 @@ const RED = '#e0210f';
 const PARAMS = {
   speed: 0.19,
   turn: 5,
-  mouse: true,
+  mouse: false,
   bite: true,
   paint: true,
   night: true,

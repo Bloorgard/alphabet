@@ -2643,7 +2643,7 @@ MODES.sketch1 = {
   tools: [
     { type: 'range', key: 'speed', label: 'скорость', min: 0.08, max: 0.55, step: 0.01, value: 0.19 },
     { type: 'range', key: 'turn', label: 'поворот', min: 1, max: 10, step: 0.5, value: 5 },
-    { type: 'toggle', key: 'mouse', label: 'управление мышью', value: true },
+    { type: 'toggle', key: 'mouse', label: 'управление мышью', value: false },
     { type: 'toggle', key: 'bite', label: 'укус', value: true },
     { type: 'toggle', key: 'paint', label: 'краска', value: true },
     { type: 'toggle', key: 'night', label: 'ночь', value: true },
