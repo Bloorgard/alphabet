@@ -2801,7 +2801,7 @@ const sketch2 = {
 };
 
 function sketch2Reset() {
-  const count = Math.round(SKETCH2_BODY.length / 0.009) + 1;
+  const count = Math.round(SKETCH2_BODY.length / 0.005) + 1;
   sketch2.points = resample(SKETCH2_BODY, count).reverse();
   sketch2.segment = SKETCH2_BODY.length / (count - 1);
   sketch2.trail = sketch2.points.map((point) => ({ ...point }));
