@@ -222,7 +222,7 @@ export function mountZ(workspace) {
     const speed = params.speed * STEP;
     const turn = params.turn * STEP;
     const radius = 30 / 1200;
-    if (params.mouse && pointer.seen && state.mouseTarget) {
+    if (pointer.seen && state.mouseTarget) {
       const dx = pointer.x - head.x;
       const dy = pointer.y - head.y;
       if (Math.hypot(dx, dy) <= radius * 2.2) {
@@ -482,23 +482,32 @@ export function mountZ(workspace) {
     pointer.seen = true;
   }
 
+  function pointerEnabled(event) {
+    return params.mouse || event.pointerType !== 'mouse';
+  }
+
   function onPointerDown(event) {
     track(event);
     if (state.dead || state.full) {
       reset();
       state.started = true;
-      state.mouseTarget = params.mouse;
-      if (!params.mouse) pointer.seen = false;
+      state.mouseTarget = pointerEnabled(event);
+      if (!state.mouseTarget) pointer.seen = false;
       return;
     }
-    if (!params.mouse) return;
+    if (!pointerEnabled(event)) return;
     state.started = true;
     state.mouseTarget = true;
   }
 
   function onPointerMove(event) {
+    if (!pointerEnabled(event)) {
+      state.mouseTarget = false;
+      pointer.seen = false;
+      return;
+    }
     track(event);
-    if (params.mouse && state.started) state.mouseTarget = true;
+    if (state.started) state.mouseTarget = true;
   }
 
   function frame(now) {

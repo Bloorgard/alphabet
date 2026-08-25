@@ -2426,7 +2426,7 @@ function sketch1Advance() {
   const speed = num('speed') * STEP;
   const turn = num('turn') * STEP;
   const radius = 30 / 1200;
-  if (on('mouse') && pointer.seen && sketch1.mouseTarget) {
+  if (pointer.seen && sketch1.mouseTarget) {
     const dx = pointer.x - head.x;
     const dy = pointer.y - head.y;
     if (Math.hypot(dx, dy) <= radius * 2.2) {
@@ -2671,21 +2671,26 @@ MODES.sketch1 = {
       }
     }
   },
-  onDown() {
+  onDown(event) {
+    const pointerControl = on('mouse') || event.pointerType !== 'mouse';
     if (sketch1.dead || sketch1.full) {
-      const mouse = on('mouse');
       sketch1Reset();
       sketch1.started = true;
-      sketch1.mouseTarget = mouse;
-      if (!mouse) pointer.seen = false;
+      sketch1.mouseTarget = pointerControl;
+      if (!pointerControl) pointer.seen = false;
       return;
     }
-    if (!on('mouse')) return;
+    if (!pointerControl) return;
     sketch1.started = true;
     sketch1.mouseTarget = true;
   },
-  onMove() {
-    if (on('mouse') && sketch1.started) sketch1.mouseTarget = true;
+  onMove(event) {
+    if (!on('mouse') && event.pointerType === 'mouse') {
+      sketch1.mouseTarget = false;
+      pointer.seen = false;
+      return;
+    }
+    if (sketch1.started) sketch1.mouseTarget = true;
   },
   onKey(event, down) {
     if (!down) return;
