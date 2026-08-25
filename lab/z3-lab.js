@@ -2788,6 +2788,23 @@ const SKETCH2_BODY = (() => {
   return { samples, length: pixelLength / 1200 };
 })();
 
+/* Точный маршрут без скругления. Радиус поворота применяется только при
+   отрисовке, поэтому ползунок действительно меняет форму, а прямые не плывут. */
+const SKETCH2_ROUTE = (() => {
+  const turns = [
+    [497.5, 255], [870, 255], [870, 485], [754, 485], [754, 555],
+    [590, 555], [590, 705], [870, 705], [870, 1037], [647, 1037],
+  ];
+  let length = 0;
+  const samples = turns.map(([x, y], index) => {
+    const point = { x: x / 1200, y: y / 1200 };
+    if (index) length += Math.hypot(point.x - turns[index - 1][0] / 1200, point.y - turns[index - 1][1] / 1200);
+    return { ...point, length };
+  });
+  samples.forEach((sample) => { sample.u = sample.length / length; });
+  return { samples, length };
+})();
+
 const SKETCH2_BLOCKS = [
   { x: 597, y: 372, r: 95 },
   { x: 597, y: 814, r: 95 },
@@ -2801,10 +2818,10 @@ const sketch2 = {
 };
 
 function sketch2Reset() {
-  const count = Math.round(SKETCH2_BODY.length / 0.005) + 1;
-  sketch2.points = resample(SKETCH2_BODY, count).reverse();
-  sketch2.segment = SKETCH2_BODY.length / (count - 1);
-  sketch2.trail = sketch2.points.map((point) => ({ ...point }));
+  const count = Math.round(SKETCH2_ROUTE.length / 0.005) + 1;
+  sketch2.points = resample(SKETCH2_ROUTE, count).reverse();
+  sketch2.segment = SKETCH2_ROUTE.length / (count - 1);
+  sketch2.trail = SKETCH2_ROUTE.samples.map((point) => ({ x: point.x, y: point.y })).reverse();
   sketch2.dir = Math.PI;
   sketch2.apple = { x: 470 / 1200, y: 999.875 / 1200 };
   sketch2.eaten = 0;
@@ -2832,7 +2849,7 @@ function sketch2TrailAt(distance, distances) {
 }
 
 function sketch2FollowTrail() {
-  const keep = SKETCH2_BODY.length + 0.22;
+  const keep = SKETCH2_ROUTE.length + 0.35;
   const distances = [0];
   for (let index = 1; index < sketch2.trail.length; index += 1) {
     const point = sketch2.trail[index];
@@ -2854,12 +2871,49 @@ function sketch2FollowTrail() {
 }
 
 function sketch2DrawBody(offset) {
-  const radius = num('rounding') / 1200;
-  const last = sketch2.points.length - 1;
-  const points = sketch2.points.map((point) => ({
-    x: point.x * S,
-    y: point.y * S + offset,
-  }));
+  const radius = num('rounding') / 1200 * S;
+  const body = [];
+  let length = 0;
+  sketch2.trail.some((point, index) => {
+    if (!index) {
+      body.push({ x: point.x, y: point.y });
+      return false;
+    }
+    const previous = sketch2.trail[index - 1];
+    const segment = Math.hypot(point.x - previous.x, point.y - previous.y);
+    if (length + segment >= SKETCH2_ROUTE.length) {
+      const mix = (SKETCH2_ROUTE.length - length) / Math.max(0.000001, segment);
+      body.push({ x: lerp(previous.x, point.x, mix), y: lerp(previous.y, point.y, mix) });
+      return true;
+    }
+    body.push({ x: point.x, y: point.y });
+    length += segment;
+    return false;
+  });
+  const dense = body.map((point) => ({ x: point.x * S, y: point.y * S + offset }));
+  const points = [];
+
+  /* Схлопываем точки одной прямой в один отрезок. Так радиус действует только
+     на настоящие повороты и не создаёт микроволн вдоль горизонталей и вертикалей. */
+  dense.forEach((point) => {
+    const last = points.at(-1);
+    if (last && Math.hypot(point.x - last.x, point.y - last.y) < 0.001) return;
+    if (points.length > 1) {
+      const a = points.at(-2);
+      const b = points.at(-1);
+      const abx = b.x - a.x;
+      const aby = b.y - a.y;
+      const bcx = point.x - b.x;
+      const bcy = point.y - b.y;
+      const cross = abx * bcy - aby * bcx;
+      const dot = abx * bcx + aby * bcy;
+      if (Math.abs(cross) < 0.000001 && dot >= 0) {
+        points[points.length - 1] = point;
+        return;
+      }
+    }
+    points.push(point);
+  });
 
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
@@ -2867,9 +2921,27 @@ function sketch2DrawBody(offset) {
     for (let index = 1; index < points.length; index += 1) ctx.lineTo(points[index].x, points[index].y);
   } else {
     for (let index = 1; index < points.length - 1; index += 1) {
+      const previous = points[index - 1];
       const point = points[index];
       const next = points[index + 1];
-      ctx.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
+      const ax = previous.x - point.x;
+      const ay = previous.y - point.y;
+      const bx = next.x - point.x;
+      const by = next.y - point.y;
+      const al = Math.hypot(ax, ay);
+      const bl = Math.hypot(bx, by);
+      const cosine = clamp((ax * bx + ay * by) / Math.max(0.000001, al * bl), -1, 1);
+      const angle = Math.acos(cosine);
+      const tangent = Math.min(radius / Math.tan(angle / 2), al / 2, bl / 2);
+
+      if (!Number.isFinite(tangent) || tangent < 0.001) {
+        ctx.lineTo(point.x, point.y);
+        continue;
+      }
+      const enter = { x: point.x + ax / al * tangent, y: point.y + ay / al * tangent };
+      const leave = { x: point.x + bx / bl * tangent, y: point.y + by / bl * tangent };
+      ctx.lineTo(enter.x, enter.y);
+      ctx.quadraticCurveTo(point.x, point.y, leave.x, leave.y);
     }
     ctx.lineTo(points.at(-1).x, points.at(-1).y);
   }
