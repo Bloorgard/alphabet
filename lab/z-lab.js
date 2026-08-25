@@ -2855,7 +2855,8 @@ function sketch2FollowTrail() {
 
 function sketch2DrawBody(offset) {
   const radius = num('rounding') / 1200;
-  const reach = radius / sketch2.segment;
+  const rawReach = radius / sketch2.segment;
+  const reach = rawReach ? Math.max(1, rawReach * 3) : 0;
   const last = sketch2.points.length - 1;
   const at = (position) => {
     const value = clamp(position, 0, last);
@@ -2867,16 +2868,30 @@ function sketch2DrawBody(offset) {
       y: lerp(sketch2.points[low].y, sketch2.points[high].y, mix),
     };
   };
-  const points = sketch2.points.map((point, index) => {
-    if (!reach) return { x: point.x * S, y: point.y * S + offset };
-    const before = at(index - reach);
-    const after = at(index + reach);
-    const influence = Math.min(1, index / reach, (last - index) / reach);
-    return {
-      x: lerp(point.x, (before.x + point.x * 2 + after.x) / 4, influence) * S,
-      y: lerp(point.y, (before.y + point.y * 2 + after.y) / 4, influence) * S + offset,
+  const smooth = (source) => {
+    const len = source.length - 1;
+    const sample = (position) => {
+      const value = clamp(position, 0, len);
+      const low = Math.floor(value);
+      const high = Math.min(low + 1, len);
+      const mix = value - low;
+      return {
+        x: lerp(source[low].x, source[high].x, mix),
+        y: lerp(source[low].y, source[high].y, mix),
+      };
     };
-  });
+    return source.map((point, index) => {
+      if (!reach) return point;
+      const before = sample(index - reach);
+      const after = sample(index + reach);
+      const influence = Math.min(1, index / reach, (len - index) / reach);
+      return {
+        x: lerp(point.x, (before.x + point.x * 2 + after.x) / 4, influence),
+        y: lerp(point.y, (before.y + point.y * 2 + after.y) / 4, influence),
+      };
+    });
+  };
+  const points = smooth(smooth(sketch2.points)).map((point) => ({ x: point.x * S, y: point.y * S + offset }));
 
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
