@@ -3080,6 +3080,568 @@ MODES.sketch2 = {
   },
 };
 
+/* ---------- 14. эскиз 3: многослойная рисовалка ---------- */
+
+const SKETCH3_LENGTH = SKETCH2_BODY.length / 6;
+const sketch3 = {
+  points: [], trail: [], segment: 0, length: 0,
+  dir: Math.PI, pendingDir: null, held: new Set(), paintDown: false,
+  paint: [], paintStroke: null, route: [], pilotIndex: 0, pilotDirection: -1,
+  mouseActive: false,
+};
+
+function sketch3Dark() { return on('night'); }
+function sketch3Field() { return sketch3Dark() ? SKETCH2_FIELD : SKETCH2_LINE; }
+function sketch3Mono() { return sketch3Dark() ? SKETCH2_LINE : SKETCH2_FIELD; }
+function sketch3PaintColor(red) { return red ? SKETCH2_APPLE : sketch3Mono(); }
+
+function sketch3Reset() {
+  const fullCount = Math.round(SKETCH2_BODY.length / (SKETCH2_STROKE / 1200)) + 1;
+  const initial = resample(SKETCH2_BODY, fullCount).reverse();
+  const count = Math.round(SKETCH3_LENGTH / (SKETCH2_STROKE / 1200)) + 1;
+  sketch3.points = initial.slice(0, count).map((point) => ({ ...point }));
+  sketch3.segment = SKETCH2_BODY.length / (fullCount - 1);
+  sketch3.length = sketch3.segment * (sketch3.points.length - 1);
+  sketch3.trail = sketch3.points.map((point) => ({ ...point }));
+  sketch3.dir = Math.PI;
+  sketch3.pendingDir = null;
+  sketch3.held.clear();
+  sketch3.paintDown = false;
+  sketch3.paint = [];
+  sketch3.paintStroke = null;
+  sketch3.route = [{ ...sketch3.points[0] }];
+  sketch3.pilotIndex = 0;
+  sketch3.pilotDirection = -1;
+  sketch3.mouseActive = false;
+}
+
+function sketch3TrailAt(distance, distances) {
+  const target = clamp(distance, 0, distances.at(-1));
+  let low = 0;
+  let high = distances.length - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >> 1;
+    if (distances[middle] < target) low = middle;
+    else high = middle;
+  }
+  const span = Math.max(0.000001, distances[high] - distances[low]);
+  const mix = clamp((target - distances[low]) / span, 0, 1);
+  return {
+    x: lerp(sketch3.trail[low].x, sketch3.trail[high].x, mix),
+    y: lerp(sketch3.trail[low].y, sketch3.trail[high].y, mix),
+  };
+}
+
+function sketch3FollowTrail() {
+  const distances = [0];
+  for (let index = 1; index < sketch3.trail.length; index += 1) {
+    const point = sketch3.trail[index];
+    const previous = sketch3.trail[index - 1];
+    distances.push(distances.at(-1) + Math.hypot(point.x - previous.x, point.y - previous.y));
+    if (distances.at(-1) >= sketch3.length + 0.12) {
+      sketch3.trail.length = index + 1;
+      distances.length = index + 1;
+      break;
+    }
+  }
+  sketch3.points.forEach((point, index) => {
+    const exact = sketch3TrailAt(index * sketch3.segment, distances);
+    point.x = exact.x;
+    point.y = exact.y;
+  });
+}
+
+function sketch3SmoothPoints(source) {
+  const radius = num('rounding') / 1200;
+  if (!radius || source.length < 3) return source.map((point) => ({ ...point }));
+  const distances = [0];
+  for (let index = 1; index < source.length; index += 1) {
+    distances.push(distances.at(-1) + Math.hypot(
+      source[index].x - source[index - 1].x,
+      source[index].y - source[index - 1].y,
+    ));
+  }
+  const total = distances.at(-1);
+  const at = (distance) => {
+    const target = clamp(distance, 0, total);
+    let low = 0;
+    let high = distances.length - 1;
+    while (high - low > 1) {
+      const middle = (low + high) >> 1;
+      if (distances[middle] < target) low = middle;
+      else high = middle;
+    }
+    const span = Math.max(0.000001, distances[high] - distances[low]);
+    const mix = clamp((target - distances[low]) / span, 0, 1);
+    return {
+      x: lerp(source[low].x, source[high].x, mix),
+      y: lerp(source[low].y, source[high].y, mix),
+    };
+  };
+  return source.map((point, index) => {
+    const before = at(distances[index] - radius);
+    const after = at(distances[index] + radius);
+    const influence = Math.min(1, distances[index] / radius, (total - distances[index]) / radius);
+    return {
+      x: lerp(point.x, (before.x + point.x * 2 + after.x) / 4, influence),
+      y: lerp(point.y, (before.y + point.y * 2 + after.y) / 4, influence),
+    };
+  });
+}
+
+function sketch3StrokePath(source, offsetX = 0, offsetY = 0) {
+  const points = sketch3SmoothPoints(source);
+  if (points.length < 2) return;
+
+  ctx.beginPath();
+  ctx.moveTo(points[0].x * S + offsetX, points[0].y * S + offsetY);
+  if (!num('rounding')) {
+    for (let index = 1; index < points.length; index += 1) {
+      ctx.lineTo(points[index].x * S + offsetX, points[index].y * S + offsetY);
+    }
+  } else {
+    for (let index = 0; index < points.length - 1; index += 1) {
+      const before = points[Math.max(0, index - 1)];
+      const point = points[index];
+      const next = points[index + 1];
+      const after = points[Math.min(points.length - 1, index + 2)];
+      ctx.bezierCurveTo(
+        (point.x + (next.x - before.x) / 6) * S + offsetX,
+        (point.y + (next.y - before.y) / 6) * S + offsetY,
+        (next.x - (after.x - point.x) / 6) * S + offsetX,
+        (next.y - (after.y - point.y) / 6) * S + offsetY,
+        next.x * S + offsetX,
+        next.y * S + offsetY,
+      );
+    }
+  }
+  ctx.stroke();
+}
+
+function sketch3DrawBody(offset) {
+  const tiles = on('frame') ? [0] : [-1, 0, 1];
+  for (const tileX of tiles) {
+    for (const tileY of tiles) sketch3StrokePath(sketch3.points, tileX * S, tileY * S + offset);
+  }
+}
+
+function sketch3AddPaint(from, to) {
+  if (!sketch3.paintDown || Math.hypot(to.x - from.x, to.y - from.y) < 0.000001) return;
+  if (!sketch3.paintStroke) {
+    sketch3.paintStroke = {
+      red: on('red'),
+      free: on('mouse'),
+      points: [{ ...from }],
+    };
+    sketch3.paint.push(sketch3.paintStroke);
+  }
+  sketch3.paintStroke.points.push({ ...to });
+}
+
+function sketch3Commit(points, record) {
+  let from = { ...sketch3.points[0] };
+  for (const point of points) {
+    if (Math.hypot(point.x - from.x, point.y - from.y) < 0.000001) continue;
+    sketch3AddPaint(from, point);
+    sketch3.trail.unshift({ ...point });
+    if (record) sketch3.route.push({ ...point });
+    from = point;
+  }
+  sketch3.points[0].x = from.x;
+  sketch3.points[0].y = from.y;
+  sketch3FollowTrail();
+}
+
+function sketch3SplitPaint() {
+  sketch3.paintStroke = null;
+  if (!sketch3.paintDown) return;
+  sketch3.paintStroke = {
+    red: on('red'),
+    free: on('mouse'),
+    points: [{ ...sketch3.points[0] }],
+  };
+  sketch3.paint.push(sketch3.paintStroke);
+}
+
+function sketch3Wrap(shiftX, shiftY, record) {
+  for (const point of sketch3.trail) {
+    point.x += shiftX;
+    point.y += shiftY;
+  }
+  for (const point of sketch3.points) {
+    point.x += shiftX;
+    point.y += shiftY;
+  }
+  sketch3SplitPaint();
+  if (record) sketch3.route.push({ ...sketch3.points[0], jump: true });
+}
+
+function sketch3Move(dx, dy, record) {
+  const margin = 5 / 1200;
+  const limit = 1 - margin;
+  if (on('frame')) {
+    const head = sketch3.points[0];
+    sketch3Commit([{
+      x: clamp(head.x + dx, margin, limit),
+      y: clamp(head.y + dy, margin, limit),
+    }], record);
+    return;
+  }
+
+  let leftX = dx;
+  let leftY = dy;
+  for (let pass = 0; pass < 3 && Math.hypot(leftX, leftY) > 0.000001; pass += 1) {
+    const head = sketch3.points[0];
+    let portion = 1;
+    let wrapX = 0;
+    let wrapY = 0;
+    if (leftX > 0 && head.x + leftX > limit) portion = Math.min(portion, (limit - head.x) / leftX);
+    if (leftX < 0 && head.x + leftX < margin) portion = Math.min(portion, (margin - head.x) / leftX);
+    if (leftY > 0 && head.y + leftY > limit) portion = Math.min(portion, (limit - head.y) / leftY);
+    if (leftY < 0 && head.y + leftY < margin) portion = Math.min(portion, (margin - head.y) / leftY);
+
+    const stepX = leftX * clamp(portion, 0, 1);
+    const stepY = leftY * clamp(portion, 0, 1);
+    sketch3Commit([{ x: head.x + stepX, y: head.y + stepY }], record);
+    leftX -= stepX;
+    leftY -= stepY;
+    if (portion >= 1) break;
+
+    const edge = sketch3.points[0];
+    if (edge.x >= limit - 0.000001 && leftX > 0) wrapX = margin - limit;
+    else if (edge.x <= margin + 0.000001 && leftX < 0) wrapX = limit - margin;
+    if (edge.y >= limit - 0.000001 && leftY > 0) wrapY = margin - limit;
+    else if (edge.y <= margin + 0.000001 && leftY < 0) wrapY = limit - margin;
+    sketch3Wrap(wrapX, wrapY, record);
+  }
+}
+
+function sketch3ManualStep() {
+  const head = sketch3.points[0];
+  const speed = num('speed') * 0.04 * STEP;
+  let remaining = speed;
+
+  if (sketch3.pendingDir !== null) {
+    const horizontal = Math.abs(Math.cos(sketch3.dir)) > 0.5;
+    const axis = horizontal ? 'x' : 'y';
+    const current = horizontal ? head.x : head.y;
+    const origin = SKETCH2_GRID_ORIGIN[axis];
+    const direction = horizontal ? Math.sign(Math.cos(sketch3.dir)) : Math.sign(Math.sin(sketch3.dir));
+    const grid = num('gridStep') / 1200;
+    const relative = (current - origin) / grid;
+    const nearest = Math.round(relative);
+    const aligned = Math.abs(relative - nearest) < 0.0001;
+    const target = aligned
+      ? current
+      : origin + (direction > 0 ? Math.ceil(relative) : Math.floor(relative)) * grid;
+    const distance = Math.max(0, (target - current) * direction);
+    if (distance <= remaining) {
+      sketch3Move(Math.cos(sketch3.dir) * distance, Math.sin(sketch3.dir) * distance, true);
+      remaining -= distance;
+      sketch3.dir = sketch3.pendingDir;
+      sketch3.pendingDir = null;
+    }
+  }
+
+  sketch3Move(Math.cos(sketch3.dir) * remaining, Math.sin(sketch3.dir) * remaining, true);
+}
+
+function sketch3MouseStep() {
+  if (!pointer.seen) return;
+  const head = sketch3.points[0];
+  const margin = 5 / 1200;
+  const limit = 1 - margin;
+  const span = limit - margin;
+  let dx = clamp(pointer.x, margin, limit) - head.x;
+  let dy = clamp(pointer.y, margin, limit) - head.y;
+  if (!on('frame')) {
+    if (Math.abs(dx) > span / 2) dx -= Math.sign(dx) * span;
+    if (Math.abs(dy) > span / 2) dy -= Math.sign(dy) * span;
+  }
+  const distance = Math.hypot(dx, dy);
+  if (distance < 0.0005) return;
+  if (!sketch3.mouseActive) {
+    sketch3.route = [{ ...head }];
+    sketch3.mouseActive = true;
+  }
+  sketch3.dir = Math.atan2(dy, dx);
+  sketch3.pendingDir = null;
+  const movement = Math.min(distance, num('speed') * 0.04 * STEP);
+  sketch3Move(dx / distance * movement, dy / distance * movement, true);
+}
+
+function sketch3PilotStep() {
+  if (sketch3.route.length < 2) return;
+  let remaining = num('speed') * 0.04 * STEP;
+  const path = [];
+  while (remaining > 0.000001) {
+    const target = sketch3.route[sketch3.pilotIndex];
+    const head = path.at(-1) || sketch3.points[0];
+    const crossing = sketch3.pilotDirection > 0
+      ? target.jump
+      : sketch3.route[sketch3.pilotIndex + 1]?.jump;
+    if (crossing) {
+      if (path.length) {
+        sketch3Commit(path, false);
+        path.length = 0;
+      }
+      sketch3Wrap(target.x - sketch3.points[0].x, target.y - sketch3.points[0].y, false);
+      sketch3.pilotIndex += sketch3.pilotDirection;
+      continue;
+    }
+    const dx = target.x - head.x;
+    const dy = target.y - head.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance <= remaining) {
+      if (distance > 0.000001) path.push({ ...target });
+      remaining -= distance;
+      sketch3.pilotIndex += sketch3.pilotDirection;
+      if (sketch3.pilotIndex < 0 || sketch3.pilotIndex >= sketch3.route.length) {
+        sketch3.pilotDirection *= -1;
+        sketch3.pilotIndex = clamp(sketch3.pilotIndex, 1, sketch3.route.length - 2);
+      }
+      continue;
+    }
+    path.push({ x: head.x + dx / distance * remaining, y: head.y + dy / distance * remaining });
+    remaining = 0;
+  }
+  if (path.length) sketch3Commit(path, false);
+}
+
+function sketch3DrawGrid(scale) {
+  if (!on('grid')) return;
+  const step = num('gridStep');
+  const origins = [SKETCH2_GRID_ORIGIN.x * 1200, SKETCH2_GRID_ORIGIN.y * 1200];
+  const drawLines = (major) => {
+    ctx.save();
+    ctx.strokeStyle = sketch3Mono();
+    ctx.globalAlpha = major ? 0.2 : 0.09;
+    ctx.lineWidth = Math.max(0.5, scale) * (major ? 2 : 1);
+    ctx.beginPath();
+    origins.forEach((origin, axis) => {
+      const first = Math.floor(-origin / step);
+      const last = Math.ceil((1200 - origin) / step);
+      for (let index = first; index <= last; index += 1) {
+        if ((index % 5 === 0) !== major) continue;
+        const value = (origin + index * step) * scale;
+        if (axis) {
+          ctx.moveTo(0, value);
+          ctx.lineTo(S, value);
+        } else {
+          ctx.moveTo(value, 0);
+          ctx.lineTo(value, S);
+        }
+      }
+    });
+    ctx.stroke();
+    ctx.restore();
+  };
+  drawLines(false);
+  drawLines(true);
+}
+
+function sketch3RouteNodes(source) {
+  if (source.length < 3) return source;
+  const nodes = [{ ...source[0] }];
+  let direction = null;
+  for (let index = 1; index < source.length; index += 1) {
+    const dx = source[index].x - source[index - 1].x;
+    const dy = source[index].y - source[index - 1].y;
+    const length = Math.hypot(dx, dy);
+    if (length < 0.000001) continue;
+    const next = { x: dx / length, y: dy / length };
+    if (direction && direction.x * next.x + direction.y * next.y < 0.9999) {
+      nodes.push({ ...source[index - 1] });
+    }
+    direction = next;
+  }
+  const last = source.at(-1);
+  if (Math.hypot(last.x - nodes.at(-1).x, last.y - nodes.at(-1).y) > 0.000001) {
+    nodes.push({ ...last });
+  }
+  return nodes;
+}
+
+function sketch3RoundedPaintPath(source, offsetY) {
+  const points = sketch3RouteNodes(source);
+  if (points.length < 2) return;
+  const radius = num('rounding') / 1200;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x * S, points[0].y * S + offsetY);
+  if (!radius || points.length < 3) {
+    for (const point of points.slice(1)) ctx.lineTo(point.x * S, point.y * S + offsetY);
+    ctx.stroke();
+    return;
+  }
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const before = points[index - 1];
+    const point = points[index];
+    const after = points[index + 1];
+    const into = { x: point.x - before.x, y: point.y - before.y };
+    const out = { x: after.x - point.x, y: after.y - point.y };
+    const intoLength = Math.hypot(into.x, into.y);
+    const outLength = Math.hypot(out.x, out.y);
+    const cosine = clamp(
+      (into.x * out.x + into.y * out.y) / Math.max(0.000001, intoLength * outLength),
+      -1,
+      1,
+    );
+    const turn = Math.acos(cosine);
+    if (turn < 0.001 || turn > Math.PI - 0.001) {
+      ctx.lineTo(point.x * S, point.y * S + offsetY);
+      continue;
+    }
+    const tangent = Math.tan(turn / 2);
+    const cornerRadius = Math.min(radius, Math.min(intoLength, outLength) / Math.max(0.000001, tangent));
+    ctx.arcTo(
+      point.x * S,
+      point.y * S + offsetY,
+      after.x * S,
+      after.y * S + offsetY,
+      cornerRadius * S,
+    );
+  }
+  ctx.lineTo(points.at(-1).x * S, points.at(-1).y * S + offsetY);
+  ctx.stroke();
+}
+
+function sketch3DrawPaint(scale) {
+  ctx.save();
+  ctx.lineWidth = SKETCH2_STROKE * scale;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const copies = Math.round(num('copies'));
+  const layerStep = num('gridStep');
+  for (const stroke of sketch3.paint) {
+    for (let index = 0; index < copies; index += 1) {
+      ctx.strokeStyle = sketch3PaintColor(stroke.red);
+      const offset = -index * layerStep * scale;
+      if (stroke.free) sketch3StrokePath(stroke.points, 0, offset);
+      else sketch3RoundedPaintPath(stroke.points, offset);
+    }
+  }
+  ctx.restore();
+}
+
+MODES.sketch3 = {
+  label: 'эскиз 3',
+  note: 'Рисовалка без преград. Удерживай стрелку или включи следование за мышью; A заставляет все непрозрачные головы наносить параллельные штрихи. Высота в любой момент раскрывает весь рисунок в нужное число слоёв. Рамка останавливает змею у края.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'copies', label: 'высота', min: 1, max: 10, step: 1, value: 6 },
+    { type: 'range', key: 'speed', label: 'скорость', min: 0.5, max: 6, step: 0.5, value: 2.5 },
+    { type: 'range', key: 'rounding', label: 'радиус поворота', min: 0, max: 120, step: 5, value: 20 },
+    { type: 'toggle', key: 'grid', label: 'сетка', value: false },
+    { type: 'range', key: 'gridStep', label: 'шаг сетки и слоя', min: 5, max: 40, step: 5, value: 20 },
+    { type: 'toggle', key: 'red', label: 'красный штрих', value: false },
+    { type: 'toggle', key: 'night', label: 'ночь', value: true },
+    { type: 'toggle', key: 'mouse', label: 'следование за мышью', value: false },
+    { type: 'toggle', key: 'frame', label: 'ограничительная рамка', value: true },
+    { type: 'toggle', key: 'autopilot', label: 'автопилот', value: false },
+    { type: 'button', label: 'очистить холст', action: () => {
+      sketch3.paint = [];
+      sketch3.paintStroke = null;
+    } },
+  ],
+  setup() {
+    setGround(on('night') ? 'ink' : 'paper');
+    sketch3Reset();
+  },
+  onTool(key) {
+    if (key === 'night') {
+      setGround(on('night') ? 'ink' : 'paper');
+      return;
+    }
+    if (key === 'mouse') {
+      sketch3.mouseActive = false;
+      sketch3.held.clear();
+      sketch3.pendingDir = null;
+      pointer.seen = false;
+      return;
+    }
+    if (key !== 'autopilot' || !on('autopilot')) return;
+    sketch3.held.clear();
+    sketch3.pendingDir = null;
+    sketch3.pilotDirection = -1;
+    sketch3.pilotIndex = Math.max(0, sketch3.route.length - 2);
+  },
+  onKey(event, down) {
+    if (event.code === 'KeyA') {
+      if (down === sketch3.paintDown) {
+        event.preventDefault();
+        return;
+      }
+      sketch3.paintDown = down;
+      if (down) {
+        sketch3.paintStroke = {
+          red: on('red'),
+          free: on('mouse'),
+          points: [{ ...sketch3.points[0] }],
+        };
+        sketch3.paint.push(sketch3.paintStroke);
+      } else {
+        sketch3.paintStroke = null;
+      }
+      event.preventDefault();
+      return;
+    }
+    const directions = {
+      ArrowLeft: Math.PI,
+      ArrowRight: 0,
+      ArrowUp: -Math.PI / 2,
+      ArrowDown: Math.PI / 2,
+    };
+    if (!(event.code in directions)) return;
+    event.preventDefault();
+    if (on('autopilot') || on('mouse')) return;
+    const next = directions[event.code];
+    if (!down) {
+      sketch3.held.delete(event.code);
+      if (sketch3.pendingDir === next) sketch3.pendingDir = null;
+      return;
+    }
+    if (sketch3.held.has(event.code)) return;
+    if (!sketch3.held.size) sketch3.route = [{ ...sketch3.points[0] }];
+    sketch3.held.add(event.code);
+    if (Math.abs(wrapAngle(next - sketch3.dir)) < 0.01) sketch3.pendingDir = null;
+    else sketch3.pendingDir = next;
+  },
+  step() {
+    if (on('autopilot')) sketch3PilotStep();
+    else if (on('mouse')) sketch3MouseStep();
+    else if (sketch3.held.size) sketch3ManualStep();
+  },
+  draw() {
+    const scale = S / 1200;
+    const copies = Math.round(num('copies'));
+    const layerStep = num('gridStep');
+    ctx.fillStyle = sketch3Field();
+    ctx.fillRect(0, 0, S, S);
+    sketch3DrawGrid(scale);
+    sketch3DrawPaint(scale);
+
+    for (let index = 0; index < copies; index += 1) {
+      ctx.save();
+      ctx.strokeStyle = on('red') ? SKETCH2_APPLE : sketch3Mono();
+      ctx.globalAlpha = 0.2;
+      ctx.lineWidth = SKETCH2_STROKE * scale;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      sketch3DrawBody(-index * layerStep * scale);
+      ctx.restore();
+    }
+
+    for (let index = 0; index < copies; index += 1) {
+      dot(
+        sketch3.points[0].x,
+        sketch3.points[0].y - index * layerStep / 1200,
+        sketch3PaintColor(on('red')),
+        SKETCH2_STROKE / 2400,
+      );
+    }
+  },
+};
+
 startLab({
   title: 'З · две дуги и горловина',
   modes: MODES,
