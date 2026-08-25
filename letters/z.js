@@ -5,12 +5,12 @@ const MUTED = '#8b877f';
 const RED = '#e0210f';
 
 const PARAMS = {
-  speed: 0.24,
+  speed: 0.19,
   turn: 5,
   mouse: true,
   bite: true,
   paint: true,
-  night: false,
+  night: true,
   endless: false,
 };
 
@@ -552,9 +552,9 @@ export function mountZ(workspace) {
     panel.append(button);
   }
 
-  addRange('speed', 'ход', 0.08, 0.55, 0.01);
+  addRange('speed', 'скорость', 0.08, 0.55, 0.01);
   addRange('turn', 'поворот', 1, 10, 0.5);
-  addSwitch('mouse', 'мышь', () => {
+  addSwitch('mouse', 'управление мышью', () => {
     if (params.mouse) return;
     state.mouseTarget = false;
     pointer.seen = false;
