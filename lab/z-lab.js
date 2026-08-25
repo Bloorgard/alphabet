@@ -2855,28 +2855,7 @@ function sketch2FollowTrail() {
 
 function sketch2DrawBody(offset) {
   const radius = num('rounding') / 1200;
-  const reach = radius / sketch2.segment;
-  const last = sketch2.points.length - 1;
-  const at = (position) => {
-    const value = clamp(position, 0, last);
-    const low = Math.floor(value);
-    const high = Math.min(low + 1, last);
-    const mix = value - low;
-    return {
-      x: lerp(sketch2.points[low].x, sketch2.points[high].x, mix),
-      y: lerp(sketch2.points[low].y, sketch2.points[high].y, mix),
-    };
-  };
-  const points = sketch2.points.map((point, index) => {
-    if (!reach) return { x: point.x * S, y: point.y * S + offset };
-    const before = at(index - reach);
-    const after = at(index + reach);
-    const influence = Math.min(1, index / reach, (last - index) / reach);
-    return {
-      x: lerp(point.x, (before.x + point.x * 2 + after.x) / 4, influence) * S,
-      y: lerp(point.y, (before.y + point.y * 2 + after.y) / 4, influence) * S + offset,
-    };
-  });
+  const points = sketch2.points.map((point) => ({ x: point.x * S, y: point.y * S + offset }));
 
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
