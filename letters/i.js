@@ -24,12 +24,12 @@ const RUN_TAIL = 0.13;       // какую долю следа занимает 
 
 const PARAMS = {
   symmetry: 1,
-  periods: 2.4,
-  amp: 0.55,
-  band: 0,
-  noise: 0.16,
-  rate: 0.8,
-  drift: true,
+  periods: 2,
+  amp: 0.61,
+  band: 0.45,
+  noise: 0,
+  rate: 1.25,
+  drift: false,
   runner: true,
 };
 
