@@ -1,105 +1,55 @@
-/* И — волна и её зубцы.
+/* И — пила на экране.
 
-   Буква здесь не нарисована. Строчная «и» — это два одинаковых зубца, и больше
-   её ничто не задаёт: три зубца — уже «ш». Перевернуть волну — получится «п»,
-   три перевёрнутых — «т». Весь этот куст живёт на одной поверхности, и буква
-   на ней не картинка, а координата: сколько периодов и куда смотрит горб.
+   Прописная И — это вертикаль, диагональ, вертикаль. Ровно один период пилы,
+   прочитанный между двумя спадами. А симметрия — доля периода, которую
+   занимает подъём, — на любом генераторе тянет треугольную волну от края
+   до края:
 
-   Профиль зуба — смесь двух волн. Синус кругл и сверху и снизу, это ещё не
-   письмо; |sin| оставляет низ круглым, а верх сводит настоящим углом — вот это
-   уже скоропись. Острота смешивает одно с другим, а перевалив за единицу,
-   начинает уводить перо назад, и на вершине набухает петля: так и срывается
-   быстрый почерк.
+     0    мгновенный подъём, пологий спад   —  N
+     0.5  равнобедренный шатёр              —  не буква
+     1    пологий подъём, отвесный спад     —  И
 
-   Отсчёт начинается с t₀ = 0, то есть с верхней линии строчных: в прописи
-   перо ставят туда и первым движением ведут вниз. Зубцы считаются по чашам,
-   а не по вершинам, и волна кончается там же, где началась, — наверху,
-   откуда «и» уходит на связку со следующей буквой.
+   Поэтому «И — зеркальная N» здесь не наблюдение со стороны, а одна ручка
+   прибора: диагональ буквы — это развёртка, вертикали — фронты.
 
-   Одинаковые штрихи, из которых собраны и, ш, п, т, в палеографии зовут
-   минимами. В готике из-за них строка переставала читаться — отсюда фраза
-   «mimi numinum niuium minimi munium nimium uini muniminum imminui uiui
-   minimum uolunt», написанная почти одними m, n, u, i, и отсюда же точка
-   над i: её завели, чтобы минимы можно было пересчитать. Красный в сцене
-   отмечает ровно это событие — момент, когда прочтение перестало быть
-   единственным. */
+   Скругление фронтов — не рисовальный приём, а ограничение полосы: прибор
+   усредняет сигнал по окну, и углы съедаются ровно так же, как у настоящего
+   осциллографа. Волна при этом уходит от печатной И к рукописной.
+
+   Рукописную «и» держит отдельная механика: там перо ставят на верхнюю
+   линию строчных и первым движением ведут вниз. Если начать снизу, к букве
+   спереди прирастает лишний восходящий штрих — и «и» становится «м». */
 
 const TAU = Math.PI * 2;
-const SAMPLES = 48;          // точек на один зуб
-const CHUNK = 3;             // сегментов в одном мазке луча
+const DIV = 10;              // делений на экране в каждую сторону
+const SAW_STEPS = 900;       // точек на кадр: спад должен выйти отвесным
+const CHUNK = 3;             // сегментов в одном мазке гаснущего луча
 const WIDE = 2;              // во сколько раз бледный ореол шире ядра луча
 
-/* Буква — это число зубцов подряд. Двойка и тройка, вниз и вверх. */
-const PARTS = {
-  down: [[2, 'и'], [3, 'ш']],
-  up: [[2, 'п'], [3, 'т']],
-};
+/* ---------- экран ---------- */
 
-const READ_CAP = 8;
-
-/* Все способы разложить n зубцов на буквы. Пусто — значит такой строки в
-   алфавите нет: один зубец сам по себе не буква. */
-function readings(n, side) {
-  const parts = PARTS[side];
-  const out = [];
-  const walk = (left, acc, sizes) => {
-    if (out.length >= READ_CAP) return;
-    if (left === 0) { out.push({ word: acc, sizes }); return; }
-    for (const [size, letter] of parts) {
-      if (size <= left) walk(left - size, acc + letter, [...sizes, size]);
-    }
-  };
-  walk(n, '', []);
-  return out;
-}
-
-function sideOf(up) { return up ? 'up' : 'down'; }
-
-/* Дрожь луча: три несоизмеримые синусоиды, чтобы рисунок не повторялся. */
-function tremble(u, phase) {
-  return Math.sin(u * 11.7 + phase) * 0.6
-    + Math.sin(u * 27.3 - phase * 1.7) * 0.3
-    + Math.sin(u * 5.1 + phase * 0.6) * 0.1;
-}
-
-/* Высота зуба долей роста: 0 на строке, 1 на верхней линии строчных.
-   На t = 0 перо стоит наверху, на t = π опускается в чашу. */
-function toothHeight(t, sharp) {
-  const soft = 0.5 * (1 + Math.cos(t));
-  const crisp = 1 - Math.abs(Math.sin(t / 2));
-  return lerp(soft, crisp, clamp(sharp, 0, 1));
-}
-
-/* Точки волны в пикселях. teeth дробное — волна обрывается, не дойдя до
-   строки: прибор не настроен, и прочтения у неё нет.
-
-   Отсчёт идёт с t₀ = 0, то есть с верхней линии строчных: в прописи перо
-   ставят туда и первым движением ведут вниз. Если начать снизу, к букве
-   спереди прирастает лишний восходящий штрих — и «и» становится «м». */
-function wavePath(p) {
-  const R = p.tooth / TAU;
-  const t0 = 0;
-  const steps = Math.max(2, Math.round(p.teeth * SAMPLES));
-  const shake = p.shake || 0;
-  /* Перо не идёт по строке ровно: наверху оно медлит и стык сходится узким
-     углом, внизу разгоняется и чаша выходит широкой. Сверх единицы оно
-     успевает уйти назад — и на стыке набухает петля. */
-  const pinch = Math.min(1, p.sharp) * 0.62 + Math.max(0, p.sharp - 1) * 3;
-  const points = [];
-  for (let i = 0; i <= steps; i += 1) {
-    const u = i / steps;
-    const t = t0 + u * p.teeth * TAU;
-    // Полярность вертит зуб вокруг середины роста: на нуле он ложится в строку.
-    let h = p.height * (0.5 + p.polarity * (toothHeight(t, p.sharp) - 0.5));
-    let x = R * ((t - t0) - pinch * Math.sin(t));
-    if (shake) {
-      h += shake * p.height * 0.05 * tremble(u * p.teeth, p.phase);
-      x += shake * p.tooth * 0.035 * tremble(u * p.teeth + 4.2, p.phase * 0.8);
-    }
-    points.push([(p.x + x + p.slant * h) * S, (p.baseline - h) * S]);
+/* Сетка — и координатный ориентир, и половина стиля прибора. Центральные оси
+   заметнее прочих, на них — насечки по пятой доле деления. */
+function drawScreen() {
+  const step = 1 / DIV;
+  for (let i = 0; i <= DIV; i += 1) {
+    const at = i * step;
+    const axis = i === DIV / 2;
+    const tone = axis ? ink(0.24) : ink(0.075);
+    const weight = axis ? 0.0016 : 0.001;
+    line(at, 0, at, 1, tone, weight);
+    line(0, at, 1, at, tone, weight);
   }
-  return points;
+  const tick = step / 5;
+  for (let i = 1; i < DIV * 5; i += 1) {
+    if (i % 5 === 0) continue;
+    const at = i * tick;
+    line(at, 0.492, at, 0.508, ink(0.18), 0.001);
+    line(0.492, at, 0.508, at, ink(0.18), 0.001);
+  }
 }
+
+/* ---------- луч ---------- */
 
 /* Люминофор: широкий бледный ореол под узким ядром. */
 function stroke(points, from, to, alpha, width) {
@@ -117,57 +67,316 @@ function stroke(points, from, to, alpha, width) {
   ctx.stroke();
 }
 
-/* Луч дошёл до head, за ним хвост длиной tail, дальше — остаточное свечение. */
+/* Луч дошёл до head, за ним хвост длиной tail, дальше — остаточное свечение.
+   Целый ровный след идёт одним мазком: дробить его на триста — впустую. */
 function drawTrace(points, width, head = 1, tail = 1, rest = 1) {
   const last = points.length - 1;
+  if (head >= 1 && rest >= 1) {
+    stroke(points, 0, last, 1, width);
+    return;
+  }
   const cut = Math.round(clamp(head, 0, 1) * last);
   const span = Math.max(1, tail * last);
   for (let i = 0; i < cut; i += CHUNK) {
     const to = Math.min(cut, i + CHUNK);
-    const age = (cut - to) / span;
-    stroke(points, i, to, Math.max(rest, 1 - age), width);
+    stroke(points, i, to, Math.max(rest, 1 - (cut - to) / span), width);
   }
   if (cut > 0 && head < 1) {
-    const [hx, hy] = points[cut];
     ctx.beginPath();
-    ctx.arc(hx, hy, width * 0.9, 0, TAU);
+    ctx.arc(points[cut][0], points[cut][1], width * 0.9, 0, TAU);
     ctx.fillStyle = ink(1);
     ctx.fill();
   }
 }
 
-function baselineMark(x1, x2, y) {
-  line(x1, y, x2, y, ink(0.12), 0.002);
+/* Дрожь: три несоизмеримые синусоиды, чтобы рисунок не повторялся. */
+function tremble(u, phase) {
+  return Math.sin(u * 11.7 + phase) * 0.6
+    + Math.sin(u * 27.3 - phase * 1.7) * 0.3
+    + Math.sin(u * 5.1 + phase * 0.6) * 0.1;
 }
 
-function label(text, x, y, size, color) {
-  ctx.fillStyle = color;
-  ctx.font = `${Math.round(S * size)}px 'DM Mono', ui-monospace, monospace`;
-  ctx.textAlign = 'center';
-  ctx.fillText(text, x * S, y * S);
-  ctx.textAlign = 'left';
+/* ---------- пила ---------- */
+
+/* Уровень в доле размаха, 0…1. Симметрия — доля периода под подъёмом. */
+function sawRaw(phase, symmetry) {
+  const u = phase - Math.floor(phase);
+  const s = clamp(symmetry, 0, 1);
+  if (s <= 0.0005) return 1 - u;
+  if (s >= 0.9995) return u;
+  return u < s ? u / s : 1 - (u - s) / (1 - s);
 }
 
-/* Общие для всех механик ручки формы волны. */
-const SHAPE_TOOLS = [
-  { type: 'range', key: 'sharp', label: 'острота', min: 0, max: 1.6, step: 0.02, value: 1 },
-  { type: 'range', key: 'tooth', label: 'ширина зуба', min: 0.06, max: 0.3, step: 0.005, value: 0.195 },
-  { type: 'range', key: 'height', label: 'рост', min: 0.06, max: 0.42, step: 0.005, value: 0.21 },
-  { type: 'range', key: 'slant', label: 'наклон', min: -0.5, max: 0.5, step: 0.01, value: 0.16 },
-  { type: 'range', key: 'shake', label: 'дрожь', min: 0, max: 1, step: 0.02, value: 0.22 },
-  { type: 'toggle', key: 'up', label: 'круглый верх', value: false },
-];
+// Треугольное окно: угол съедается плавно, а не срезается фаской.
+const BAND_WINDOW = [1, 2, 3, 4, 5, 4, 3, 2, 1];
+const BAND_SUM = BAND_WINDOW.reduce((a, b) => a + b, 0);
+
+function sawLevel(phase, symmetry, band) {
+  if (band <= 0.001) return sawRaw(phase, symmetry);
+  let sum = 0;
+  for (let k = 0; k < BAND_WINDOW.length; k += 1) {
+    const at = phase + band * (k / (BAND_WINDOW.length - 1) - 0.5);
+    sum += BAND_WINDOW[k] * sawRaw(at, symmetry);
+  }
+  return sum / BAND_SUM;
+}
+
+function waveY(level, amp, offset) {
+  return 0.5 - (level - 0.5) * amp + offset;
+}
+
+/* Кадр развёртки от края до края: волна занимает весь экран. */
+function sawPoints(o) {
+  const points = [];
+  for (let i = 0; i <= SAW_STEPS; i += 1) {
+    const u = i / SAW_STEPS;
+    let level = sawLevel(o.phase + u * o.periods, o.symmetry, o.band);
+    // Частота шума заведомо выше развёртки: он должен читаться зерном, а не волной.
+    if (o.noise) level += o.noise * 0.035 * tremble(u * 190, o.seed);
+    points.push([u * S, waveY(level, o.amp, o.offset) * S]);
+  }
+  return points;
+}
+
+/* Уровень на экране обратно в доли размаха: где по сигналу стоит эта высота. */
+function levelToSignal(y, amp, offset) {
+  return 0.5 + (0.5 + offset - y) / Math.max(amp, 0.001);
+}
 
 const MODES = {};
 
+/* ---------- генератор ---------- */
+
+MODES.saw = {
+  label: 'генератор',
+  note: 'Указатель — две ручки разом: вправо пила растягивается, вверх растёт. Симметрия ведёт волну от N через шатёр к И: это одна и та же диагональ, только повёрнутая. Полоса съедает углы, и печатная И оплывает в рукописную.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'symmetry', label: 'симметрия', min: 0, max: 1, step: 0.01, value: 1 },
+    { type: 'range', key: 'band', label: 'полоса', min: 0, max: 0.45, step: 0.005, value: 0 },
+    { type: 'range', key: 'noise', label: 'шум', min: 0, max: 1, step: 0.02, value: 0.06 },
+    { type: 'range', key: 'offset', label: 'смещение', min: -0.3, max: 0.3, step: 0.01, value: 0 },
+  ],
+
+  setup() {
+    modeState.time = 0;
+    modeState.periods = 2.4;
+    modeState.amp = 0.62;
+  },
+
+  step() {
+    modeState.time += STEP;
+  },
+
+  draw() {
+    drawScreen();
+
+    /* Указатель держит последнее, что показал: увёл курсор — настройка стоит. */
+    if (pointer.seen) {
+      modeState.periods = lerp(6.5, 1, clamp(pointer.x, 0, 1));
+      modeState.amp = lerp(0.92, 0.06, clamp(pointer.y, 0, 1));
+    }
+    const { periods, amp } = modeState;
+
+    drawTrace(sawPoints({
+      periods,
+      amp,
+      symmetry: num('symmetry'),
+      band: num('band'),
+      noise: num('noise'),
+      offset: num('offset'),
+      phase: 0,
+      seed: modeState.time * 3,
+    }), S * 0.005);
+
+    drawStatus(`пила ${(1 / periods).toFixed(2)} × ${amp.toFixed(2)}`);
+  },
+};
+
+/* ---------- синхронизация ---------- */
+
+/* Развёртка ждёт, пока сигнал пересечёт уровень на подъёме, и только тогда
+   срывается с места — потому картинка и стоит. Уровень вне размаха ловить
+   нечего: развёртка идёт вхолостую, и кадры разъезжаются друг по другу. */
+const GHOSTS = 5;
+
+MODES.trig = {
+  label: 'синхронизация',
+  note: 'Указателем ведёшь уровень запуска. Попал в размах — картинка встала, буква читается. Вышел за край — ловить нечего, развёртка идёт вхолостую и кадры разъезжаются. Чем ближе уровень к краю, тем легче шум сбивает захват.',
+  cursor: 'ns-resize',
+  tools: [
+    { type: 'range', key: 'symmetry', label: 'симметрия', min: 0, max: 1, step: 0.01, value: 1 },
+    { type: 'range', key: 'periods', label: 'развёртка', min: 1, max: 6, step: 0.1, value: 2.4 },
+    { type: 'range', key: 'amp', label: 'амплитуда', min: 0.06, max: 0.92, step: 0.01, value: 0.55 },
+    { type: 'range', key: 'band', label: 'полоса', min: 0, max: 0.45, step: 0.005, value: 0 },
+    { type: 'range', key: 'noise', label: 'шум', min: 0, max: 1, step: 0.02, value: 0.35 },
+    { type: 'range', key: 'rate', label: 'частота сигнала', min: 0, max: 3, step: 0.05, value: 0.8 },
+    { type: 'toggle', key: 'drift', label: 'дрейф', value: true },
+  ],
+
+  setup() {
+    modeState.time = 0;
+    modeState.free = 0;
+    modeState.offset = 0;
+    modeState.level = 0.5;
+  },
+
+  step() {
+    modeState.time += STEP;
+    modeState.free += STEP * num('rate');
+    // Прибор греется и уводит ноль: уровень приходится подправлять.
+    if (on('drift')) modeState.offset = Math.sin(modeState.time * 0.21) * 0.16;
+    else modeState.offset = 0;
+  },
+
+  draw() {
+    drawScreen();
+
+    const amp = num('amp');
+    const offset = modeState.offset;
+    if (pointer.seen) modeState.level = clamp(pointer.y, 0, 1);
+    const level = modeState.level;
+
+    const signal = levelToSignal(level, amp, offset);
+    const inside = signal > 0.02 && signal < 0.98;
+
+    // У края сигнал проводит меньше времени, и шум легче сбивает захват.
+    const margin = Math.min(signal, 1 - signal);
+    const shake = num('noise') * (inside ? clamp(0.09 / Math.max(margin, 0.02), 0, 1) : 1);
+
+    const base = {
+      periods: num('periods'),
+      amp,
+      symmetry: num('symmetry'),
+      band: num('band'),
+      noise: num('noise'),
+      offset,
+    };
+
+    if (inside) {
+      /* Захват держит фазу: подъём занимает долю периода, равную симметрии,
+         и приходит к уровню всегда в один и тот же миг. */
+      const lock = signal * clamp(num('symmetry'), 0.001, 1);
+      const jitter = shake * 0.09 * tremble(modeState.time * 9, 1.3);
+      drawTrace(sawPoints({ ...base, phase: lock + jitter, seed: modeState.time * 3 }), S * 0.005);
+    } else {
+      // Срыв: каждый кадр приходит со своей фазой, и они ложатся друг на друга.
+      for (let g = 0; g < GHOSTS; g += 1) {
+        const phase = modeState.free + g * 0.37;
+        stroke(sawPoints({ ...base, phase, seed: modeState.time * 3 + g }), 0, SAW_STEPS, 0.34, S * 0.004);
+      }
+    }
+
+    // Метка уровня: пунктир поперёк экрана и флажок у левого края.
+    ctx.save();
+    ctx.setLineDash([S * 0.012, S * 0.012]);
+    line(0, level, 1, level, inside ? ink(0.4) : RED, 0.0014);
+    ctx.restore();
+    ctx.beginPath();
+    ctx.moveTo(0, (level - 0.014) * S);
+    ctx.lineTo(0.022 * S, level * S);
+    ctx.lineTo(0, (level + 0.014) * S);
+    ctx.fillStyle = inside ? ink(0.55) : RED;
+    ctx.fill();
+
+    drawStatus(inside ? 'захват' : 'срыв', !inside);
+  },
+};
+
+/* ---------- вход ---------- */
+
+MODES.input = {
+  label: 'вход',
+  note: 'Сигнал подаёшь ты: высота указателя — это напряжение на входе, время идёт само. Чтобы на экране встала И, надо ровно тянуть вверх и резко ронять — пилу приходится писать рукой, а не буквой.',
+  cursor: 'ns-resize',
+  tools: [
+    { type: 'range', key: 'sweep', label: 'развёртка', min: 0.2, max: 4, step: 0.05, value: 1.1 },
+    { type: 'range', key: 'smooth', label: 'полоса', min: 0, max: 1, step: 0.02, value: 0.25 },
+    { type: 'range', key: 'glow', label: 'послесвечение', min: 0, max: 1, step: 0.02, value: 0.75 },
+    { type: 'button', label: 'стереть', action: () => { modeState.feed = []; } },
+  ],
+
+  setup() {
+    modeState.feed = [];
+    modeState.value = 0.5;
+  },
+
+  step() {
+    // Полоса у входа та же, что у прибора: сигнал не поспевает за рукой.
+    const target = pointer.seen ? clamp(pointer.y, 0.02, 0.98) : 0.5;
+    modeState.value = lerp(modeState.value, target, 1 - num('smooth') * 0.92);
+    modeState.feed.push(modeState.value);
+    const room = Math.round(SAW_STEPS / Math.max(num('sweep'), 0.2) / 6);
+    while (modeState.feed.length > room) modeState.feed.shift();
+  },
+
+  draw() {
+    drawScreen();
+
+    const feed = modeState.feed;
+    if (feed.length < 2) {
+      drawStatus('веди указателем');
+      return;
+    }
+
+    const points = feed.map((v, i) => [(i / (feed.length - 1)) * S, v * S]);
+    const glow = num('glow');
+    drawTrace(points, S * 0.005, 1, 0.35 + glow * 0.65, glow * 0.9);
+
+    // Кончик луча — там, где сигнал прямо сейчас.
+    ctx.beginPath();
+    ctx.arc(points[points.length - 1][0], points[points.length - 1][1], S * 0.006, 0, TAU);
+    ctx.fillStyle = ink(1);
+    ctx.fill();
+
+    drawStatus(`вход ${(1 - modeState.value).toFixed(2)}`);
+  },
+};
+
 /* ---------- прибор ---------- */
+
+/* Рукописная «и»: две чаши, стык углом, выход вверх вправо. Отсчёт идёт
+   с t₀ = 0, то есть с верхней линии строчных, — перо ставят туда. */
+const HAND_SAMPLES = 48;
+
+function handHeight(t, sharp) {
+  const soft = 0.5 * (1 + Math.cos(t));
+  const crisp = 1 - Math.abs(Math.sin(t / 2));
+  return lerp(soft, crisp, clamp(sharp, 0, 1));
+}
+
+function handPath(p) {
+  const R = p.tooth / TAU;
+  const steps = Math.max(2, Math.round(p.bowls * HAND_SAMPLES));
+  /* Перо не идёт по строке ровно: наверху медлит и стык сходится узким углом,
+     внизу разгоняется и чаша выходит широкой. Сверх единицы оно успевает
+     уйти назад — и на стыке набухает петля. */
+  const pinch = Math.min(1, p.sharp) * 0.62 + Math.max(0, p.sharp - 1) * 3;
+  const points = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const u = i / steps;
+    const t = u * p.bowls * TAU;
+    let h = p.height * handHeight(t, p.sharp);
+    let x = R * (t - pinch * Math.sin(t));
+    if (p.shake) {
+      h += p.shake * p.height * 0.05 * tremble(u * p.bowls, p.phase);
+      x += p.shake * p.tooth * 0.035 * tremble(u * p.bowls + 4.2, p.phase * 0.8);
+    }
+    points.push([(p.x + x + p.slant * h) * S, (p.baseline - h) * S]);
+  }
+  return points;
+}
 
 MODES.probe = {
   label: 'прибор',
-  note: 'Луч пишет волну, ручки задают её форму. Два зубца — «и», три — «ш»; «круглый верх» переворачивает волну, и те же зубцы читаются как «п» и «т». Красным — когда прочтение перестало быть единственным.',
+  note: 'Та же развёртка, но пишет она рукописную «и»: перо стартует на верхней линии строчных и первым движением идёт вниз. Острота ведёт от вялой волны через скоропись с настоящим углом к петле на стыке.',
   tools: [
-    { type: 'range', key: 'teeth', label: 'зубцы', min: 1, max: 8, step: 1, value: 2 },
-    ...SHAPE_TOOLS,
+    { type: 'range', key: 'bowls', label: 'чаши', min: 1, max: 6, step: 1, value: 2 },
+    { type: 'range', key: 'sharp', label: 'острота', min: 0, max: 1.6, step: 0.02, value: 1 },
+    { type: 'range', key: 'tooth', label: 'ширина чаши', min: 0.06, max: 0.3, step: 0.005, value: 0.195 },
+    { type: 'range', key: 'height', label: 'рост', min: 0.06, max: 0.42, step: 0.005, value: 0.21 },
+    { type: 'range', key: 'slant', label: 'наклон', min: -0.5, max: 0.5, step: 0.01, value: 0.2 },
+    { type: 'range', key: 'shake', label: 'дрожь', min: 0, max: 1, step: 0.02, value: 0.22 },
     { type: 'range', key: 'speed', label: 'скорость луча', min: 0.1, max: 3, step: 0.05, value: 0.7 },
     { type: 'range', key: 'glow', label: 'послесвечение', min: 0, max: 1, step: 0.02, value: 0.55 },
   ],
@@ -179,338 +388,45 @@ MODES.probe = {
 
   step() {
     modeState.time += STEP;
-    // Плитка на перечне замирает на 120-м шаге: луч должен стоять на строке целиком.
+    // Плитка на перечне замирает на 120-м шаге: луч должен стоять целиком.
     if (labBare) { modeState.head = 1; return; }
     modeState.head += STEP * num('speed');
     if (modeState.head > 1.35) modeState.head = 0;
   },
 
   draw() {
-    const teeth = num('teeth');
-    const up = on('up');
-    const tooth = Math.min(num('tooth'), 0.84 / teeth);
+    drawScreen();
+
+    const bowls = num('bowls');
+    const tooth = Math.min(num('tooth'), 0.84 / bowls);
     const height = num('height');
     const baseline = 0.5 + height / 2;
+    const x = 0.5 - (tooth * bowls) / 2;
 
-    const p = {
-      teeth,
+    line(x - 0.04, baseline, x + tooth * bowls + 0.04, baseline, ink(0.2), 0.002);
+    line(x - 0.04, baseline - height, x + tooth * bowls + 0.04, baseline - height, ink(0.2), 0.002);
+
+    const points = handPath({
+      bowls,
       tooth,
       height,
       sharp: num('sharp'),
       slant: num('slant'),
       shake: num('shake'),
-      polarity: up ? -1 : 1,
       phase: modeState.time * 2.4,
-      x: 0.5 - (tooth * teeth) / 2,
+      x,
       baseline,
-    };
-
-    baselineMark(p.x - 0.04, p.x + tooth * teeth + 0.04, baseline);
-    baselineMark(p.x - 0.04, p.x + tooth * teeth + 0.04, baseline - height);
-
-    const points = wavePath(p);
+    });
     const glow = num('glow');
     drawTrace(points, S * 0.0055, Math.min(1, modeState.head), 0.3 + glow * 0.7, glow * 0.85);
 
-    const list = readings(teeth, sideOf(up));
-    const hot = list.length > 1;
-    const word = list.length ? list[0].word : '—';
-    label(word, 0.5, baseline + 0.13, 0.075, list.length ? ink(1) : ink(0.3));
-    if (hot) {
-      label(list.slice(1).map((r) => r.word).join('  '), 0.5, baseline + 0.2, 0.032, RED);
-    }
-    drawStatus(hot ? `прочтений ${list.length}` : `зубцов ${teeth}`, hot);
-  },
-};
-
-/* ---------- карта ---------- */
-
-const MAP_COLS = 6;
-const MAP_ROWS = 5;
-const MAP_SHARP = [0.25, 0.6, 1, 1.3, 1.6];
-
-MODES.map = {
-  label: 'карта',
-  note: 'То же пространство разложено сеткой: вправо прибавляется зубец, вниз растёт острота — от вялой волны через скоропись к петле. Видно, что и, ш, п, т — участок одной поверхности, а И на ней просто вторая колонка.',
-  tools: [
-    { type: 'range', key: 'slant', label: 'наклон', min: -0.5, max: 0.5, step: 0.01, value: 0.16 },
-    { type: 'range', key: 'shake', label: 'дрожь', min: 0, max: 1, step: 0.02, value: 0.12 },
-    { type: 'toggle', key: 'up', label: 'круглый верх', value: false },
-  ],
-
-  setup() {
-    modeState.time = 0;
-  },
-
-  step() {
-    modeState.time += STEP;
-  },
-
-  draw() {
-    const up = on('up');
-    const side = sideOf(up);
-    const left = 0.135;
-    const top = 0.155;
-    const cellW = (1 - left - 0.04) / MAP_COLS;
-    const cellH = (0.93 - top) / MAP_ROWS;
-
-    label('зубцы', left - 0.07, top - 0.042, 0.024, ink(0.3));
-    for (let col = 0; col < MAP_COLS; col += 1) {
-      label(String(col + 1), left + cellW * (col + 0.5), top - 0.042, 0.026, ink(0.4));
-    }
-
-    for (let row = 0; row < MAP_ROWS; row += 1) {
-      for (let col = 0; col < MAP_COLS; col += 1) {
-        const teeth = col + 1;
-        const sharp = MAP_SHARP[row];
-        const list = readings(teeth, side);
-        const hot = list.length > 1;
-
-        const height = cellH * 0.4;
-        const tooth = (cellW * 0.74) / teeth;
-        const baseline = top + cellH * row + cellH * 0.62;
-
-        // Значение остроты стоит слева от своей строки, а не подписью у края.
-        if (col === 0) label(sharp.toFixed(2), left - 0.07, baseline, 0.024, ink(0.32));
-
-        const points = wavePath({
-          teeth,
-          tooth,
-          height,
-          sharp,
-          slant: num('slant'),
-          shake: num('shake'),
-          polarity: up ? -1 : 1,
-          phase: modeState.time * 2.4 + col * 1.7 + row * 0.9,
-          x: left + cellW * col + cellW * 0.5 - (tooth * teeth) / 2,
-          baseline,
-        });
-
-        drawTrace(points, S * 0.003, 1, 1, 1);
-
-        const word = list.length ? list[0].word : '·';
-        label(
-          hot ? `${word}…` : word,
-          left + cellW * (col + 0.5),
-          baseline + cellH * 0.3,
-          0.026,
-          hot ? RED : ink(list.length ? 0.75 : 0.25),
-        );
-
-        // Каноническая И: два зубца циклоидой, то есть с настоящим острым углом.
-        if (teeth === 2 && sharp === 1 && !up) {
-          ctx.strokeStyle = ink(0.35);
-          ctx.lineWidth = 1;
-          ctx.strokeRect(
-            (left + cellW * col + cellW * 0.06) * S,
-            (top + cellH * row + cellH * 0.06) * S,
-            cellW * 0.88 * S,
-            cellH * 0.88 * S,
-          );
-        }
-      }
-    }
-
-    label('острота', left - 0.07, top + 0.005, 0.024, ink(0.3));
-    drawStatus(up ? 'круглый верх · п, т' : 'круглый низ · и, ш');
-  },
-};
-
-/* ---------- письмо ---------- */
-
-MODES.word = {
-  label: 'письмо',
-  note: 'Набираешь не буквы, а зубцы: строка пишется одной непрерывной волной. «Прочесть иначе» переставляет разбиение — волна не сдвигается ни на пиксель, а слово выходит другое. Это и есть минимы.',
-  tools: [
-    { type: 'button', label: '+ два зуба', action: () => MODES.word.add(2) },
-    { type: 'button', label: '+ три зуба', action: () => MODES.word.add(3) },
-    { type: 'button', label: 'стереть', action: () => MODES.word.drop() },
-    { type: 'button', label: 'прочесть иначе', action: () => MODES.word.next() },
-    ...SHAPE_TOOLS,
-    { type: 'range', key: 'glow', label: 'послесвечение', min: 0, max: 1, step: 0.02, value: 1 },
-  ],
-
-  setup() {
-    modeState.time = 0;
-    modeState.teeth = 5;
-    modeState.pick = 0;
-  },
-
-  add(size) {
-    modeState.teeth = Math.min(18, (modeState.teeth || 0) + size);
-    modeState.pick = 0;
-  },
-
-  drop() {
-    modeState.teeth = Math.max(0, (modeState.teeth || 0) - 2);
-    modeState.pick = 0;
-  },
-
-  next() {
-    modeState.pick = (modeState.pick || 0) + 1;
-  },
-
-  step() {
-    modeState.time += STEP;
-  },
-
-  draw() {
-    const teeth = modeState.teeth;
-    const up = on('up');
-    const list = readings(teeth, sideOf(up));
-    const pick = list.length ? modeState.pick % list.length : 0;
-
-    if (!teeth) {
-      label('пусто', 0.5, 0.5, 0.04, ink(0.3));
-      drawStatus('зубцов 0');
-      return;
-    }
-
-    const height = num('height');
-    const tooth = Math.min(num('tooth'), 0.86 / teeth);
-    const baseline = 0.5 + height / 2;
-    const x = 0.5 - (tooth * teeth) / 2;
-
-    baselineMark(x - 0.03, x + tooth * teeth + 0.03, baseline);
-    baselineMark(x - 0.03, x + tooth * teeth + 0.03, baseline - height);
-
-    const points = wavePath({
-      teeth,
-      tooth,
-      height,
-      sharp: num('sharp'),
-      slant: num('slant'),
-      shake: num('shake'),
-      polarity: up ? -1 : 1,
-      phase: modeState.time * 2.4,
-      x,
-      baseline,
-    });
-    const glow = num('glow');
-    drawTrace(points, S * 0.0055, 1, 0.3 + glow * 0.7, glow * 0.85);
-
-    // Разбиение под строкой: скобки двигаются, волна стоит.
-    const reading = list[pick];
-    if (reading) {
-      const brace = baseline + 0.055;
-      let at = 0;
-      for (let i = 0; i < reading.sizes.length; i += 1) {
-        const size = reading.sizes[i];
-        const from = x + at * tooth;
-        const to = x + (at + size) * tooth;
-        line(from, brace, to, brace, ink(0.45), 0.0025);
-        line(from, brace - 0.012, from, brace, ink(0.45), 0.0025);
-        line(to, brace - 0.012, to, brace, ink(0.45), 0.0025);
-        label(reading.word[i], (from + to) / 2, brace + 0.05, 0.036, ink(0.85));
-        at += size;
-      }
-      label(reading.word, 0.5, brace + 0.14, 0.06, ink(1));
-    } else {
-      label('не читается', 0.5, baseline + 0.1, 0.04, RED);
-    }
-
-    const hot = list.length > 1;
-    drawStatus(
-      hot ? `чтение ${pick + 1} из ${list.length}` : `зубцов ${teeth}`,
-      hot,
-    );
-  },
-};
-
-/* ---------- ручка ---------- */
-
-MODES.hand = {
-  label: 'ручка',
-  note: 'Указатель сам и есть две ручки: вправо прибавляются зубцы, вверх и вниз переворачивается волна, а посередине она ложится в прямую. Пишешь не рукой по бумаге, а рукой по полю параметров — и строка читается только там, где зубцов вышло ровное число.',
-  cursor: 'crosshair',
-  tools: [
-    { type: 'range', key: 'sharp', label: 'острота', min: 0, max: 1.6, step: 0.02, value: 1 },
-    { type: 'range', key: 'tooth', label: 'ширина зуба', min: 0.06, max: 0.3, step: 0.005, value: 0.17 },
-    { type: 'range', key: 'height', label: 'рост', min: 0.06, max: 0.42, step: 0.005, value: 0.21 },
-    { type: 'range', key: 'slant', label: 'наклон', min: -0.5, max: 0.5, step: 0.01, value: 0.16 },
-    { type: 'range', key: 'shake', label: 'дрожь', min: 0, max: 1, step: 0.02, value: 0.22 },
-    { type: 'range', key: 'snap', label: 'притяжка к целому', min: 0, max: 1, step: 0.02, value: 0 },
-    { type: 'toggle', key: 'trail', label: 'след', value: true },
-    { type: 'button', label: 'стереть след', action: () => { modeState.trail = []; } },
-  ],
-
-  setup() {
-    modeState.time = 0;
-    modeState.trail = [];
-  },
-
-  step() {
-    modeState.time += STEP;
-    if (!on('trail') || !pointer.seen) return;
-    modeState.trail.push([pointer.x, pointer.y]);
-    if (modeState.trail.length > 400) modeState.trail.shift();
-  },
-
-  draw() {
-    const px = pointer.seen ? clamp(pointer.x, 0, 1) : 0.28;
-    const py = pointer.seen ? clamp(pointer.y, 0, 1) : 0.14;
-
-    // Поле параметров: по горизонтали зубцы, по вертикали полярность.
-    let teeth = 1 + px * 6;
-    const snap = num('snap');
-    if (snap) teeth = lerp(teeth, Math.round(teeth), snap);
-    const polarity = 1 - py * 2;
-
-    if (on('trail') && modeState.trail.length > 1) {
-      ctx.beginPath();
-      ctx.moveTo(modeState.trail[0][0] * S, modeState.trail[0][1] * S);
-      for (const [tx, ty] of modeState.trail) ctx.lineTo(tx * S, ty * S);
-      ctx.strokeStyle = ink(0.16);
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    line(0, 0.5, 1, 0.5, ink(0.08), 0.0015);
-
-    const height = num('height');
-    const tooth = Math.min(num('tooth'), 0.86 / teeth);
-    const baseline = 0.5 + height / 2;
-    const x = 0.5 - (tooth * teeth) / 2;
-
-    const points = wavePath({
-      teeth,
-      tooth,
-      height,
-      sharp: num('sharp'),
-      slant: num('slant'),
-      shake: num('shake'),
-      polarity,
-      phase: modeState.time * 2.4,
-      x,
-      baseline,
-    });
-    drawTrace(points, S * 0.0055, 1, 1, 1);
-
-    dot(px, py, ink(0.5), 0.005);
-
-    // Строка читается только на целом числе зубцов и внятной полярности.
-    const whole = Math.round(teeth);
-    const tuned = Math.abs(teeth - whole) < 0.08 && Math.abs(polarity) > 0.35;
-    const list = tuned ? readings(whole, sideOf(polarity < 0)) : [];
-    const hot = list.length > 1;
-
-    if (list.length) {
-      label(list[0].word, 0.5, baseline + 0.13, 0.075, ink(1));
-      if (hot) label(list.slice(1).map((r) => r.word).join('  '), 0.5, baseline + 0.2, 0.03, RED);
-    } else {
-      label('—', 0.5, baseline + 0.13, 0.075, ink(0.22));
-    }
-
-    drawStatus(
-      hot ? `прочтений ${list.length}` : `зубцов ${teeth.toFixed(2)}`,
-      hot,
-    );
+    drawStatus(`чаш ${bowls}`);
   },
 };
 
 startLab({
-  title: 'И · волна и её зубцы',
+  title: 'И · пила на экране',
   modes: MODES,
-  start: 'probe',
+  start: 'saw',
   ground: 'ink',
 });

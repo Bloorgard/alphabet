@@ -49,7 +49,7 @@ const LABS = [
     chosen: 'эскиз 1',
   },
   {
-    slug: 'i', letter: 'И', title: 'волна и её зубцы', tile: true,
-    mechanics: ['прибор', 'карта', 'письмо', 'ручка'],
+    slug: 'i', letter: 'И', title: 'пила на экране', tile: true,
+    mechanics: ['прибор', 'генератор', 'синхронизация', 'вход'],
   },
 ];
