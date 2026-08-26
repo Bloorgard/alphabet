@@ -14,8 +14,8 @@
      росчерк     живёт только штрих, проведённый быстрее порога
      перо        кончик пера висит на пружине за курсором: скобка — это
                  не форма, а перелёт
-     шнур        скоба жёсткая и держит, а краткость на ней висит верёвкой:
-                 дёргается, натягивается и срывается с узла
+     шнур        краткость перекинута через перекладину скобы и держится
+                 обхватом: тянешь за хвост — перебирается и в конце падает
 
    Красный обозначает событие: краткости не вышло. В «шнуре» он держит
    сам шнур — это спорно и решается, когда механика поедет в букву. */
@@ -443,34 +443,40 @@ MODES.pen = {
     drawStatus(modeState.live ? 'пишет' : 'веди и нажми');
   },
 };
+
 /* ---------- шнур ---------- */
 
 /* Скоба жёсткая: две стойки уходят за кадр, перекладина внизу, углы скруглены.
-   Краткость к ней не привязана, а перекинута через углы: два хвоста снаружи,
-   провис между ними.
+   Краткость к ней не привязана, а перекинута через перекладину: верёвка идёт
+   за ней, оба конца висят спереди. Держит обхват — трение верёвки о деталь,
+   как на турнике или на кнехте.
 
-   Угол работает проушиной. Верёвка не приколота к нему, а идёт сквозь: угол
-   помнит, какое её место сейчас на нём лежит, и это место переползает, когда
-   натяжение с одной стороны перевешивает другую. Перевес меряется разностью
-   растяжения соседних звеньев, а порог перевеса — это и есть трение.
+   Отсюда рисование в два слоя: то, что выше перекладины, идёт под деталью,
+   остальное поверх. Верёвка проходит за скобой, а не сквозь неё, и это
+   единственное место, где сцена помнит про третье измерение.
 
-   Считать угол опорой, на которой верёвка просто лежит, нельзя: скоба
-   разомкнута вверх, её внешний угол выпуклостью смотрит вниз и держать
-   не может — верёвка съезжает с него и падает. Так и вышло на первой сборке.
+   Виток знает своё место на перекладине и своё место на верёвке. Оба ползут:
+   вдоль перекладины — когда верёвка тянет виток вбок, вдоль верёвки — когда
+   натяжение с одной стороны перевешивает другую. Порог обоих переступов и
+   есть трение. Вытянул хвост целиком — витку не за что держаться, он сходит.
 
-   Вытянул хвост целиком — место сползло за конец, угол пуст, верёвка ушла.
-   Обратно её перекидывают: подносят кусок к пустому углу и отпускают. */
+   Витки не хранятся вечно: отпустил верёвку — они пересобираются по тому,
+   что сейчас лежит выше перекладины. Поэтому «закинуть конец за перекладину»
+   не отдельная команда, а то же самое действие: занёс и отпустил.
+
+   Перевес меряется усреднённо: по верёвке ходят волны, и мгновенная разность
+   соседних звеньев скачет знаком вдесятеро больше самого перевеса — виток
+   перебирал бы верёвку от собственной дрожи. */
 
 const BRACE = { x1: 0.315, x2: 0.685, bar: 0.215, r: 0.024, top: -0.06 };
 const BRACE_HALF = 0.0085;   // половина толщины скобы
 const CORD_N = 72;
 const CORD_HALF = 0.008;     // половина толщины верёвки
 const RELAX = 8;
-const HOOK = 0.05;           // с какого расстояния кусок ложится на пустой угол
 const FLOOR = 0.93;          // пол: сдёрнутой верёвке есть куда лечь
+const SLIDE = 0.0016;        // насколько виток ползёт вдоль перекладины за кадр
 
-/* Осевая линия скобы ломаной: по ней деталь и рисуется, и отталкивает верёвку.
-   Углы разложены на отрезки — верёвке нужна поверхность, а не команда дуги. */
+/* Скоба ломаной: по ней деталь рисуется. Углы разложены на отрезки. */
 const BRACE_LINE = (() => {
   const points = [[BRACE.x1, BRACE.top], [BRACE.x1, BRACE.bar - BRACE.r]];
   const arc = (cx, cy, from, to) => {
@@ -486,17 +492,20 @@ const BRACE_LINE = (() => {
   return points;
 })();
 
-/* Точка проушины — там, где верёвка ложится на скруглении: снаружи угла,
-   по биссектрисе. */
-const EYES = (() => {
-  const out = (BRACE.r + BRACE_HALF + CORD_HALF) * Math.SQRT1_2;
-  return [
-    [BRACE.x1 + BRACE.r - out, BRACE.bar - BRACE.r + out],
-    [BRACE.x2 - BRACE.r + out, BRACE.bar - BRACE.r + out],
-  ];
-})();
+/* Стойки — единственное, сквозь что верёвке нельзя: перекладину она обходит
+   сзади, а стойки стоят в её плоскости. */
+const STEMS = [
+  [BRACE.x1, BRACE.top, BRACE.x1, BRACE.bar - BRACE.r],
+  [BRACE.x2, BRACE.top, BRACE.x2, BRACE.bar - BRACE.r],
+];
 
-/* Ближайшая точка отрезка — вся геометрия касания держится на ней. */
+/* Куда виток может встать: по перекладине, не заходя на скругления. */
+const BAR_FROM = BRACE.x1 + BRACE.r;
+const BAR_TO = BRACE.x2 - BRACE.r;
+/* Гребень витка чуть выше верхней кромки перекладины: обхват должен быть виден
+   поверх детали, иначе верёвка читается обрезанной, а не перекинутой. */
+const BAR_TOP = BRACE.bar - BRACE_HALF - CORD_HALF * 0.5;
+
 function nearestOn(ax, ay, bx, by, x, y) {
   const dx = bx - ax;
   const dy = by - ay;
@@ -505,44 +514,69 @@ function nearestOn(ax, ay, bx, by, x, y) {
   return [ax + dx * t, ay + dy * t];
 }
 
-/* Скоба выталкивает точку наружу: попала внутрь детали — встала на поверхность.
-   Это не про удержание верёвки, а про то, чтобы хвосты не проходили сквозь. */
-function braceHit(p) {
+function stemHit(p) {
   const reach = BRACE_HALF + CORD_HALF;
-  if (p.y > BRACE.bar + reach) return;
-
-  let best = null;
-  let near = reach;
-  for (let i = 1; i < BRACE_LINE.length; i += 1) {
-    const [ax, ay] = BRACE_LINE[i - 1];
-    const [bx, by] = BRACE_LINE[i];
+  if (p.y > BRACE.bar) return;
+  for (const [ax, ay, bx, by] of STEMS) {
     const [cx, cy] = nearestOn(ax, ay, bx, by, p.x, p.y);
     const d = Math.hypot(p.x - cx, p.y - cy);
-    if (d < near) { near = d; best = [cx, cy, d]; }
+    if (d >= reach) continue;
+    const nx = d > 1e-6 ? (p.x - cx) / d : 1;
+    const ny = d > 1e-6 ? (p.y - cy) / d : 0;
+    p.x = cx + nx * reach;
+    p.y = cy + ny * reach;
   }
-  if (!best) return;
-
-  const [cx, cy, d] = best;
-  const nx = d > 1e-6 ? (p.x - cx) / d : 0;
-  const ny = d > 1e-6 ? (p.y - cy) / d : 1;
-  p.x = cx + nx * reach;
-  p.y = cy + ny * reach;
 }
 
-/* Верёвка рождается уже перекинутой: хвост, угол, провис, угол, хвост.
-   Точки раскладываются по этой ломаной поровну, и длина звена берётся отсюда
-   же — тогда первый кадр обходится без рывка. */
+function plural(n, forms) {
+  const ten = n % 10;
+  const hundred = n % 100;
+  if (ten === 1 && hundred !== 11) return forms[0];
+  if (ten >= 2 && ten <= 4 && (hundred < 12 || hundred > 14)) return forms[1];
+  return forms[2];
+}
+
+/* Витки пересобираются по верёвке: каждый сплошной кусок, лежащий выше
+   перекладины, — это один обхват, и держится он серединой этого куска. */
+function rebuildWraps(cord) {
+  const wraps = [];
+  let from = -1;
+  const close = (to) => {
+    if (from < 0) return;
+    const at = clamp(Math.round((from + to) / 2), 1, CORD_N - 2);
+    wraps.push({ at, x: clamp(cord.points[at].x, BAR_FROM, BAR_TO), pull: 0, side: 0 });
+    from = -1;
+  };
+  for (let i = 0; i < CORD_N; i += 1) {
+    const p = cord.points[i];
+    const over = p.y < BRACE.bar && p.x > BRACE.x1 && p.x < BRACE.x2;
+    if (over && from < 0) from = i;
+    if (!over) close(i - 1);
+  }
+  close(CORD_N - 1);
+
+  // Два витка на одном месте — это один виток.
+  cord.wraps = wraps.filter((w, i) => i === 0 || w.at - wraps[i - 1].at > 3);
+}
+
+/* Верёвка рождается уже перекинутой: хвост, обхват, провис, обхват, хвост —
+   ровно то, что на схеме. Длина звена берётся из самой раскладки, поэтому
+   первый кадр обходится без рывка. */
 function makeCord(length) {
   const span = BRACE.x2 - BRACE.x1;
+  const over = 0.04;
+  const left = BRACE.x1 + 0.055;
+  const right = BRACE.x2 - 0.055;
   const tail = Math.max(0.08, (span * length - span * 1.25) / 2);
   const sag = span * 0.34;
-  const path = [[EYES[0][0] - 0.012, EYES[0][1] + tail], [EYES[0][0], EYES[0][1]]];
-  for (let i = 1; i < 14; i += 1) {
-    const u = i / 14;
-    path.push([lerp(EYES[0][0], EYES[1][0], u), EYES[0][1] + Math.sin(Math.PI * u) * sag]);
+
+  const path = [[left - 0.014, BRACE.bar + tail], [left - 0.006, BRACE.bar - over]];
+  for (let i = 0; i <= 12; i += 1) {
+    const u = i / 12;
+    path.push([lerp(left + 0.006, right - 0.006, u), BRACE.bar + Math.sin(Math.PI * u) * sag]);
   }
-  path.push([EYES[1][0], EYES[1][1]]);
-  path.push([EYES[1][0] + 0.012, EYES[1][1] + tail]);
+  path.push([right + 0.006, BRACE.bar - over]);
+  path.push([right + 0.014, BRACE.bar + tail]);
 
   const steps = [0];
   for (let i = 1; i < path.length; i += 1) {
@@ -551,68 +585,61 @@ function makeCord(length) {
   const total = steps[steps.length - 1];
   const points = [];
   let leg = 1;
-  let atEye = [0, 0];
   for (let i = 0; i < CORD_N; i += 1) {
     const at = (i / (CORD_N - 1)) * total;
     while (leg < steps.length - 1 && steps[leg] < at) leg += 1;
     const u = (at - steps[leg - 1]) / Math.max(1e-6, steps[leg] - steps[leg - 1]);
-    points.push({
-      x: lerp(path[leg - 1][0], path[leg][0], u),
-      y: lerp(path[leg - 1][1], path[leg][1], u),
-      px: 0, py: 0,
-    });
-    const last = points[i];
-    last.px = last.x;
-    last.py = last.y;
-    // Какое место верёвки легло на угол — от него и пойдёт переползание.
-    if (steps[1] >= at) atEye[0] = i;
-    if (steps[steps.length - 2] >= at) atEye[1] = i;
+    const x = lerp(path[leg - 1][0], path[leg][0], u);
+    const y = lerp(path[leg - 1][1], path[leg][1], u);
+    points.push({ x, y, px: x, py: y });
   }
-  return { points, rest: total / (CORD_N - 1), hold: -1, eye: atEye, pull: [0, 0], settle: 60 };
+
+  const cord = { points, rest: total / (CORD_N - 1), hold: -1, wraps: [], settle: 60 };
+  rebuildWraps(cord);
+  return cord;
 }
 
-/* Переползание: у пустого угла места нет, у занятого сравниваются растяжения
-   соседних звеньев. Перевесила внешняя сторона — место уходит внутрь, и хвост
-   удлиняется; внутренняя — наоборот. Порог разности и есть трение.
-
-   Мгновенный перевес мерить нельзя: по верёвке ходят волны, и разность звеньев
-   скачет знаком вдесятеро больше самого перевеса — угол начал бы перебирать
-   верёвку от собственной дрожи. Поэтому перевес усредняется, а после каждого
-   переступа среднее сбрасывается вполовину: один переступ уже снял часть тяги. */
-function feedEye(cord, side, slip) {
-  const at = cord.eye[side];
-  if (at < 0) return;
-  const outward = side === 0 ? -1 : 1;
-  const out = cord.points[at + outward];
-  const inward = cord.points[at - outward];
+/* Переступ витка вдоль верёвки: перевесила одна сторона — обхват сползает
+   к другой, и её хвост удлиняется. Дошло до конца верёвки — витку не за что
+   держаться. Заодно виток ползёт вбок, если верёвка тянет его вдоль
+   перекладины, и сходит со скругления. */
+function feedWrap(cord, wrap, slip) {
+  const at = wrap.at;
   const p = cord.points[at];
-  if (!out || !inward) { cord.eye[side] = -1; return; }
+  const back = cord.points[at - 1];
+  const ahead = cord.points[at + 1];
+  if (!back || !ahead) return false;
 
-  const now = Math.hypot(out.x - p.x, out.y - p.y) - Math.hypot(inward.x - p.x, inward.y - p.y);
-  const pull = lerp(cord.pull[side], now, 0.06);
-  cord.pull[side] = pull;
-  if (Math.abs(pull) < slip) return;
-  cord.pull[side] = pull * 0.5;
-
-  const next = at - Math.sign(pull) * outward;
-  const other = cord.eye[1 - side];
-  // Место дошло до конца верёвки или упёрлось во второй угол — угол пуст.
-  if (next < 1 || next > CORD_N - 2 || (other >= 0 && Math.abs(next - other) < 2)) {
-    cord.eye[side] = -1;
-    return;
+  const now = Math.hypot(back.x - p.x, back.y - p.y) - Math.hypot(ahead.x - p.x, ahead.y - p.y);
+  wrap.pull = lerp(wrap.pull, now, 0.06);
+  if (Math.abs(wrap.pull) >= slip) {
+    // Перевесила сторона back — верёвка идёт туда, а на перекладину выходит
+    // место, которое было со стороны ahead.
+    const next = at + (wrap.pull > 0 ? 1 : -1);
+    wrap.pull *= 0.5;
+    if (next < 1 || next > CORD_N - 2) return false;
+    wrap.at = next;
   }
-  cord.eye[side] = next;
+
+  const drift = (back.x - p.x) + (ahead.x - p.x);
+  wrap.side = lerp(wrap.side, drift, 0.06);
+  if (Math.abs(wrap.side) >= slip) {
+    wrap.side *= 0.5;
+    wrap.x += Math.sign(drift) * SLIDE;
+    if (wrap.x < BAR_FROM || wrap.x > BAR_TO) return false;
+  }
+  return true;
 }
 
 MODES.cord = {
   label: 'шнур',
-  note: 'Верёвка не привязана, а перекинута через углы скобы и держится трением. Тяни за хвост: верёвка ползёт через угол, второй хвост укорачивается. Вытянул до конца — ушла. Поднеси кусок к пустому углу и отпусти — ляжет обратно.',
+  note: 'Верёвка не привязана, а перекинута через перекладину и держится обхватом. Тяни за хвост: верёвка перебирается через виток, другой хвост укорачивается. Вытянул до конца — упала. Закинуть обратно — занести кусок за перекладину и отпустить.',
   cursor: 'grab',
   tools: [
     { type: 'range', key: 'length', label: 'длина', min: 1.6, max: 3.6, step: 0.05, value: 2.7 },
     { type: 'range', key: 'gravity', label: 'тяжесть', min: 1, max: 14, step: 0.5, value: 7 },
     { type: 'range', key: 'air', label: 'вязкость', min: 0, max: 0.2, step: 0.005, value: 0.03 },
-    { type: 'range', key: 'friction', label: 'трение в углах', min: 0, max: 1, step: 0.02, value: 0.5 },
+    { type: 'range', key: 'friction', label: 'трение о скобу', min: 0, max: 1, step: 0.02, value: 0.5 },
     { type: 'toggle', key: 'letter', label: 'буква', value: false },
     { type: 'button', label: 'перекинуть заново', action: () => { modeState.cord = makeCord(num('length')); } },
   ],
@@ -636,19 +663,11 @@ MODES.cord = {
     cord.hold = best;
   },
 
+  /* Отпустили — верёвка ложится: всё, что занесено за перекладину, становится
+     обхватом. Тем же движением её и вешают обратно. */
   onUp() {
-    const cord = modeState.cord;
-    // Кусок, поднесённый к пустому углу, ложится на него.
-    if (cord.hold > 0 && cord.hold < CORD_N - 1) {
-      EYES.forEach((eye, side) => {
-        if (cord.eye[side] >= 0) return;
-        const other = cord.eye[1 - side];
-        if (other >= 0 && Math.abs(cord.hold - other) < 3) return;
-        const p = cord.points[cord.hold];
-        if (Math.hypot(p.x - eye[0], p.y - eye[1]) < HOOK) cord.eye[side] = cord.hold;
-      });
-    }
-    cord.hold = -1;
+    modeState.cord.hold = -1;
+    rebuildWraps(modeState.cord);
   },
 
   step() {
@@ -683,12 +702,11 @@ MODES.cord = {
         b.x -= ox; b.y -= oy;
       }
 
-      EYES.forEach((eye, side) => {
-        const at = cord.eye[side];
-        if (at < 0) return;
-        cord.points[at].x = eye[0];
-        cord.points[at].y = eye[1];
-      });
+      for (const wrap of cord.wraps) {
+        const p = cord.points[wrap.at];
+        p.x = wrap.x;
+        p.y = BAR_TOP;
+      }
 
       // Рука сильнее скобы: её точка ставится последней.
       if (cord.hold >= 0) {
@@ -696,19 +714,40 @@ MODES.cord = {
         cord.points[cord.hold].y = pointer.y;
       }
 
-      for (const p of cord.points) braceHit(p);
+      for (const p of cord.points) stemHit(p);
     }
 
-    // Верёвку только что перекинули: первые полсекунды она качается, и волны
-    // от броска не должны считаться перевесом.
+    // Верёвку только что закинули: волны от броска — не перевес.
     if (cord.settle > 0) { cord.settle -= 1; return; }
     const slip = cord.rest * (0.02 + num('friction') * 1.5);
-    feedEye(cord, 0, slip);
-    feedEye(cord, 1, slip);
+    cord.wraps = cord.wraps.filter((wrap) => feedWrap(cord, wrap, slip));
   },
 
   draw() {
     if (on('letter')) letterI(0.5, 0.09);
+
+    const cord = modeState.cord;
+
+    // Верёвка целиком уходит под скобу, а потом всё, что ниже перекладины,
+    // кладётся поверх: так виден обхват, а не пересечение.
+    const rope = (only) => {
+      ctx.strokeStyle = RED;
+      ctx.lineWidth = S * CORD_HALF * 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      let drawing = false;
+      for (let i = 1; i < cord.points.length; i += 1) {
+        const a = cord.points[i - 1];
+        const b = cord.points[i];
+        if (only && (a.y < BRACE.bar || b.y < BRACE.bar)) { drawing = false; continue; }
+        if (!drawing) { ctx.moveTo(a.x * S, a.y * S); drawing = true; }
+        ctx.lineTo(b.x * S, b.y * S);
+      }
+      ctx.stroke();
+    };
+
+    rope(false);
 
     ctx.beginPath();
     ctx.moveTo(BRACE_LINE[0][0] * S, BRACE_LINE[0][1] * S);
@@ -719,36 +758,11 @@ MODES.cord = {
     ctx.lineCap = 'butt';
     ctx.stroke();
 
-    const cord = modeState.cord;
+    rope(true);
 
-    // Пустой угол виден кружком: туда верёвку и перекидывают обратно.
-    EYES.forEach((eye, side) => {
-      if (cord.eye[side] >= 0) return;
-      ctx.beginPath();
-      ctx.arc(eye[0] * S, eye[1] * S, S * 0.013, 0, TAU);
-      ctx.strokeStyle = ink(0.25);
-      ctx.lineWidth = S * 0.0016;
-      ctx.stroke();
-    });
-
-    ctx.beginPath();
-    ctx.moveTo(cord.points[0].x * S, cord.points[0].y * S);
-    for (const p of cord.points) ctx.lineTo(p.x * S, p.y * S);
-    ctx.strokeStyle = RED;
-    ctx.lineWidth = S * CORD_HALF * 2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-
-    const on2 = cord.eye.filter((at) => at >= 0).length;
-    if (!on2) drawStatus('сдёрнут', true);
-    else if (on2 === 1) drawStatus('на одном углу', true);
-    else {
-      // Коротко: длинная строка залезает на стойку скобы.
-      const left = cord.eye[0];
-      const right = CORD_N - 1 - cord.eye[1];
-      drawStatus(`хвосты ${left} · ${right}`);
-    }
+    const count = cord.wraps.length;
+    if (!count) drawStatus('сдёрнут', true);
+    else drawStatus(`${count} ${plural(count, ['виток', 'витка', 'витков'])}`);
   },
 };
 
