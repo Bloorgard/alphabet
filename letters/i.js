@@ -221,14 +221,17 @@ export function mountI(workspace) {
     drawRunner(points, width);
   }
 
-  /* Крестик закрытия занимает у верхнего края 40 px и на узком кадре не
-     умещается в долю: зазор поэтому задан в пикселях, а не в доле стороны. */
+  /* Подпись встаёт в верхнюю строку между заголовком слева и крестиком справа,
+     поэтому берёт их же кегль: заголовок и крестик заданы в пикселях, и доля
+     стороны выбила бы её из строки. Базовая линия — на 24 px, как у них. */
   function status(text, hot) {
-    ctx.fillStyle = hot ? RED : ink(0.45);
-    ctx.font = `${Math.max(10, Math.round(S * 0.022))}px 'DM Mono', ui-monospace, monospace`;
-    ctx.textAlign = 'right';
-    ctx.fillText(text, S * 0.955, Math.max(62, S * 0.115));
+    ctx.fillStyle = hot ? RED : ink(0.55);
+    ctx.font = "10px 'DM Mono', ui-monospace, monospace";
+    ctx.letterSpacing = '.08em';
+    ctx.textAlign = 'center';
+    ctx.fillText(text.toUpperCase(), S / 2, 24);
     ctx.textAlign = 'left';
+    ctx.letterSpacing = '0px';
   }
 
   function advance() {
