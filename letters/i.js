@@ -110,6 +110,39 @@ function sawLevel(phase, symmetry, band) {
     + sawArea2(phase - half, symmetry)) / (half * half);
 }
 
+/* Где сигнал на самом деле ходит и где он пересекает уровень на подъёме.
+   По идеальной пиле это считать нельзя: полоса срезает размах, и зона захвата
+   выходит заметно шире самой волны — ловится пустое место над и под ней.
+   Профиль зависит только от симметрии и полосы, поэтому держим последний. */
+const SCAN = 256;
+let waveShape = null;
+
+function scanWave(symmetry, band) {
+  if (waveShape && waveShape.symmetry === symmetry && waveShape.band === band) return waveShape;
+  const level = new Float64Array(SCAN + 1);
+  let low = Infinity;
+  let high = -Infinity;
+  for (let i = 0; i <= SCAN; i += 1) {
+    const v = sawLevel(i / SCAN, symmetry, band);
+    level[i] = v;
+    if (v < low) low = v;
+    if (v > high) high = v;
+  }
+  waveShape = { symmetry, band, level, low, high };
+  return waveShape;
+}
+
+/* Фаза, на которой подъём приходит к уровню. Развёртка стартует отсюда,
+   поэтому картинка и стоит на месте. */
+function riseAt(shape, target) {
+  for (let i = 0; i < SCAN; i += 1) {
+    const a = shape.level[i];
+    const b = shape.level[i + 1];
+    if (a <= target && b > target) return (i + (target - a) / (b - a)) / SCAN;
+  }
+  return 0;
+}
+
 /* Шум на экране. Частоты заданы прямо в периодах на кадр и держатся вдесятеро
    ниже того, что развёртка успевает сосчитать. Разгонишь выше — недосчёт
    свернёт их в ровную ступеньку, и линия будет не рябить, а ломаться. */
@@ -251,7 +284,10 @@ export function mountI(workspace) {
 
     // Уровень задан в кадре, а сигнал живёт в долях размаха: переводим обратно.
     const signal = 0.5 + (0.5 + state.offset - state.level) / Math.max(params.amp, 0.001);
-    state.inside = signal > 0.02 && signal < 0.98;
+    const shape = scanWave(params.symmetry, params.band);
+    // Полоски у самого края размаха не считаем: там подъём слишком полог.
+    const edge = (shape.high - shape.low) * 0.03;
+    state.inside = signal > shape.low + edge && signal < shape.high - edge;
 
     // Развёртки лежат в пикселях кадра: сменился размер — тянуть их нечем.
     if (state.side !== S) {
@@ -263,10 +299,11 @@ export function mountI(workspace) {
        приходит к уровню всегда в один и тот же миг. У края размаха сигнал
        проводит меньше времени, и шум легче сбивает точку пересечения. Без
        захвата фаза свободная, и развёртка каждый раз встаёт на новое место. */
-    const margin = Math.min(signal, 1 - signal);
+    const swing = Math.max(shape.high - shape.low, 0.001);
+    const margin = Math.min(signal - shape.low, shape.high - signal) / swing;
     const shake = params.noise * clamp(0.09 / Math.max(margin, 0.02), 0, 1);
     const phase = state.inside
-      ? signal * clamp(params.symmetry, 0.001, 1) + shake * 0.09 * tremble(state.time * 9)
+      ? riseAt(shape, signal) + shake * 0.09 * tremble(state.time * 9)
       : state.free;
 
     state.sweeps.push(sawPoints(phase, state.time * 3));
@@ -285,7 +322,10 @@ export function mountI(workspace) {
     for (let i = 0; i < state.sweeps.length; i += 1) {
       const age = state.sweeps.length - 1 - i;
       if (age >= life) continue;
-      stroke(state.sweeps[i], 0, steps, weight * (1 - age / life), width);
+      /* Длину спрашиваем у самой развёртки: ResizeObserver успевает поменять
+         steps между шагом и кадром, и сохранённая окажется короче. */
+      const sweep = state.sweeps[i];
+      stroke(sweep, 0, sweep.length - 1, weight * (1 - age / life), width);
     }
 
     // Бегунок идёт поверх и не копится: он не след, а место луча прямо сейчас.

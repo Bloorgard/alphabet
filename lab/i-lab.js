@@ -149,6 +149,39 @@ function sawLevel(phase, symmetry, band) {
     + sawArea2(phase - half, symmetry)) / (half * half);
 }
 
+/* Где сигнал на самом деле ходит и где он пересекает уровень на подъёме.
+   По идеальной пиле это считать нельзя: полоса срезает размах, и зона захвата
+   выходит заметно шире самой волны — ловится пустое место над и под ней.
+   Профиль зависит только от симметрии и полосы, поэтому держим последний. */
+const SCAN = 256;
+let waveShape = null;
+
+function scanWave(symmetry, band) {
+  if (waveShape && waveShape.symmetry === symmetry && waveShape.band === band) return waveShape;
+  const level = new Float64Array(SCAN + 1);
+  let low = Infinity;
+  let high = -Infinity;
+  for (let i = 0; i <= SCAN; i += 1) {
+    const v = sawLevel(i / SCAN, symmetry, band);
+    level[i] = v;
+    if (v < low) low = v;
+    if (v > high) high = v;
+  }
+  waveShape = { symmetry, band, level, low, high };
+  return waveShape;
+}
+
+/* Фаза, на которой подъём приходит к уровню. Развёртка стартует отсюда,
+   поэтому картинка и стоит на месте. */
+function riseAt(shape, target) {
+  for (let i = 0; i < SCAN; i += 1) {
+    const a = shape.level[i];
+    const b = shape.level[i + 1];
+    if (a <= target && b > target) return (i + (target - a) / (b - a)) / SCAN;
+  }
+  return 0;
+}
+
 function waveY(level, amp, offset) {
   return 0.5 - (level - 0.5) * amp + offset;
 }
@@ -311,8 +344,11 @@ MODES.trig = {
 
     const amp = num('amp');
     if (pointer.seen) modeState.level = clamp(pointer.y, 0, 1);
+    const shape = scanWave(num('symmetry'), num('band'));
     const signal = levelToSignal(modeState.level, amp, modeState.offset);
-    const inside = signal > 0.02 && signal < 0.98;
+    // Полоски у самого края размаха не считаем: там подъём слишком полог.
+    const edge = (shape.high - shape.low) * 0.03;
+    const inside = signal > shape.low + edge && signal < shape.high - edge;
     modeState.inside = inside;
 
     // Развёртки лежат в пикселях кадра: сменился размер — тянуть их нечем.
@@ -322,14 +358,14 @@ MODES.trig = {
     }
 
     // У края сигнал проводит меньше времени, и шум легче сбивает захват.
-    const margin = Math.min(signal, 1 - signal);
+    const swing = Math.max(shape.high - shape.low, 0.001);
+    const margin = Math.min(signal - shape.low, shape.high - signal) / swing;
     const shake = num('noise') * (inside ? clamp(0.09 / Math.max(margin, 0.02), 0, 1) : 1);
 
-    /* Захват держит фазу: подъём занимает долю периода, равную симметрии,
-       и приходит к уровню всегда в один и тот же миг. Без захвата фаза
-       свободная, и развёртка каждый раз встаёт на новое место. */
+    /* Захват держит фазу: подъём приходит к уровню всегда в один и тот же миг.
+       Без захвата фаза свободная, и развёртка встаёт на новое место. */
     const phase = inside
-      ? signal * clamp(num('symmetry'), 0.001, 1) + shake * 0.09 * tremble(modeState.time * 9, 1.3)
+      ? riseAt(shape, signal) + shake * 0.09 * tremble(modeState.time * 9, 1.3)
       : modeState.free;
 
     modeState.sweeps.push(sawPoints({
