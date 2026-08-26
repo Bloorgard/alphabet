@@ -117,18 +117,36 @@ function sawRaw(phase, symmetry) {
   return u < s ? u / s : 1 - (u - s) / (1 - s);
 }
 
-// Треугольное окно: угол съедается плавно, а не срезается фаской.
-const BAND_WINDOW = [1, 2, 3, 4, 5, 4, 3, 2, 1];
-const BAND_SUM = BAND_WINDOW.reduce((a, b) => a + b, 0);
+/* Скругление фронтов — это ограничение полосы, то есть свёртка с треугольным
+   окном. Считать её по отсчётам нельзя: на изгибе выходит столько граней,
+   сколько отсчётов, а на отвесном спаде — столько ступеней, потому что
+   усреднение разрыва по конечному числу точек и есть лесенка. Пила
+   кусочно-линейна, поэтому свёртка берётся точно.
+
+   Треугольное окно — это два прямоугольных подряд, значит нужна вторая
+   первообразная: тогда свёртка — её вторая разность с шагом в полуширину
+   окна. Ниже x²/4 — вклад среднего уровня, n·mean — накопленное за целые
+   периоды, остальное — кусок внутри текущего периода. */
+function sawArea2(x, symmetry) {
+  const s = clamp(symmetry, 0, 1);
+  const n = Math.floor(x);
+  const u = x - n;
+  let area;
+  if (u < s) {
+    area = (u * u * u) / (6 * Math.max(s, 1e-9)) - (u * u) / 4;
+  } else {
+    const w = u - s;
+    area = -(s * s) / 12 + (w * w) / 4 - (w * w * w) / (6 * Math.max(1 - s, 1e-9));
+  }
+  return (x * x) / 4 + n * ((1 - 2 * s) / 12) + area;
+}
 
 function sawLevel(phase, symmetry, band) {
-  if (band <= 0.001) return sawRaw(phase, symmetry);
-  let sum = 0;
-  for (let k = 0; k < BAND_WINDOW.length; k += 1) {
-    const at = phase + band * (k / (BAND_WINDOW.length - 1) - 0.5);
-    sum += BAND_WINDOW[k] * sawRaw(at, symmetry);
-  }
-  return sum / BAND_SUM;
+  const half = band / 2;
+  if (half <= 0.0005) return sawRaw(phase, symmetry);
+  return (sawArea2(phase + half, symmetry)
+    - 2 * sawArea2(phase, symmetry)
+    + sawArea2(phase - half, symmetry)) / (half * half);
 }
 
 function waveY(level, amp, offset) {
