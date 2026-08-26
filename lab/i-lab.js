@@ -96,6 +96,16 @@ function tremble(u, phase) {
     + Math.sin(u * 5.1 + phase * 0.6) * 0.1;
 }
 
+/* Шум на экране. Частоты заданы прямо в периодах на кадр и держатся ниже
+   того, что развёртка успевает сосчитать: самая быстрая берётся десятком
+   точек. Разгонишь выше — недосчёт свернёт её в ровную ступеньку, и линия
+   будет не рябить, а ломаться. */
+function fizz(u, seed) {
+  return Math.sin(u * 91 + seed * 7.1) * 0.62
+    + Math.sin(u * 57 - seed * 4.3) * 0.28
+    + Math.sin(u * 23 + seed * 2.7) * 0.1;
+}
+
 /* ---------- пила ---------- */
 
 /* Уровень в доле размаха, 0…1. Симметрия — доля периода под подъёмом. */
@@ -131,11 +141,39 @@ function sawPoints(o) {
   for (let i = 0; i <= SAW_STEPS; i += 1) {
     const u = i / SAW_STEPS;
     let level = sawLevel(o.phase + u * o.periods, o.symmetry, o.band);
-    // Частота шума заведомо выше развёртки: он должен читаться зерном, а не волной.
-    if (o.noise) level += o.noise * 0.035 * tremble(u * 190, o.seed);
+    if (o.noise) level += o.noise * 0.03 * fizz(u, o.seed);
     points.push([u * S, waveY(level, o.amp, o.offset) * S]);
   }
   return points;
+}
+
+/* Луч бежит по уже написанному следу: сам след горит ровно, а под лучом
+   вспыхивает и гаснет за ним короткий хвост. */
+const RUN_RATE = 0.42;       // кадров развёртки в секунду
+const RUN_TAIL = 0.13;       // какую долю следа занимает хвост
+
+function drawRunner(points, width, head) {
+  const last = points.length - 1;
+  const span = Math.max(1, RUN_TAIL * last);
+  const to = Math.round(clamp(head, 0, 1) * last);
+  for (let i = Math.max(0, Math.floor(to - span)); i < to; i += CHUNK) {
+    const end = Math.min(to, i + CHUNK);
+    stroke(points, i, end, 1 - (to - end) / span, width);
+  }
+  ctx.beginPath();
+  ctx.arc(points[to][0], points[to][1], width * 1.1, 0, TAU);
+  ctx.fillStyle = ink(1);
+  ctx.fill();
+}
+
+/* След целиком, а поверх — бегунок, если он включён. */
+function drawSweep(points, width, running, head) {
+  if (!running) {
+    drawTrace(points, width);
+    return;
+  }
+  stroke(points, 0, points.length - 1, 0.62, width);
+  drawRunner(points, width, head);
 }
 
 /* Уровень на экране обратно в доли размаха: где по сигналу стоит эта высота. */
@@ -156,16 +194,19 @@ MODES.saw = {
     { type: 'range', key: 'band', label: 'полоса', min: 0, max: 0.45, step: 0.005, value: 0 },
     { type: 'range', key: 'noise', label: 'шум', min: 0, max: 1, step: 0.02, value: 0.06 },
     { type: 'range', key: 'offset', label: 'смещение', min: -0.3, max: 0.3, step: 0.01, value: 0 },
+    { type: 'toggle', key: 'runner', label: 'бегунок', value: true },
   ],
 
   setup() {
     modeState.time = 0;
+    modeState.run = 0;
     modeState.periods = 2.4;
     modeState.amp = 0.62;
   },
 
   step() {
     modeState.time += STEP;
+    modeState.run = (modeState.run + STEP * RUN_RATE) % 1;
   },
 
   draw() {
@@ -178,7 +219,7 @@ MODES.saw = {
     }
     const { periods, amp } = modeState;
 
-    drawTrace(sawPoints({
+    drawSweep(sawPoints({
       periods,
       amp,
       symmetry: num('symmetry'),
@@ -191,7 +232,7 @@ MODES.saw = {
          центра в обе стороны, а не отрастает вправо. */
       phase: 0.5 - periods / 2,
       seed: modeState.time * 3,
-    }), S * 0.005);
+    }), S * 0.005, on('runner'), modeState.run);
 
     drawStatus(`пила ${(1 / periods).toFixed(2)} × ${amp.toFixed(2)}`);
   },
@@ -213,13 +254,15 @@ MODES.trig = {
     { type: 'range', key: 'periods', label: 'развёртка', min: 1, max: 6, step: 0.1, value: 2.4 },
     { type: 'range', key: 'amp', label: 'амплитуда', min: 0.06, max: 0.92, step: 0.01, value: 0.55 },
     { type: 'range', key: 'band', label: 'полоса', min: 0, max: 0.45, step: 0.005, value: 0 },
-    { type: 'range', key: 'noise', label: 'шум', min: 0, max: 1, step: 0.02, value: 0.35 },
+    { type: 'range', key: 'noise', label: 'шум', min: 0, max: 1, step: 0.02, value: 0.16 },
     { type: 'range', key: 'rate', label: 'частота сигнала', min: 0, max: 3, step: 0.05, value: 0.8 },
     { type: 'toggle', key: 'drift', label: 'дрейф', value: true },
+    { type: 'toggle', key: 'runner', label: 'бегунок', value: true },
   ],
 
   setup() {
     modeState.time = 0;
+    modeState.run = 0;
     modeState.free = 0;
     modeState.offset = 0;
     modeState.level = 0.5;
@@ -228,6 +271,7 @@ MODES.trig = {
   step() {
     modeState.time += STEP;
     modeState.free += STEP * num('rate');
+    modeState.run = (modeState.run + STEP * RUN_RATE) % 1;
     // Прибор греется и уводит ноль: уровень приходится подправлять.
     if (on('drift')) modeState.offset = Math.sin(modeState.time * 0.21) * 0.16;
     else modeState.offset = 0;
@@ -262,7 +306,8 @@ MODES.trig = {
          и приходит к уровню всегда в один и тот же миг. */
       const lock = signal * clamp(num('symmetry'), 0.001, 1);
       const jitter = shake * 0.09 * tremble(modeState.time * 9, 1.3);
-      drawTrace(sawPoints({ ...base, phase: lock + jitter, seed: modeState.time * 3 }), S * 0.005);
+      const points = sawPoints({ ...base, phase: lock + jitter, seed: modeState.time * 3 });
+      drawSweep(points, S * 0.005, on('runner'), modeState.run);
     } else {
       // Срыв: каждый кадр приходит со своей фазой, и они ложатся друг на друга.
       for (let g = 0; g < GHOSTS; g += 1) {
