@@ -41,6 +41,7 @@ const PARAMS = {
   noise: 0,
   rate: 1.25,
   glow: 0.6,
+  follow: true,
   drift: false,
   runner: true,
 };
@@ -56,6 +57,7 @@ const CONTROLS = [
 ];
 
 const SWITCHES = [
+  { key: 'follow', label: 'уровень за курсором' },
   { key: 'drift', label: 'дрейф' },
   { key: 'runner', label: 'бегунок' },
 ];
@@ -161,9 +163,10 @@ export function mountI(workspace) {
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const params = { ...PARAMS };
-  const state = { time: 0, run: 0, free: 0, offset: 0, level: 0.5, sweeps: [], side: 0, inside: true, holding: false };
+  const state = { time: 0, run: 0, free: 0, offset: 0, level: 0.5, sweeps: [], side: 0, inside: true, holding: false, armed: false, anchor: null };
 
-  canvas.style.cursor = 'grab';
+  const aimCursor = () => { canvas.style.cursor = params.follow ? 'ns-resize' : 'grab'; };
+  aimCursor();
 
   let S = 1;
   let steps = 600;
@@ -356,18 +359,36 @@ export function mountI(workspace) {
     frameId = requestAnimationFrame(frame);
   }
 
-  /* Уровень идёт за указателем только пока его тянут. Если пустить его за
-     наведением, буква встретит срывом всякий раз, когда курсор при открытии
-     окажется выше размаха, — а первый кадр должен быть собранным. */
+  /* По умолчанию уровень идёт за указателем, но не раньше, чем тот сам
+     двинется по сцене. Окно открывается прямо под курсором, и первое движение
+     приходит без всякого участия человека: если пустить уровень сразу, буква
+     встретит срывом всякий раз, когда курсор окажется выше размаха, — а первый
+     кадр должен быть собранным. Поэтому первую точку только запоминаем и ждём
+     заметного сдвига. Нажатие взводит сразу: это уже намерение.
+
+     Отвязали в панели — уровень становится ручкой, которую тянут. */
+  const ARM_SHIFT = 0.02;   // доля кадра, после которой считаем, что указатель повели
+
   function track(event) {
-    if (!state.holding) return;
     const bounds = canvas.getBoundingClientRect();
-    state.level = clamp((event.clientY - bounds.top) / bounds.height, 0, 1);
+    const y = clamp((event.clientY - bounds.top) / bounds.height, 0, 1);
+    if (state.holding) {
+      state.level = y;
+      return;
+    }
+    if (!params.follow) return;
+    if (!state.armed) {
+      if (state.anchor === null) { state.anchor = y; return; }
+      if (Math.abs(y - state.anchor) < ARM_SHIFT) return;
+      state.armed = true;
+    }
+    state.level = y;
   }
 
   // Палец, уехавший за край кадра, должен продолжать вести уровень.
   function onDown(event) {
     state.holding = true;
+    state.armed = true;
     track(event);
     try { canvas.setPointerCapture(event.pointerId); } catch (error) { /* Safari может отказать */ }
   }
@@ -379,7 +400,7 @@ export function mountI(workspace) {
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = 'тяни за уровень запуска · держишь его в размахе — буква проступает';
+  hint.textContent = 'уровень запуска идёт за указателем · держишь его в размахе — буква проступает';
 
   const panel = document.createElement('div');
   panel.className = 'sketch-panel';
@@ -409,6 +430,7 @@ export function mountI(workspace) {
     button.addEventListener('click', () => {
       params[item.key] = !params[item.key];
       button.setAttribute('aria-pressed', String(params[item.key]));
+      if (item.key === 'follow') aimCursor();
     });
     panel.append(button);
   }

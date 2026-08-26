@@ -311,7 +311,7 @@ const SWEEP_SUM = 2.2;   // суммарная яркость стопки: бо
 
 MODES.trig = {
   label: 'синхронизация',
-  note: 'Указателем ведёшь уровень запуска. Держишь захват — развёртки ложатся одна в одну, и буква проступает на люминофоре. Вышел за размах — каждая приходит на новое место, складывать нечего, и остаётся тусклый смаз. Ближе к краю размаха шум сильнее сбивает захват, и буква не доходит до резкости.',
+  note: 'Уровень запуска идёт за указателем, а отвязав его — тянется мышью. Держишь захват — развёртки ложатся одна в одну, и буква проступает на люминофоре. Вышел за размах — каждая приходит на новое место, складывать нечего, и остаётся тусклый смаз. Ближе к краю размаха шум сильнее сбивает захват, и буква не доходит до резкости.',
   cursor: 'ns-resize',
   tools: [
     { type: 'range', key: 'symmetry', label: 'симметрия', min: 0, max: 1, step: 0.01, value: 1 },
@@ -321,6 +321,7 @@ MODES.trig = {
     { type: 'range', key: 'noise', label: 'шум', min: 0, max: 1, step: 0.02, value: 0.16 },
     { type: 'range', key: 'rate', label: 'частота сигнала', min: 0, max: 3, step: 0.05, value: 0.8 },
     { type: 'range', key: 'glow', label: 'послесвечение', min: 0, max: 1, step: 0.02, value: 0.6 },
+    { type: 'toggle', key: 'follow', label: 'уровень за курсором', value: true },
     { type: 'toggle', key: 'drift', label: 'дрейф', value: false },
     { type: 'toggle', key: 'runner', label: 'бегунок', value: true },
   ],
@@ -343,7 +344,7 @@ MODES.trig = {
     modeState.offset = on('drift') ? Math.sin(modeState.time * 0.21) * 0.16 : 0;
 
     const amp = num('amp');
-    if (pointer.seen) modeState.level = clamp(pointer.y, 0, 1);
+    if (pointer.seen && (on('follow') || pointer.down)) modeState.level = clamp(pointer.y, 0, 1);
     const shape = scanWave(num('symmetry'), num('band'));
     const signal = levelToSignal(modeState.level, amp, modeState.offset);
     // Полоски у самого края размаха не считаем: там подъём слишком полог.
