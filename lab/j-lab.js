@@ -5,7 +5,7 @@
    не дали дотянуть. Поэтому все механики здесь про одно — скобку надо
    заслужить и удержать, сама по себе она не стоит.
 
-   Четыре подхода:
+   Пять подходов:
 
      краткость   длительность нажатия и есть буква: коротко — скобка встаёт,
                  передержал — осталась И
@@ -14,8 +14,11 @@
      росчерк     живёт только штрих, проведённый быстрее порога
      перо        кончик пера висит на пружине за курсором: скобка — это
                  не форма, а перелёт
+     шнур        скоба жёсткая и держит, а краткость на ней висит верёвкой:
+                 дёргается, натягивается и срывается с узла
 
-   Красный тут один и обозначает событие: краткости не вышло. */
+   Красный обозначает событие: краткости не вышло. В «шнуре» он держит
+   сам шнур — это спорно и решается, когда механика поедет в букву. */
 
 const TAU = Math.PI * 2;
 
@@ -438,6 +441,219 @@ MODES.pen = {
     dot(modeState.tip[0], modeState.tip[1], ink(0.8), 0.006);
 
     drawStatus(modeState.live ? 'пишет' : 'веди и нажми');
+  },
+};
+
+/* ---------- шнур ---------- */
+
+/* Скоба жёсткая: две стойки уходят за кадр, перекладина внизу, углы скруглены.
+   Краткость на ней не нарисована, а висит — верёвка на двух узлах. Верёвка
+   считается по Верле: точки помнят прошлое положение, а длина восстанавливается
+   несколькими проходами по звеньям. Точнее решать нечего: рывок руки всё равно
+   быстрее любого шага, и держит сцену как раз мягкость связей.
+
+   Узел рвётся не от силы, а от натяжения: если звено у самого узла растянуто
+   сверх запаса, узел отпускает. Тянуть можно сколько угодно, пока верёвка
+   провисает, — рвётся ровно тогда, когда она встала в струну. */
+
+const BRACE = { x1: 0.315, x2: 0.685, bar: 0.215, r: 0.024 };
+const CORD_N = 46;
+const RELAX = 9;
+const HOOK = 0.045;          // с какого расстояния свободный конец цепляется
+const FLOOR = 0.93;          // пол: сдёрнутой верёвке есть куда лечь
+
+function pegs() {
+  return [[BRACE.x1, BRACE.bar], [BRACE.x2, BRACE.bar]];
+}
+
+/* Верёвка рождается уже провисшей дугой: иначе первый кадр даёт рывок. */
+function makeCord(length) {
+  const span = BRACE.x2 - BRACE.x1;
+  const total = span * length;
+  const sag = (total - span) * 0.62;
+  const points = [];
+  for (let i = 0; i < CORD_N; i += 1) {
+    const u = i / (CORD_N - 1);
+    const x = BRACE.x1 + u * span;
+    const y = BRACE.bar + Math.sin(Math.PI * u) * sag;
+    points.push({ x, y, px: x, py: y });
+  }
+  return { points, rest: total / (CORD_N - 1), knot: [0, 1], hold: -1 };
+}
+
+/* Узлы: индекс конца → номер угла, на котором он сидит. −1 значит свободен. */
+function knotted(end) {
+  return modeState.cord.knot[end] >= 0;
+}
+
+MODES.cord = {
+  label: 'шнур',
+  note: 'Скоба держит, краткость висит. Хватай верёвку и дёргай: пока она провисает, тянуть можно сколько угодно. Встала в струну — узел отпускает, и конец падает. Свободный конец подтащи к углу скобы, и он зацепится обратно.',
+  cursor: 'grab',
+  tools: [
+    { type: 'range', key: 'length', label: 'длина', min: 1.05, max: 2.6, step: 0.05, value: 1.9 },
+    { type: 'range', key: 'gravity', label: 'тяжесть', min: 1, max: 14, step: 0.5, value: 7 },
+    { type: 'range', key: 'drag', label: 'вязкость', min: 0, max: 0.2, step: 0.005, value: 0.02 },
+    { type: 'range', key: 'hold', label: 'прочность узла', min: 0.05, max: 1, step: 0.05, value: 0.35 },
+    { type: 'toggle', key: 'tight', label: 'узел не сдёрнуть', value: false },
+    { type: 'toggle', key: 'letter', label: 'буква', value: false },
+    { type: 'button', label: 'повесить заново', action: () => { modeState.cord = makeCord(num('length')); } },
+  ],
+
+  setup() {
+    modeState.cord = makeCord(num('length'));
+    modeState.torn = 0;
+  },
+
+  onTool(key) {
+    if (key === 'length') modeState.cord = makeCord(num('length'));
+  },
+
+  onDown() {
+    const cord = modeState.cord;
+    let best = -1;
+    let near = HOOK * 1.6;
+    for (let i = 0; i < cord.points.length; i += 1) {
+      const d = Math.hypot(cord.points[i].x - pointer.x, cord.points[i].y - pointer.y);
+      if (d < near) { near = d; best = i; }
+    }
+    cord.hold = best;
+  },
+
+  onUp() {
+    const cord = modeState.cord;
+    const end = cord.hold === 0 ? 0 : cord.hold === CORD_N - 1 ? 1 : -1;
+
+    // Свободный конец, отпущенный у пустого угла, цепляется обратно.
+    if (end >= 0 && !knotted(end)) {
+      const point = cord.points[cord.hold];
+      const taken = cord.knot[1 - end];
+      pegs().forEach((peg, index) => {
+        if (index === taken) return;
+        if (Math.hypot(point.x - peg[0], point.y - peg[1]) < HOOK) cord.knot[end] = index;
+      });
+    }
+    cord.hold = -1;
+  },
+
+  step() {
+    const cord = modeState.cord;
+    const damp = 1 - num('drag');
+    const gravity = num('gravity') * STEP * STEP;
+
+    for (let i = 0; i < cord.points.length; i += 1) {
+      const p = cord.points[i];
+      const vx = (p.x - p.px) * damp;
+      const vy = (p.y - p.py) * damp;
+      p.px = p.x;
+      p.py = p.y;
+      p.x += vx;
+      p.y += vy + gravity;
+      // Пол: сдёрнутая верёвка не улетает из кадра, а ложится и замирает.
+      if (p.y > FLOOR) {
+        p.y = FLOOR;
+        p.px = p.x - (p.x - p.px) * 0.4;
+      }
+    }
+
+    const spots = pegs();
+    for (let k = 0; k < RELAX; k += 1) {
+      for (let i = 1; i < cord.points.length; i += 1) {
+        const a = cord.points[i - 1];
+        const b = cord.points[i];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d = Math.hypot(dx, dy) || 1e-6;
+        const shift = ((d - cord.rest) / d) * 0.5;
+        const ox = dx * shift;
+        const oy = dy * shift;
+        a.x += ox; a.y += oy;
+        b.x -= ox; b.y -= oy;
+      }
+
+      if (knotted(0)) {
+        const peg = spots[cord.knot[0]];
+        cord.points[0].x = peg[0];
+        cord.points[0].y = peg[1];
+      }
+      if (knotted(1)) {
+        const peg = spots[cord.knot[1]];
+        cord.points[CORD_N - 1].x = peg[0];
+        cord.points[CORD_N - 1].y = peg[1];
+      }
+      if (cord.hold >= 0) {
+        cord.points[cord.hold].x = pointer.x;
+        cord.points[cord.hold].y = pointer.y;
+      }
+    }
+
+    if (modeState.torn > 0) modeState.torn = Math.max(0, modeState.torn - STEP);
+
+    // Натяжение считается по руке, а не по звеньям: узел сдаёт, когда рука
+    // ушла дальше, чем верёвки между ней и узлом, — то есть верёвка встала
+    // в струну и её тянут ещё. Мерить растяжение звена нельзя: верхнее звено
+    // и без рывка растянуто весом всей верёвки, и узел рвался бы от касания.
+    // Сдаёт всегда один, самый нагруженный: он отпустил — второму держать нечего.
+    if (cord.hold >= 0 && !on('tight')) {
+      const hand = cord.points[cord.hold];
+      let worst = -1;
+      let strain = 1 + num('hold');
+      for (const end of [0, 1]) {
+        if (!knotted(end)) continue;
+        const peg = spots[cord.knot[end]];
+        const count = Math.max(1, end === 0 ? cord.hold : CORD_N - 1 - cord.hold);
+        const ratio = Math.hypot(hand.x - peg[0], hand.y - peg[1]) / (cord.rest * count);
+        if (ratio > strain) { strain = ratio; worst = end; }
+      }
+      if (worst >= 0) {
+        cord.knot[worst] = -1;
+        modeState.torn = 1;
+      }
+    }
+  },
+
+  draw() {
+    if (on('letter')) letterI(0.5, 0.09);
+
+    // Скоба: стойки уходят за кадр, углы скруглены — жёсткая деталь, не штрих.
+    ctx.beginPath();
+    ctx.moveTo(BRACE.x1 * S, -0.02 * S);
+    ctx.lineTo(BRACE.x1 * S, (BRACE.bar - BRACE.r) * S);
+    ctx.quadraticCurveTo(BRACE.x1 * S, BRACE.bar * S, (BRACE.x1 + BRACE.r) * S, BRACE.bar * S);
+    ctx.lineTo((BRACE.x2 - BRACE.r) * S, BRACE.bar * S);
+    ctx.quadraticCurveTo(BRACE.x2 * S, BRACE.bar * S, BRACE.x2 * S, (BRACE.bar - BRACE.r) * S);
+    ctx.lineTo(BRACE.x2 * S, -0.02 * S);
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = S * 0.017;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'butt';
+    ctx.stroke();
+
+    // Пустой угол виден кружком: туда конец и вешают обратно.
+    const cord = modeState.cord;
+    pegs().forEach((peg, index) => {
+      if (cord.knot.includes(index)) return;
+      ctx.beginPath();
+      ctx.arc(peg[0] * S, peg[1] * S, S * 0.012, 0, TAU);
+      ctx.strokeStyle = ink(0.25);
+      ctx.lineWidth = S * 0.0016;
+      ctx.stroke();
+    });
+
+    ctx.beginPath();
+    ctx.moveTo(cord.points[0].x * S, cord.points[0].y * S);
+    for (const p of cord.points) ctx.lineTo(p.x * S, p.y * S);
+    ctx.strokeStyle = RED;
+    ctx.lineWidth = S * 0.016;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    const hanging = Number(knotted(0)) + Number(knotted(1));
+    if (modeState.torn > 0) drawStatus('сорвался с узла', true);
+    else if (hanging === 2) drawStatus(on('tight') ? 'узел держит' : 'висит');
+    else if (hanging === 1) drawStatus('на одном узле');
+    else drawStatus('лежит');
   },
 };
 
