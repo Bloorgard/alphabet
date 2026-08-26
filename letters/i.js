@@ -5,9 +5,19 @@
 
    Сцена держится на второй ручке — уровне запуска. Развёртка ждёт, пока
    сигнал пересечёт его на подъёме, и только тогда срывается с места: потому
-   картинка и стоит. Уровень вне размаха ловить нечего, кадры приходят со
-   своей фазой и ложатся друг на друга. Прибор при этом греется и уводит
-   ноль, так что букву надо не поймать однажды, а держать.
+   картинка и стоит.
+
+   Награда за захват — люминофор. Экран держит последние развёртки, и каждая
+   бледнее предыдущей. Держишь захват — они ложатся одна в одну, яркости
+   складываются, и буква проступает. Сорвался — развёртка идёт вхолостую,
+   каждая приходит на новое место, складывать нечего, и остаётся тусклый смаз.
+   Уровень запуска при этом остаётся ручкой чтения: он ничего не делает с
+   сигналом, только с тем, как экран его показывает.
+
+   Гасить накопленный слой через destination-out нельзя: множительное затухание
+   упирается в округление восьмибитной альфы и встаёт на осадке — при шаге 0.05
+   она замирает на 9/255 и не уходит уже никогда. Поэтому развёртки хранятся
+   поштучно: тогда затухание точное и догорает до нуля.
 
    Красный тут один и обозначает событие: захват потерян. */
 
@@ -18,9 +28,10 @@ const MARK = [241, 237, 229];
 const DIV = 10;              // делений на экране в каждую сторону
 const CHUNK = 3;             // сегментов в одном мазке гаснущего хвоста
 const WIDE = 2;              // во сколько раз бледный ореол шире ядра луча
-const GHOSTS = 5;            // сколько разъехавшихся кадров показывает срыв
 const RUN_RATE = 0.42;       // кадров развёртки в секунду у бегунка
 const RUN_TAIL = 0.13;       // какую долю следа занимает его хвост
+const SWEEP_KEEP = 30;       // сколько развёрток помнит люминофор
+const SWEEP_SUM = 2.2;       // суммарная яркость стопки: больше единицы, чтобы захват насыщал
 
 const PARAMS = {
   symmetry: 1,
@@ -29,6 +40,7 @@ const PARAMS = {
   band: 0.45,
   noise: 0,
   rate: 1.25,
+  glow: 0.6,
   drift: false,
   runner: true,
 };
@@ -40,6 +52,7 @@ const CONTROLS = [
   { key: 'band', label: 'полоса', min: 0, max: 0.45, step: 0.005 },
   { key: 'noise', label: 'шум', min: 0, max: 1, step: 0.02 },
   { key: 'rate', label: 'частота сигнала', min: 0, max: 3, step: 0.05 },
+  { key: 'glow', label: 'послесвечение', min: 0, max: 1, step: 0.02 },
 ];
 
 const SWITCHES = [
@@ -49,6 +62,10 @@ const SWITCHES = [
 
 function clamp(value, min, max) {
   return value < min ? min : value > max ? max : value;
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
 }
 
 /* Уровень в доле размаха, 0…1. Симметрия — доля периода под подъёмом:
@@ -111,9 +128,9 @@ export function mountI(workspace) {
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const params = { ...PARAMS };
-  const state = { time: 0, run: 0, free: 0, offset: 0, level: 0.5 };
+  const state = { time: 0, run: 0, free: 0, offset: 0, level: 0.5, sweeps: [], side: 0, inside: true, holding: false };
 
-  canvas.style.cursor = 'ns-resize';
+  canvas.style.cursor = 'grab';
 
   let S = 1;
   let steps = 600;
@@ -212,15 +229,6 @@ export function mountI(workspace) {
     ctx.fill();
   }
 
-  function drawSweep(points, width) {
-    if (!params.runner) {
-      stroke(points, 0, points.length - 1, 1, width);
-      return;
-    }
-    stroke(points, 0, points.length - 1, 0.62, width);
-    drawRunner(points, width);
-  }
-
   /* Подпись встаёт в верхнюю строку между заголовком слева и крестиком справа,
      поэтому берёт их же кегль: заголовок и крестик заданы в пикселях, и доля
      стороны выбила бы её из строки. Базовая линия — на 24 px, как у них. */
@@ -240,44 +248,61 @@ export function mountI(workspace) {
     state.run = (state.run + STEP * RUN_RATE) % 1;
     // Прибор греется и уводит ноль: уровень приходится подправлять.
     state.offset = params.drift ? Math.sin(state.time * 0.21) * 0.16 : 0;
+
+    // Уровень задан в кадре, а сигнал живёт в долях размаха: переводим обратно.
+    const signal = 0.5 + (0.5 + state.offset - state.level) / Math.max(params.amp, 0.001);
+    state.inside = signal > 0.02 && signal < 0.98;
+
+    // Развёртки лежат в пикселях кадра: сменился размер — тянуть их нечем.
+    if (state.side !== S) {
+      state.side = S;
+      state.sweeps = [];
+    }
+
+    /* Захват держит фазу: подъём занимает долю периода, равную симметрии, и
+       приходит к уровню всегда в один и тот же миг. У края размаха сигнал
+       проводит меньше времени, и шум легче сбивает точку пересечения. Без
+       захвата фаза свободная, и развёртка каждый раз встаёт на новое место. */
+    const margin = Math.min(signal, 1 - signal);
+    const shake = params.noise * clamp(0.09 / Math.max(margin, 0.02), 0, 1);
+    const phase = state.inside
+      ? signal * clamp(params.symmetry, 0.001, 1) + shake * 0.09 * tremble(state.time * 9)
+      : state.free;
+
+    state.sweeps.push(sawPoints(phase, state.time * 3));
+    while (state.sweeps.length > SWEEP_KEEP) state.sweeps.shift();
   }
 
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawScreen();
 
-    // Уровень задан в кадре, а сигнал живёт в долях размаха: переводим обратно.
-    const signal = 0.5 + (0.5 + state.offset - state.level) / Math.max(params.amp, 0.001);
-    const inside = signal > 0.02 && signal < 0.98;
     const width = S * 0.005;
+    const life = lerp(6, SWEEP_KEEP, params.glow);
+    const weight = SWEEP_SUM / life;
 
-    if (inside) {
-      /* Захват держит фазу: подъём занимает долю периода, равную симметрии,
-         и приходит к уровню всегда в один и тот же миг. У края размаха сигнал
-         проводит меньше времени, и шум легче сбивает точку пересечения. */
-      const margin = Math.min(signal, 1 - signal);
-      const shake = params.noise * clamp(0.09 / Math.max(margin, 0.02), 0, 1);
-      const lock = signal * clamp(params.symmetry, 0.001, 1);
-      const jitter = shake * 0.09 * tremble(state.time * 9);
-      drawSweep(sawPoints(lock + jitter, state.time * 3), width);
-    } else {
-      for (let g = 0; g < GHOSTS; g += 1) {
-        stroke(sawPoints(state.free + g * 0.37, state.time * 3 + g), 0, steps, 0.34, S * 0.004);
-      }
+    // Свежая развёртка ярче всех, дальние догорают ровно до нуля.
+    for (let i = 0; i < state.sweeps.length; i += 1) {
+      const age = state.sweeps.length - 1 - i;
+      if (age >= life) continue;
+      stroke(state.sweeps[i], 0, steps, weight * (1 - age / life), width);
     }
+
+    // Бегунок идёт поверх и не копится: он не след, а место луча прямо сейчас.
+    if (params.runner && state.sweeps.length) drawRunner(state.sweeps.at(-1), width);
 
     ctx.save();
     ctx.setLineDash([S * 0.012, S * 0.012]);
-    line(0, state.level, 1, state.level, inside ? ink(0.4) : RED, 0.0014);
+    line(0, state.level, 1, state.level, state.inside ? ink(0.4) : RED, 0.0014);
     ctx.restore();
     ctx.beginPath();
     ctx.moveTo(0, (state.level - 0.014) * S);
     ctx.lineTo(0.022 * S, state.level * S);
     ctx.lineTo(0, (state.level + 0.014) * S);
-    ctx.fillStyle = inside ? ink(0.55) : RED;
+    ctx.fillStyle = state.inside ? ink(0.55) : RED;
     ctx.fill();
 
-    status(inside ? 'захват' : 'срыв', !inside);
+    status(state.inside ? 'захват' : 'срыв', !state.inside);
   }
 
   function frame(now) {
@@ -291,21 +316,30 @@ export function mountI(workspace) {
     frameId = requestAnimationFrame(frame);
   }
 
+  /* Уровень идёт за указателем только пока его тянут. Если пустить его за
+     наведением, буква встретит срывом всякий раз, когда курсор при открытии
+     окажется выше размаха, — а первый кадр должен быть собранным. */
   function track(event) {
+    if (!state.holding) return;
     const bounds = canvas.getBoundingClientRect();
     state.level = clamp((event.clientY - bounds.top) / bounds.height, 0, 1);
   }
 
   // Палец, уехавший за край кадра, должен продолжать вести уровень.
   function onDown(event) {
+    state.holding = true;
     track(event);
     try { canvas.setPointerCapture(event.pointerId); } catch (error) { /* Safari может отказать */ }
+  }
+
+  function onUp() {
+    state.holding = false;
   }
 
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = 'веди указателем — это уровень запуска · попал в размах, буква стоит';
+  hint.textContent = 'тяни за уровень запуска · держишь его в размахе — буква проступает';
 
   const panel = document.createElement('div');
   panel.className = 'sketch-panel';
@@ -362,6 +396,7 @@ export function mountI(workspace) {
   resizeObserver.observe(workspace);
   canvas.addEventListener('pointerdown', onDown);
   canvas.addEventListener('pointermove', track);
+  window.addEventListener('pointerup', onUp);
   document.addEventListener('keydown', onKeyDown);
 
   resize();
@@ -372,6 +407,7 @@ export function mountI(workspace) {
     resizeObserver.disconnect();
     canvas.removeEventListener('pointerdown', onDown);
     canvas.removeEventListener('pointermove', track);
+    window.removeEventListener('pointerup', onUp);
     document.removeEventListener('keydown', onKeyDown);
     hint.remove();
     panel.remove();

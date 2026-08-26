@@ -259,13 +259,26 @@ MODES.saw = {
 /* ---------- синхронизация ---------- */
 
 /* Развёртка ждёт, пока сигнал пересечёт уровень на подъёме, и только тогда
-   срывается с места — потому картинка и стоит. Уровень вне размаха ловить
-   нечего: развёртка идёт вхолостую, и кадры разъезжаются друг по другу. */
-const GHOSTS = 5;
+   срывается с места — потому картинка и стоит.
+
+   Награда за захват — сам люминофор. Экран держит последние развёртки, и
+   каждая бледнее предыдущей. Держишь захват — они ложатся одна в одну, яркости
+   складываются, и буква проступает. Сорвался — развёртка идёт вхолостую, каждая
+   приходит на новое место, складывать нечего, и остаётся тусклый смаз. Уровень
+   запуска при этом остаётся ручкой чтения: он ничего не делает с сигналом,
+   только с тем, как экран его показывает.
+
+   Гасить накопленный слой через destination-out нельзя: множительное затухание
+   упирается в округление восьмибитной альфы и встаёт на осадке — при шаге 0.05
+   она замирает на 9/255 и не уходит уже никогда. Поэтому развёртки хранятся
+   поштучно: тогда затухание точное и догорает до нуля. */
+
+const SWEEP_KEEP = 30;   // сколько развёрток помнит люминофор
+const SWEEP_SUM = 2.2;   // суммарная яркость стопки: больше единицы, чтобы захват насыщал
 
 MODES.trig = {
   label: 'синхронизация',
-  note: 'Указателем ведёшь уровень запуска. Попал в размах — картинка встала, буква читается. Вышел за край — ловить нечего, развёртка идёт вхолостую и кадры разъезжаются. Чем ближе уровень к краю, тем легче шум сбивает захват.',
+  note: 'Указателем ведёшь уровень запуска. Держишь захват — развёртки ложатся одна в одну, и буква проступает на люминофоре. Вышел за размах — каждая приходит на новое место, складывать нечего, и остаётся тусклый смаз. Ближе к краю размаха шум сильнее сбивает захват, и буква не доходит до резкости.',
   cursor: 'ns-resize',
   tools: [
     { type: 'range', key: 'symmetry', label: 'симметрия', min: 0, max: 1, step: 0.01, value: 1 },
@@ -274,7 +287,8 @@ MODES.trig = {
     { type: 'range', key: 'band', label: 'полоса', min: 0, max: 0.45, step: 0.005, value: 0 },
     { type: 'range', key: 'noise', label: 'шум', min: 0, max: 1, step: 0.02, value: 0.16 },
     { type: 'range', key: 'rate', label: 'частота сигнала', min: 0, max: 3, step: 0.05, value: 0.8 },
-    { type: 'toggle', key: 'drift', label: 'дрейф', value: true },
+    { type: 'range', key: 'glow', label: 'послесвечение', min: 0, max: 1, step: 0.02, value: 0.6 },
+    { type: 'toggle', key: 'drift', label: 'дрейф', value: false },
     { type: 'toggle', key: 'runner', label: 'бегунок', value: true },
   ],
 
@@ -284,6 +298,8 @@ MODES.trig = {
     modeState.free = 0;
     modeState.offset = 0;
     modeState.level = 0.5;
+    modeState.sweeps = [];
+    modeState.side = S;
   },
 
   step() {
@@ -291,48 +307,64 @@ MODES.trig = {
     modeState.free += STEP * num('rate');
     modeState.run = (modeState.run + STEP * RUN_RATE) % 1;
     // Прибор греется и уводит ноль: уровень приходится подправлять.
-    if (on('drift')) modeState.offset = Math.sin(modeState.time * 0.21) * 0.16;
-    else modeState.offset = 0;
-  },
-
-  draw() {
-    drawScreen();
+    modeState.offset = on('drift') ? Math.sin(modeState.time * 0.21) * 0.16 : 0;
 
     const amp = num('amp');
-    const offset = modeState.offset;
     if (pointer.seen) modeState.level = clamp(pointer.y, 0, 1);
-    const level = modeState.level;
-
-    const signal = levelToSignal(level, amp, offset);
+    const signal = levelToSignal(modeState.level, amp, modeState.offset);
     const inside = signal > 0.02 && signal < 0.98;
+    modeState.inside = inside;
+
+    // Развёртки лежат в пикселях кадра: сменился размер — тянуть их нечем.
+    if (modeState.side !== S) {
+      modeState.side = S;
+      modeState.sweeps = [];
+    }
 
     // У края сигнал проводит меньше времени, и шум легче сбивает захват.
     const margin = Math.min(signal, 1 - signal);
     const shake = num('noise') * (inside ? clamp(0.09 / Math.max(margin, 0.02), 0, 1) : 1);
 
-    const base = {
+    /* Захват держит фазу: подъём занимает долю периода, равную симметрии,
+       и приходит к уровню всегда в один и тот же миг. Без захвата фаза
+       свободная, и развёртка каждый раз встаёт на новое место. */
+    const phase = inside
+      ? signal * clamp(num('symmetry'), 0.001, 1) + shake * 0.09 * tremble(modeState.time * 9, 1.3)
+      : modeState.free;
+
+    modeState.sweeps.push(sawPoints({
       periods: num('periods'),
       amp,
       symmetry: num('symmetry'),
       band: num('band'),
       noise: num('noise'),
-      offset,
-    };
+      offset: modeState.offset,
+      phase,
+      seed: modeState.time * 3,
+    }));
+    while (modeState.sweeps.length > SWEEP_KEEP) modeState.sweeps.shift();
+  },
 
-    if (inside) {
-      /* Захват держит фазу: подъём занимает долю периода, равную симметрии,
-         и приходит к уровню всегда в один и тот же миг. */
-      const lock = signal * clamp(num('symmetry'), 0.001, 1);
-      const jitter = shake * 0.09 * tremble(modeState.time * 9, 1.3);
-      const points = sawPoints({ ...base, phase: lock + jitter, seed: modeState.time * 3 });
-      drawSweep(points, S * 0.005, on('runner'), modeState.run);
-    } else {
-      // Срыв: каждый кадр приходит со своей фазой, и они ложатся друг на друга.
-      for (let g = 0; g < GHOSTS; g += 1) {
-        const phase = modeState.free + g * 0.37;
-        stroke(sawPoints({ ...base, phase, seed: modeState.time * 3 + g }), 0, SAW_STEPS, 0.34, S * 0.004);
-      }
+  draw() {
+    drawScreen();
+
+    const sweeps = modeState.sweeps;
+    const life = lerp(6, SWEEP_KEEP, num('glow'));
+    const weight = SWEEP_SUM / life;
+    const width = S * 0.005;
+
+    // Свежая развёртка ярче всех, дальние догорают ровно до нуля.
+    for (let i = 0; i < sweeps.length; i += 1) {
+      const age = sweeps.length - 1 - i;
+      if (age >= life) continue;
+      stroke(sweeps[i], 0, SAW_STEPS, weight * (1 - age / life), width);
     }
+
+    // Бегунок идёт поверх и не копится: он не след, а место луча прямо сейчас.
+    if (on('runner') && sweeps.length) drawRunner(sweeps.at(-1), width, modeState.run);
+
+    const inside = modeState.inside;
+    const level = modeState.level;
 
     // Метка уровня: пунктир поперёк экрана и флажок у левого края.
     ctx.save();
