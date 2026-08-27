@@ -560,37 +560,73 @@ function rebuildWraps(cord) {
   cord.wraps = wraps.filter((w, i) => i === 0 || w.at - wraps[i - 1].at > 3);
 }
 
-/* Верёвка рождается уже перекинутой: хвост, обхват, провис, обхват, хвост —
-   ровно то, что на схеме. Длина звена берётся из самой раскладки, поэтому
-   первый кадр обходится без рывка. */
+/* Раскладка на старте снята с руки: автор развесил верёвку в полигоне, и её
+   пропорции переписаны сюда. Доли — сколько верёвки уходит в левый хвост,
+   в провис и в правый: короткая стойка, глубокая чаша, длинная стойка. Это
+   и есть И, а скоба над ней — краткая.
+
+   Провис задаётся не глубиной, а длиной: глубина под неё подбирается делением
+   пополам. Иначе при другой длине верёвки чаша меняла бы долю, и раскладка
+   переставала быть той самой. */
+const LAUNCH = {
+  left: 0.366,                    // где лежит левый виток
+  right: 0.6355,                  // где правый
+  share: [0.099, 0.62, 0.281],    // левый хвост, провис, правый хвост
+};
+
+function sagCurve(depth) {
+  const points = [];
+  for (let i = 0; i <= 16; i += 1) {
+    const u = i / 16;
+    points.push([
+      lerp(LAUNCH.left + CORD_HALF, LAUNCH.right - CORD_HALF, u),
+      BRACE.bar + Math.sin(Math.PI * u) * depth,
+    ]);
+  }
+  return points;
+}
+
+function pathLength(points) {
+  let sum = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    sum += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+  }
+  return sum;
+}
+
 function makeCord(length) {
   const span = BRACE.x2 - BRACE.x1;
-  const over = 0.04;
-  const left = BRACE.x1 + 0.03;
-  const right = BRACE.x2 - 0.03;
-  // Хвосты разной длины: симметричная раскладка читается ведром, а не буквой.
-  // Короткая стойка слева, длинная справа, между ними провис — это И, и скоба
-  // над ней работает краткой.
-  const spare = Math.max(0.2, span * length - span * 1.9);
-  const sag = span * 0.62;
+  const total = span * length;
+  const crest = BRACE.bar - BRACE_HALF - CORD_HALF * 0.45;
 
-  const path = [[left - 0.014, BRACE.bar + spare * 0.4], [left - 0.006, BRACE.bar - over]];
-  for (let i = 0; i <= 14; i += 1) {
-    const u = i / 14;
-    path.push([lerp(left + 0.006, right - 0.006, u), BRACE.bar + Math.sin(Math.PI * u) * sag]);
+  const want = total * LAUNCH.share[1];
+  let low = 0;
+  let high = 1.4;
+  for (let i = 0; i < 26; i += 1) {
+    const mid = (low + high) / 2;
+    if (pathLength(sagCurve(mid)) < want) low = mid;
+    else high = mid;
   }
-  path.push([right + 0.006, BRACE.bar - over]);
-  path.push([right + 0.014, BRACE.bar + spare * 0.6]);
+
+  const path = [
+    [LAUNCH.left - CORD_HALF, BRACE.bar + total * LAUNCH.share[0]],
+    [LAUNCH.left - CORD_HALF, BRACE.bar],
+    [LAUNCH.left, crest],
+    ...sagCurve((low + high) / 2),
+    [LAUNCH.right, crest],
+    [LAUNCH.right + CORD_HALF, BRACE.bar],
+    [LAUNCH.right + CORD_HALF, BRACE.bar + total * LAUNCH.share[2]],
+  ];
 
   const steps = [0];
   for (let i = 1; i < path.length; i += 1) {
     steps.push(steps[i - 1] + Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]));
   }
-  const total = steps[steps.length - 1];
+  const laid = steps[steps.length - 1];
   const points = [];
   let leg = 1;
   for (let i = 0; i < CORD_N; i += 1) {
-    const at = (i / (CORD_N - 1)) * total;
+    const at = (i / (CORD_N - 1)) * laid;
     while (leg < steps.length - 1 && steps[leg] < at) leg += 1;
     const u = (at - steps[leg - 1]) / Math.max(1e-6, steps[leg] - steps[leg - 1]);
     const x = lerp(path[leg - 1][0], path[leg][0], u);
@@ -598,7 +634,7 @@ function makeCord(length) {
     points.push({ x, y, px: x, py: y });
   }
 
-  const cord = { points, rest: total / (CORD_N - 1), hold: -1, wraps: [], settle: 60 };
+  const cord = { points, rest: laid / (CORD_N - 1), hold: -1, wraps: [], settle: 60 };
   rebuildWraps(cord);
   return cord;
 }
