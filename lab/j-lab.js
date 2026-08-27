@@ -502,9 +502,9 @@ const STEMS = [
 /* Куда виток может встать: по перекладине, не заходя на скругления. */
 const BAR_FROM = BRACE.x1 + BRACE.r;
 const BAR_TO = BRACE.x2 - BRACE.r;
-/* Гребень витка чуть выше верхней кромки перекладины: обхват должен быть виден
-   поверх детали, иначе верёвка читается обрезанной, а не перекинутой. */
-const BAR_TOP = BRACE.bar - BRACE_HALF - CORD_HALF * 0.5;
+/* Обхват не точка, а дуга в три звена, лежащая на кромке перекладины: из одной
+   точки обе ветви выходили бы в одном месте, и виток читался бы штырём,
+   проткнувшим деталь. */
 
 function nearestOn(ax, ay, bx, by, x, y) {
   const dx = bx - ax;
@@ -543,7 +543,7 @@ function rebuildWraps(cord) {
   let from = -1;
   const close = (to) => {
     if (from < 0) return;
-    const at = clamp(Math.round((from + to) / 2), 1, CORD_N - 2);
+    const at = clamp(Math.round((from + to) / 2), 2, CORD_N - 3);
     wraps.push({ at, x: clamp(cord.points[at].x, BAR_FROM, BAR_TO), pull: 0, side: 0 });
     from = -1;
   };
@@ -605,23 +605,27 @@ function makeCord(length) {
    перекладины, и сходит со скругления. */
 function feedWrap(cord, wrap, slip) {
   const at = wrap.at;
-  const p = cord.points[at];
-  const back = cord.points[at - 1];
-  const ahead = cord.points[at + 1];
+  // Звенья самого гребня прижаты и растяжения не показывают: мерить надо
+  // первые свободные звенья по обе стороны от обхвата.
+  const back = cord.points[at - 2];
+  const backIn = cord.points[at - 1];
+  const ahead = cord.points[at + 2];
+  const aheadIn = cord.points[at + 1];
   if (!back || !ahead) return false;
 
-  const now = Math.hypot(back.x - p.x, back.y - p.y) - Math.hypot(ahead.x - p.x, ahead.y - p.y);
+  const now = Math.hypot(back.x - backIn.x, back.y - backIn.y)
+    - Math.hypot(ahead.x - aheadIn.x, ahead.y - aheadIn.y);
   wrap.pull = lerp(wrap.pull, now, 0.06);
   if (Math.abs(wrap.pull) >= slip) {
     // Перевесила сторона back — верёвка идёт туда, а на перекладину выходит
     // место, которое было со стороны ahead.
     const next = at + (wrap.pull > 0 ? 1 : -1);
     wrap.pull *= 0.5;
-    if (next < 1 || next > CORD_N - 2) return false;
+    if (next < 2 || next > CORD_N - 3) return false;
     wrap.at = next;
   }
 
-  const drift = (back.x - p.x) + (ahead.x - p.x);
+  const drift = (back.x - wrap.x) + (ahead.x - wrap.x);
   wrap.side = lerp(wrap.side, drift, 0.06);
   if (Math.abs(wrap.side) >= slip) {
     wrap.side *= 0.5;
@@ -702,10 +706,17 @@ MODES.cord = {
         b.x -= ox; b.y -= oy;
       }
 
+      // Гребень ложится на скруглённую кромку перекладины: три точки по дуге
+      // радиусом в полтолщины детали плюс полтолщины верёвки. Угол между ними
+      // берётся из длины звена, иначе обхват растягивал бы верёвку.
+      const lift = BRACE_HALF + CORD_HALF;
+      const step = 2 * Math.asin(Math.min(0.9, cord.rest / (2 * lift)));
       for (const wrap of cord.wraps) {
-        const p = cord.points[wrap.at];
-        p.x = wrap.x;
-        p.y = BAR_TOP;
+        for (let k = -1; k <= 1; k += 1) {
+          const p = cord.points[wrap.at + k];
+          p.x = wrap.x + Math.sin(k * step) * lift;
+          p.y = BRACE.bar - Math.cos(k * step) * lift;
+        }
       }
 
       // Рука сильнее скобы: её точка ставится последней.
