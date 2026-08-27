@@ -569,9 +569,9 @@ function rebuildWraps(cord) {
    пополам. Иначе при другой длине верёвки чаша меняла бы долю, и раскладка
    переставала быть той самой. */
 const LAUNCH = {
-  left: 0.366,                    // где лежит левый виток
-  right: 0.6355,                  // где правый
-  share: [0.099, 0.62, 0.281],    // левый хвост, провис, правый хвост
+  left: 0.3637,                   // где лежит левый виток
+  right: 0.6339,                  // где правый
+  share: [0.113, 0.606, 0.281],   // левый хвост, провис, правый хвост
 };
 
 function sagCurve(depth) {
@@ -634,8 +634,14 @@ function makeCord(length) {
     points.push({ x, y, px: x, py: y });
   }
 
-  const cord = { points, rest: laid / (CORD_N - 1), hold: -1, wraps: [], settle: 60 };
-  rebuildWraps(cord);
+  // Витки ставятся прямо по долям, а не пересобираются по форме: пересборка
+  // берёт середину куска, лежащего выше перекладины, и виток уезжает от
+  // заданного места на ползвена. На старте место должно быть тем самым.
+  const cord = { points, rest: laid / (CORD_N - 1), hold: -1, settle: 60 };
+  cord.wraps = [
+    { at: Math.round(LAUNCH.share[0] * (CORD_N - 1)), x: LAUNCH.left, pull: 0, side: 0 },
+    { at: Math.round((LAUNCH.share[0] + LAUNCH.share[1]) * (CORD_N - 1)), x: LAUNCH.right, pull: 0, side: 0 },
+  ];
   return cord;
 }
 
