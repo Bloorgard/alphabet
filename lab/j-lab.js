@@ -566,18 +566,21 @@ function rebuildWraps(cord) {
 function makeCord(length) {
   const span = BRACE.x2 - BRACE.x1;
   const over = 0.04;
-  const left = BRACE.x1 + 0.055;
-  const right = BRACE.x2 - 0.055;
-  const tail = Math.max(0.08, (span * length - span * 1.25) / 2);
-  const sag = span * 0.34;
+  const left = BRACE.x1 + 0.03;
+  const right = BRACE.x2 - 0.03;
+  // Хвосты разной длины: симметричная раскладка читается ведром, а не буквой.
+  // Короткая стойка слева, длинная справа, между ними провис — это И, и скоба
+  // над ней работает краткой.
+  const spare = Math.max(0.2, span * length - span * 1.9);
+  const sag = span * 0.62;
 
-  const path = [[left - 0.014, BRACE.bar + tail], [left - 0.006, BRACE.bar - over]];
-  for (let i = 0; i <= 12; i += 1) {
-    const u = i / 12;
+  const path = [[left - 0.014, BRACE.bar + spare * 0.4], [left - 0.006, BRACE.bar - over]];
+  for (let i = 0; i <= 14; i += 1) {
+    const u = i / 14;
     path.push([lerp(left + 0.006, right - 0.006, u), BRACE.bar + Math.sin(Math.PI * u) * sag]);
   }
   path.push([right + 0.006, BRACE.bar - over]);
-  path.push([right + 0.014, BRACE.bar + tail]);
+  path.push([right + 0.014, BRACE.bar + spare * 0.6]);
 
   const steps = [0];
   for (let i = 1; i < path.length; i += 1) {
@@ -641,7 +644,7 @@ MODES.cord = {
   note: 'Верёвка не привязана, а перекинута через перекладину и держится обхватом. Тяни за хвост: верёвка перебирается через виток, другой хвост укорачивается. Вытянул до конца — упала. Закинуть обратно — занести кусок за перекладину и отпустить.',
   cursor: 'grab',
   tools: [
-    { type: 'range', key: 'length', label: 'длина', min: 1.6, max: 3.6, step: 0.05, value: 2.7 },
+    { type: 'range', key: 'length', label: 'длина', min: 2, max: 6, step: 0.05, value: 4.2 },
     { type: 'range', key: 'gravity', label: 'тяжесть', min: 1, max: 14, step: 0.5, value: 7 },
     { type: 'range', key: 'air', label: 'вязкость', min: 0, max: 0.2, step: 0.005, value: 0.03 },
     { type: 'range', key: 'friction', label: 'трение о скобу', min: 0, max: 1, step: 0.02, value: 0.5 },
