@@ -451,8 +451,9 @@ MODES.pen = {
    за ней, оба конца висят спереди. Держит обхват — трение верёвки о деталь,
    как на турнике или на кнехте.
 
-   Отсюда рисование в два слоя: то, что выше перекладины, идёт под деталью,
-   остальное поверх. Верёвка проходит за скобой, а не сквозь неё, и это
+   Отсюда рисование в два слоя: левая ветвь обхвата и гребень идут поверх
+   детали, правая уходит за неё. Прятать за перекладину обе ветви нельзя —
+   тогда деталь режет верёвку пополам и та читается проткнувшей. Это
    единственное место, где сцена помнит про третье измерение.
 
    Виток знает своё место на перекладине и своё место на верёвке. Оба ползут:
@@ -706,16 +707,14 @@ MODES.cord = {
         b.x -= ox; b.y -= oy;
       }
 
-      // Гребень ложится на скруглённую кромку перекладины: три точки по дуге
-      // радиусом в полтолщины детали плюс полтолщины верёвки. Угол между ними
-      // берётся из длины звена, иначе обхват растягивал бы верёвку.
-      const lift = BRACE_HALF + CORD_HALF;
-      const step = 2 * Math.asin(Math.min(0.9, cord.rest / (2 * lift)));
+      // Обхват — три точки: левая на самой детали, средняя над её кромкой,
+      // правая опять на детали. Левая ветвь пойдёт поверх перекладины, правая
+      // за ней — так верёвка и читается перекинутой, а не проткнувшей.
       for (const wrap of cord.wraps) {
         for (let k = -1; k <= 1; k += 1) {
           const p = cord.points[wrap.at + k];
-          p.x = wrap.x + Math.sin(k * step) * lift;
-          p.y = BRACE.bar - Math.cos(k * step) * lift;
+          p.x = wrap.x + k * CORD_HALF;
+          p.y = BRACE.bar - (k === 0 ? BRACE_HALF + CORD_HALF * 0.45 : 0);
         }
       }
 
@@ -741,20 +740,48 @@ MODES.cord = {
 
     // Верёвка целиком уходит под скобу, а потом всё, что ниже перекладины,
     // кладётся поверх: так виден обхват, а не пересечение.
+    /* Верёвка идёт кривой по серединам звеньев, а не ломаной: на обхвате угол
+       между звеньями большой, и ломаная встала бы там углом. */
+    const run = (points) => {
+      if (points.length < 2) return;
+      ctx.moveTo(points[0].x * S, points[0].y * S);
+      for (let i = 1; i < points.length - 1; i += 1) {
+        const a = points[i];
+        const b = points[i + 1];
+        ctx.quadraticCurveTo(a.x * S, a.y * S, ((a.x + b.x) / 2) * S, ((a.y + b.y) / 2) * S);
+      }
+      const last = points[points.length - 1];
+      ctx.lineTo(last.x * S, last.y * S);
+    };
+
+    /* Спереди детали — всё, что ниже её нижней кромки, и левая ветвь обхвата
+       вместе с гребнем. Правая ветвь уходит за перекладину: у перекинутой
+       верёвки одна сторона видна поверх детали, другая — из-под неё. Прятать
+       обе, как раньше, — это и есть та самая «верёвка сквозь скобу». */
+    const under = BRACE.bar + BRACE_HALF;
+    const front = (p) => {
+      if (p.y > under) return true;
+      let near = 0.06;
+      let own = null;
+      for (const wrap of cord.wraps) {
+        const d = Math.abs(p.x - wrap.x);
+        if (d < near) { near = d; own = wrap; }
+      }
+      return own ? p.x < own.x + CORD_HALF * 0.5 : false;
+    };
+
     const rope = (only) => {
       ctx.strokeStyle = RED;
       ctx.lineWidth = S * CORD_HALF * 2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.beginPath();
-      let drawing = false;
-      for (let i = 1; i < cord.points.length; i += 1) {
-        const a = cord.points[i - 1];
-        const b = cord.points[i];
-        if (only && (a.y < BRACE.bar || b.y < BRACE.bar)) { drawing = false; continue; }
-        if (!drawing) { ctx.moveTo(a.x * S, a.y * S); drawing = true; }
-        ctx.lineTo(b.x * S, b.y * S);
+      let piece = [];
+      for (const p of cord.points) {
+        if (only && !front(p)) { run(piece); piece = []; continue; }
+        piece.push(p);
       }
+      run(piece);
       ctx.stroke();
     };
 
