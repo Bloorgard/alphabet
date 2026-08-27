@@ -56,5 +56,6 @@ const LABS = [
   {
     slug: 'j', letter: 'Й', title: 'скобка над И', tile: true,
     mechanics: ['краткость', 'балансир', 'росчерк', 'перо', 'шнур'],
+    chosen: 'шнур',
   },
 ];
