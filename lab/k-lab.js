@@ -239,97 +239,178 @@ MODES.truss = {
   },
 };
 
-/* ---------- рикошет ---------- */
+/* ---------- кольцо ---------- */
 
-/* Ствол — борт, и в этом вся механика: угол падения равен углу отражения,
-   то есть верхняя и нижняя ветви К — это одна прямая, переломленная о
-   вертикаль. Буква тут не нарисована, а получена: бросок, ударивший в
-   середину ствола под углом ветви, оставляет за собой ровно К.
+/* Мяч внизу справа, кольцо вверху справа, слева стена. Закинуть мяч в кольцо
+   можно только через отскок, и вот что тут главное: при упругом отражении
+   путь из точки в точку через одну стену единственный. Он идёт по прямой к
+   зеркальному образу кольца, и точка удара при симметричной расстановке
+   приходится ровно на середину стены. Значит стена — ствол, две ветви полёта
+   — ветви буквы, а попадание в кольцо и есть написанная К. Промахнулся —
+   буквы нет вовсе.
 
-   Поэтому и цель не «попади в мишень», а «напиши букву». Совпадение
-   считается по двум промахам: насколько удар разошёлся с узлом и насколько
-   приход разошёлся с концом нижней ветви. Бросок, вышедший на девяносто
-   процентов, остаётся на кадре красным — это единственное событие сцены. */
+   Из той же единственности растёт и сложность. Расстановка меняется каждый
+   бросок, поэтому угол каждый раз новый, а буква выходит своей пропорции —
+   поле набирается кустом разных К. Отражает при этом не вся стена, а пятно
+   вокруг узла, и оно сжимается с уровнем: сначала бить нужно примерно в
+   середину, дальше — точно в неё. Ушёл мимо пятна — мяч втыкается в стену.
 
-const SHOT_PULL = 0.034;    // сколько скорости даёт доля натяжения
-const SHOT_MAX = 0.5;       // дальше тянуть бессмысленно
-const SHOT_KEEP = 5;        // сколько прошлых бросков помнит кадр
-const SHOT_GOOD = 0.9;      // с какого совпадения буква считается написанной
+   Счёт: сотня за попадание, помноженная на серию, и добавка за то, насколько
+   близко к центру кольца прошёл мяч. Три промаха заканчивают партию.
 
-function shotStart() {
-  return { x: K.armX, y: K.armY };
+   Красный тут событие: свежая К горит до следующего броска, прежние уходят
+   в бледные чернила и остаются кустом. */
+
+const RING_SPOT = [0.055, 0.017]; // половина высоты зеркального пятна: старт и предел
+const RING_HOLE = [0.05, 0.015];  // радиус кольца там же
+const RING_STEPS = 12;            // за сколько уровней сложность доходит до предела
+const RING_MULT = 8;              // выше этого множитель серии не растёт
+const RING_LIVES = 3;
+const RING_TRAIL = 110;           // длина шлейфа в шагах
+const RING_KEEP = 14;             // сколько написанных К держит поле
+const RING_FLIGHT = 900;          // дольше этого полёт считается промахом
+
+function ringRand(from, to) {
+  return from + Math.random() * (to - from);
 }
 
-/* Промах считается от эталона и нормируется высотой буквы. */
-function shotScore(shot) {
-  if (!shot.hit) return 0;
-  const off = Math.abs(shot.hit.y - K.node) / (K.bottom - K.top);
-  const path = shot.path;
-  let cross = null;
-  for (let i = shot.hitAt; i + 1 < path.length; i += 1) {
-    const a = path[i];
-    const b = path[i + 1];
-    if ((a.y - K.legY) * (b.y - K.legY) > 0) continue;
-    const t = (K.legY - a.y) / (b.y - a.y || 1e-6);
-    cross = { x: lerp(a.x, b.x, t), y: K.legY };
-    shot.crossAt = i + 1;
-    break;
+/* Чем выше уровень, тем меньше и пятно на стене, и само кольцо. */
+function ringHard() {
+  const t = clamp((modeState.level - 1) / RING_STEPS, 0, 1) * num('narrow');
+  return {
+    spot: lerp(RING_SPOT[0], RING_SPOT[1], t),
+    hole: lerp(RING_HOLE[0], RING_HOLE[1], t),
+  };
+}
+
+/* Раздача проверяется трижды. Во-первых, на решаемость: точка отражения
+   считается через зеркальный образ кольца и должна попасть в пятно с запасом,
+   иначе уровень невыполним, а игрок об этом не узнает. Во-вторых и в-главных
+   — на букву. Отражение от вертикали симметрию ветвей даёт даром (угол к
+   нормали сохраняется), но не даёт ни наклона, ни пропорции: пологая пара
+   ветвей читается птичкой, а вчетверо разные плечи — галкой с хвостом.
+   Поэтому наклон держится около сорока градусов, как у самой К, а плечи —
+   в полутора разах друг от друга. Разброс внутри этих рамок и даёт куст
+   разных К, а не веер линий. */
+
+const RING_LEAN = [0.45, 1.0];    // наклон ветвей, радианы: 26° … 57°
+const RING_ARMS = [0.72, 1.45];   // во сколько плечи могут разойтись
+const RING_REACH = [0.3, 0.56];   // и насколько они длинные
+
+function ringDeal() {
+  const { spot, hole } = ringHard();
+  for (let tries = 0; tries < 400; tries += 1) {
+    const ball = { x: ringRand(0.56, 0.88), y: ringRand(0.7, 0.9) };
+    /* Кольцо не поднимается под самую строку счёта: там ему тесно. */
+    const hoop = { x: ringRand(0.56, 0.86), y: ringRand(0.17, 0.32), r: hole };
+    const mirrorX = 2 * K.stem - hoop.x;
+    const t = (K.stem - ball.x) / (mirrorX - ball.x);
+    const at = ball.y + (hoop.y - ball.y) * t;
+    if (Math.abs(at - K.node) >= spot * 0.7) continue;
+
+    const lean = Math.atan2(Math.abs(hoop.y - ball.y), Math.abs(mirrorX - ball.x));
+    if (lean < RING_LEAN[0] || lean > RING_LEAN[1]) continue;
+
+    const low = Math.hypot(ball.x - K.stem, ball.y - at);
+    const high = Math.hypot(hoop.x - K.stem, hoop.y - at);
+    if (low < RING_REACH[0] || low > RING_REACH[1]) continue;
+    if (high < RING_REACH[0] || high > RING_REACH[1]) continue;
+    const ratio = low / high;
+    if (ratio < RING_ARMS[0] || ratio > RING_ARMS[1]) continue;
+
+    modeState.ball = ball;
+    modeState.hoop = hoop;
+    modeState.spot = spot;
+    return;
   }
-  /* Не дошёл до строки — промах считается по тому, где кончил. */
-  const end = cross || path[path.length - 1];
-  const miss = cross
-    ? Math.abs(end.x - K.legX) / (K.bottom - K.top)
-    : (Math.abs(end.x - K.legX) + Math.abs(end.y - K.legY)) / (K.bottom - K.top);
-  shot.cross = cross;
-  return clamp(1 - off - miss, 0, 1);
+  /* Пятно сжалось так, что случай не помогает — ставим точно под него. */
+  modeState.ball = { x: 0.7, y: 0.8 };
+  modeState.hoop = { x: 0.7, y: 0.22, r: hole };
+  modeState.spot = spot;
 }
 
-function shotFire(vx, vy) {
-  const from = shotStart();
-  modeState.fly = { x: from.x, y: from.y, vx, vy, path: [{ ...from }], hit: null, hitAt: 0, age: 0 };
+function ringFire(dx, dy) {
+  const len = Math.hypot(dx, dy) || 1;
+  const speed = num('speed');
+  const ball = modeState.ball;
+  modeState.fly = {
+    x: ball.x, y: ball.y,
+    vx: (dx / len) * speed,
+    vy: (dy / len) * speed,
+    path: [{ x: ball.x, y: ball.y }],
+    hit: null,
+    age: 0,
+  };
 }
 
-MODES.bounce = {
-  label: 'рикошет',
-  note: 'Тяни от верхнего конца буквы в сторону броска и отпускай. Ствол — борт: угол падения равен углу отражения, поэтому удар точно в узел выписывает нижнюю ветвь сам. Цель не сбить мишень, а написать К; вышедший бросок остаётся красным.',
+function ringMiss() {
+  modeState.fly = null;
+  modeState.streak = 0;
+  modeState.lives -= 1;
+  if (modeState.lives <= 0) modeState.over = true;
+}
+
+/* Ближайшее расстояние от отрезка хода до центра кольца: на скорости мяч
+   проскакивает кольцо между кадрами, и проверять одну точку мало. */
+function ringNear(ax, ay, bx, by, cx, cy) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 ? clamp(((cx - ax) * dx + (cy - ay) * dy) / len2, 0, 1) : 0;
+  return Math.hypot(ax + dx * t - cx, ay + dy * t - cy);
+}
+
+/* Шлейф: голова яркая, хвост уходит в ничто за RING_TRAIL шагов. */
+function ringTrail(path, color) {
+  const last = path.length - 1;
+  for (let i = last; i > 0; i -= 3) {
+    const from = Math.max(0, i - 3);
+    const fade = clamp(1 - (last - i) / RING_TRAIL, 0, 1);
+    if (fade <= 0.02) break;
+    poly(path.slice(from, i + 1), color(fade), 0.003 + fade * 0.003);
+  }
+}
+
+MODES.ring = {
+  label: 'кольцо',
+  note: 'Тяни от мяча и отпускай: попасть в кольцо можно только отскоком от стены, и такой путь единственный — он и есть К. Пятно на стене отражает, остальная стена гасит мяч, и с каждым уровнем пятно уже. Сотня за попадание на серию, три промаха — конец, R — заново.',
   cursor: 'crosshair',
   tools: [
-    { type: 'range', key: 'gravity', label: 'тяжесть', min: 0, max: 0.00004, step: 0.000002, value: 0 },
-    { type: 'range', key: 'damp', label: 'отскок', min: 0.5, max: 1, step: 0.01, value: 1 },
-    { type: 'toggle', key: 'ghost', label: 'пропись', value: true },
-    { type: 'button', label: 'стереть', action() { MODES.bounce.setup(); } },
+    { type: 'range', key: 'speed', label: 'скорость', min: 0.006, max: 0.03, step: 0.001, value: 0.014 },
+    { type: 'range', key: 'narrow', label: 'сужение', min: 0, max: 1, step: 0.05, value: 1 },
+    { type: 'toggle', key: 'hint', label: 'подсказка', value: false },
+    { type: 'toggle', key: 'bush', label: 'куст', value: true },
+    { type: 'button', label: 'заново', action() { MODES.ring.setup(); } },
   ],
 
   setup() {
-    modeState.shots = [];
+    modeState.level = 1;
+    modeState.score = 0;
+    modeState.streak = 0;
+    modeState.lives = RING_LIVES;
+    modeState.over = false;
     modeState.fly = null;
     modeState.aim = false;
-    modeState.best = 0;
-    modeState.last = null;
-    /* Первый бросок сцена делает сама — идеальный, чтобы было видно, к чему тут стремятся. */
-    const dx = K.stem - K.armX;
-    const dy = K.node - K.armY;
-    const len = Math.hypot(dx, dy);
-    shotFire((dx / len) * 0.011, (dy / len) * 0.011);
+    modeState.fresh = null;
+    /* Кадр не должен открываться пустым: одна К уже написана — образцом. */
+    modeState.done = [[
+      { x: K.armX, y: K.legY }, { x: K.stem, y: K.node }, { x: K.armX, y: K.armY },
+    ]];
+    ringDeal();
   },
 
   onDown() {
-    if (modeState.fly) return;
+    if (modeState.fly || modeState.over) return;
     modeState.aim = true;
   },
 
   onUp() {
     if (!modeState.aim) return;
     modeState.aim = false;
-    const from = shotStart();
-    let dx = pointer.x - from.x;
-    let dy = pointer.y - from.y;
-    const len = Math.hypot(dx, dy);
-    if (len < 0.02) return;
-    const pull = Math.min(len, SHOT_MAX);
-    dx = (dx / len) * pull * SHOT_PULL;
-    dy = (dy / len) * pull * SHOT_PULL;
-    shotFire(dx, dy);
+    const dx = pointer.x - modeState.ball.x;
+    const dy = pointer.y - modeState.ball.y;
+    if (Math.hypot(dx, dy) < 0.02) return;
+    ringFire(dx, dy);
   },
 
   step() {
@@ -337,80 +418,131 @@ MODES.bounce = {
     if (!fly) return;
 
     fly.age += 1;
-    fly.vy += num('gravity');
     const px = fly.x;
     const py = fly.y;
     fly.x += fly.vx;
     fly.y += fly.vy;
 
-    /* Борт проверяется по отрезку хода, а не по текущей точке: на скорости
-       шар за кадр проходит больше своей толщины и иначе прошёл бы насквозь. */
-    if (!fly.hit && (px - K.stem) * (fly.x - K.stem) < 0) {
+    /* Стена: пятно отражает, остальная стена гасит. Проверяется отрезок хода,
+       иначе на скорости мяч проходит стену насквозь. */
+    if ((px - K.stem) * (fly.x - K.stem) < 0) {
       const t = (K.stem - px) / (fly.x - px || 1e-6);
       const at = py + (fly.y - py) * t;
-      if (at >= K.top && at <= K.bottom) {
+      if (Math.abs(at - K.node) <= modeState.spot) {
         fly.x = K.stem;
         fly.y = at;
-        fly.vx = -fly.vx * num('damp');
-        fly.vy *= num('damp');
-        fly.hit = { x: K.stem, y: at };
+        fly.vx = -fly.vx;
         fly.path.push({ x: fly.x, y: fly.y });
-        fly.hitAt = fly.path.length - 1;
+        fly.hit = { x: K.stem, y: at };
+      } else if (at >= K.top && at <= K.bottom) {
+        fly.path.push({ x: K.stem, y: at });
+        modeState.dead = { x: K.stem, y: at };
+        ringMiss();
+        return;
       }
     }
 
     fly.path.push({ x: fly.x, y: fly.y });
 
-    const gone = fly.x < -0.05 || fly.x > 1.05 || fly.y < -0.05 || fly.y > 1.05;
-    if (!gone && fly.age < 900) return;
+    /* Кольцо засчитывается только после отскока: без стены буквы нет. */
+    if (fly.hit) {
+      const hoop = modeState.hoop;
+      const near = ringNear(px, py, fly.x, fly.y, hoop.x, hoop.y);
+      if (near <= hoop.r) {
+        const closeness = 1 - near / hoop.r;
+        modeState.streak += 1;
+        /* Множитель серии упирается в потолок: без него счёт к десятому
+           попаданию превращается в телефонный номер. */
+        const mult = Math.min(modeState.streak, RING_MULT);
+        modeState.score += Math.round(100 * mult * (0.6 + 0.4 * closeness));
+        modeState.level += 1;
+        modeState.fresh = fly.path;
+        modeState.done.push(fly.path);
+        if (modeState.done.length > RING_KEEP) modeState.done.shift();
+        modeState.fly = null;
+        modeState.dead = null;
+        ringDeal();
+        return;
+      }
+    }
 
-    fly.score = shotScore(fly);
-    modeState.last = fly.score;
-    modeState.best = Math.max(modeState.best, fly.score);
-    modeState.shots.unshift(fly);
-    modeState.shots.length = Math.min(modeState.shots.length, SHOT_KEEP);
-    modeState.fly = null;
+    const gone = fly.x < -0.05 || fly.x > 1.05 || fly.y < -0.05 || fly.y > 1.05;
+    if (gone || fly.age > RING_FLIGHT) ringMiss();
   },
 
   draw() {
-    if (on('ghost')) drawGhost(0.1);
+    const { ball, hoop, spot } = modeState;
 
-    /* Борт — он же ствол буквы, и он единственный тут неподвижен. */
-    line(K.stem, K.top, K.stem, K.bottom, INK, 0.02);
-    dot(K.stem, K.node, ink(0.35), 0.014);
-    dot(K.legX, K.legY, ink(0.2), 0.012);
-
-    const from = shotStart();
-    dot(from.x, from.y, ink(0.45), 0.012);
-
-    modeState.shots.forEach((shot, i) => {
-      const fresh = i === 0;
-      const tone = shot.score >= SHOT_GOOD ? RED : ink(fresh ? 0.5 : 0.16);
-      const width = fresh ? 0.005 : 0.0035;
-      /* Буква кончается на строке: дальше шар просто летит, и хвост уводится
-         в бледное, чтобы не дорисовывать ветви лишнего. */
-      const cut = shot.crossAt || shot.path.length;
-      poly(shot.path.slice(0, cut + 1), tone, width);
-      poly(shot.path.slice(cut), ink(0.1), width * 0.8);
-      if (shot.cross && fresh) dot(shot.cross.x, shot.cross.y, tone, 0.007);
-    });
-
-    const fly = modeState.fly;
-    if (fly) {
-      poly(fly.path, ink(0.7), 0.005);
-      dot(fly.x, fly.y, INK, 0.011);
+    /* Куст: всё, что уже написано, стоит бледным, свежая К горит. */
+    if (on('bush')) {
+      for (const path of modeState.done) {
+        const fresh = path === modeState.fresh;
+        poly(path, fresh ? RED : ink(0.13), fresh ? 0.005 : 0.0035);
+      }
     }
 
+    /* Стена целиком — это ствол буквы, но отражает только пятно у узла. */
+    line(K.stem, K.top, K.stem, K.bottom, ink(0.55), 0.016);
+    line(K.stem, K.node - spot, K.stem, K.node + spot, INK, 0.021);
+
+    /* Кольцо: обруч, сквозь который надо пройти. */
+    ctx.beginPath();
+    ctx.arc(hoop.x * S, hoop.y * S, hoop.r * S, 0, TAU);
+    ctx.strokeStyle = ink(0.75);
+    ctx.lineWidth = 0.005 * S;
+    ctx.stroke();
+    dot(hoop.x, hoop.y, ink(0.3), 0.004);
+
+    /* Подсказка: зеркальный образ кольца и единственная прямая к нему. */
+    if (on('hint')) {
+      const mirrorX = 2 * K.stem - hoop.x;
+      ctx.setLineDash([0.012 * S, 0.012 * S]);
+      line(ball.x, ball.y, mirrorX, hoop.y, ink(0.22), 0.002);
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(mirrorX * S, hoop.y * S, hoop.r * S, 0, TAU);
+      ctx.strokeStyle = ink(0.14);
+      ctx.lineWidth = 0.003 * S;
+      ctx.stroke();
+    }
+
+    if (modeState.fly) {
+      ringTrail(modeState.fly.path, (fade) => ink(0.15 + fade * 0.7));
+      dot(modeState.fly.x, modeState.fly.y, INK, 0.012);
+    } else {
+      dot(ball.x, ball.y, modeState.over ? ink(0.25) : INK, 0.014);
+    }
+
+    /* Мяч, воткнувшийся в стену мимо пятна: видно, куда именно не попал. */
+    if (modeState.dead) dot(modeState.dead.x, modeState.dead.y, ink(0.4), 0.01);
+
+    /* Прицел ведётся до стены и метит место удара. Куда уйдёт отскок, игрок
+       считает сам — в этом и игра, — но мазать вслепую не должен. */
     if (modeState.aim) {
-      const dx = pointer.x - from.x;
-      const dy = pointer.y - from.y;
+      const dx = pointer.x - ball.x;
+      const dy = pointer.y - ball.y;
       const len = Math.hypot(dx, dy) || 1e-6;
-      const pull = Math.min(len, SHOT_MAX);
-      line(from.x, from.y, from.x + (dx / len) * pull, from.y + (dy / len) * pull, ink(0.3), 0.0025);
+      const wall = dx < -1e-4 ? (K.stem - ball.x) / dx : Infinity;
+      const reach = Math.min(wall * len, 0.34);
+      line(ball.x, ball.y, ball.x + (dx / len) * reach, ball.y + (dy / len) * reach, ink(0.35), 0.0025);
+      if (wall !== Infinity && wall * len <= 0.34) {
+        const at = ball.y + dy * wall;
+        if (at >= K.top && at <= K.bottom) {
+          dot(K.stem, at, Math.abs(at - K.node) <= spot ? INK : ink(0.3), 0.008);
+        }
+      }
     }
 
-    const last = modeState.last === null ? '—' : `${Math.round(modeState.last * 100)}%`;
-    drawStatus(`совпало ${last} · лучшее ${Math.round(modeState.best * 100)}%`, modeState.best >= SHOT_GOOD);
+    /* Жизни — точками у нижнего края, чтобы не мешать строке счёта. */
+    for (let i = 0; i < RING_LIVES; i += 1) {
+      dot(0.94 - i * 0.028, 0.95, i < modeState.lives ? ink(0.55) : ink(0.14), 0.0075);
+    }
+
+    if (modeState.over) {
+      drawStatus(`${modeState.score} · партия окончена, R — заново`, true);
+    } else {
+      drawStatus(`${modeState.score} · серия ${modeState.streak} · уровень ${modeState.level}`);
+    }
   },
 };
 
