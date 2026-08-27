@@ -263,26 +263,29 @@ MODES.truss = {
    Красный тут событие: свежая К горит до следующего броска, прежние уходят
    в бледные чернила и остаются кустом. */
 
-const RING_HOLE = [0.04, 0.014];   // радиус кольца: первое попадание и предел
-const RING_SWAY = 0.07;            // насколько кольцо качается на пределе
+const RING_HOLE = [0.05, 0.026];   // радиус кольца: первое попадание и предел
+const RING_SWAY = 0.035;           // насколько кольцо качается на пределе
 const RING_RATE = 0.011;           // и как быстро
-const RING_RAMP = 22;              // за сколько попаданий сложность доходит до предела
+const RING_RAMP = 12;              // за сколько попаданий сложность доходит до предела
 const RING_PULL = 0.11;            // сколько скорости даёт доля тяги
 const RING_REACH = 0.34;           // дальше тянуть некуда
 const RING_KICK = 0.95;            // что остаётся от скорости после стены
 const RING_LIVES = 3;
-const RING_MULT = 8;               // выше этого множитель серии не растёт
 const RING_TRAIL = 130;            // длина шлейфа в шагах
-const RING_KEEP = 16;              // сколько написанных К держит поле
+const RING_KEEP = 8;               // сколько написанных К держит поле
 const RING_FLIGHT = 700;           // дольше этого полёт считается промахом
-const RING_REST = 45;              // пауза показа: сколько кадров стоит результат
+const RING_REST = 35;              // пауза показа: сколько кадров стоит результат
 
-function ringRand(from, to) {
-  return from + Math.random() * (to - from);
-}
+const RING_LAYOUTS = [
+  { ball: { x: 0.72, y: 0.84 }, hoop: { x: 0.69, y: 0.22 } },
+  { ball: { x: 0.79, y: 0.86 }, hoop: { x: 0.74, y: 0.28 } },
+  { ball: { x: 0.67, y: 0.87 }, hoop: { x: 0.76, y: 0.19 } },
+  { ball: { x: 0.81, y: 0.81 }, hoop: { x: 0.64, y: 0.31 } },
+  { ball: { x: 0.7, y: 0.89 }, hoop: { x: 0.73, y: 0.24 } },
+];
 
 function ringHard() {
-  return clamp(modeState.hits / RING_RAMP, 0, 1) * num('narrow');
+  return clamp(modeState.hits / RING_RAMP, 0, 1) * num('move');
 }
 
 /* Кольцо качается по вертикали вокруг своего места; на старте амплитуда
@@ -352,29 +355,12 @@ function ringSolve(ball, hoop, gravity) {
 function ringDeal() {
   const t = ringHard();
   const r = lerp(RING_HOLE[0], RING_HOLE[1], t);
-  /* Качание входит квадратом: первые попадания кольцо почти стоит, и сложность
-     сперва идёт от размера, то есть от точности броска, а не от тайминга. */
+  const layout = RING_LAYOUTS[modeState.hits % RING_LAYOUTS.length];
   const sway = t * t * RING_SWAY;
   const gravity = num('weight');
-
-  for (let tries = 0; tries < 60; tries += 1) {
-    const ball = { x: ringRand(0.58, 0.88), y: ringRand(0.74, 0.9) };
-    const hoop = { x: ringRand(0.5, 0.85), y: ringRand(0.16, 0.4), r, sway };
-    /* Кольцо должно стоять выше мяча и правее стены с запасом, иначе буквы
-       не выйдет даже при точном броске. */
-    if (hoop.y > ball.y - 0.3) continue;
-    if (hoop.x < K.stem + 0.14) continue;
-    const solved = ringSolve(ball, { ...hoop, y: hoop.y }, gravity);
-    if (!solved) continue;
-    modeState.ball = ball;
-    modeState.hoop = hoop;
-    modeState.solved = solved;
-    modeState.phase = 0;
-    return;
-  }
-  modeState.ball = { x: 0.72, y: 0.82 };
-  modeState.hoop = { x: 0.66, y: 0.24, r, sway };
-  modeState.solved = ringSolve(modeState.ball, modeState.hoop, gravity);
+  modeState.ball = { ...layout.ball };
+  modeState.hoop = { ...layout.hoop, r, sway };
+  modeState.solved = ringSolve(modeState.ball, { ...modeState.hoop, y: layout.hoop.y }, gravity);
   modeState.phase = 0;
 }
 
@@ -398,7 +384,6 @@ function ringFire(dx, dy) {
 function ringMiss() {
   modeState.missed = modeState.fly ? modeState.fly.path : null;
   modeState.fly = null;
-  modeState.streak = 0;
   modeState.lives -= 1;
   if (modeState.lives <= 0) modeState.over = true;
   else modeState.rest = RING_REST;
@@ -427,20 +412,18 @@ function ringTrail(path, color) {
 
 MODES.ring = {
   label: 'кольцо',
-  note: 'Тяни от мяча и отпускай: тяга задаёт и угол, и силу. Мяч тяжёлый, летит дугой, и попасть в кольцо можно только отскоком от стены — такой путь и есть К. Уровень один и бесконечный: с каждым попаданием кольцо меньше и качается сильнее. Три промаха — конец, R — заново.',
+  note: 'Тяни от мяча и отпускай: тяга задаёт и угол, и силу. Мяч летит дугой, а попасть в кольцо можно только после отскока от ствола — такой путь и есть К. После каждого попадания задача понемногу усложняется. Три промаха — конец, R — заново.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'weight', label: 'вес', min: 0.0001, max: 0.0012, step: 0.00005, value: 0.00045 },
-    { type: 'range', key: 'narrow', label: 'сложность', min: 0, max: 1, step: 0.05, value: 1 },
+    { type: 'range', key: 'move', label: 'усложнение', min: 0, max: 1, step: 0.05, value: 0.8 },
     { type: 'toggle', key: 'hint', label: 'подсказка', value: false },
-    { type: 'toggle', key: 'bush', label: 'куст', value: true },
+    { type: 'toggle', key: 'trace', label: 'история', value: false },
     { type: 'button', label: 'заново', action() { MODES.ring.setup(); } },
   ],
 
   setup() {
     modeState.hits = 0;
-    modeState.score = 0;
-    modeState.streak = 0;
     modeState.lives = RING_LIVES;
     modeState.over = false;
     modeState.fly = null;
@@ -450,13 +433,12 @@ MODES.ring = {
     modeState.rest = 0;
     modeState.missed = null;
     modeState.done = [];
+    modeState.guidePath = null;
     ringDeal();
-    /* Кадр не должен открываться пустым: одна К уже написана — путь найденного
-       решения кладётся в куст напрямую, мимо счёта и жизней. */
     const shot = modeState.solved;
     if (shot) {
       const shown = ringShot(modeState.ball, modeState.hoop, shot.angle, shot.power, num('weight'));
-      if (shown.hit) modeState.done.push(shown.path);
+      if (shown.hit) modeState.guidePath = shown.path;
     }
   },
 
@@ -482,6 +464,7 @@ MODES.ring = {
       if (modeState.rest === 0 && !modeState.over) {
         modeState.missed = null;
         ringDeal();
+        modeState.fresh = null;
       }
       return;
     }
@@ -517,11 +500,7 @@ MODES.ring = {
       const hoop = ringHoop();
       const near = ringNear(px, py, fly.x, fly.y, hoop.x, hoop.y);
       if (near <= hoop.r) {
-        const closeness = 1 - near / hoop.r;
-        modeState.streak += 1;
         modeState.hits += 1;
-        const mult = Math.min(modeState.streak, RING_MULT);
-        modeState.score += Math.round(100 * mult * (0.6 + 0.4 * closeness));
         modeState.fresh = fly.path;
         modeState.done.push(fly.path);
         if (modeState.done.length > RING_KEEP) modeState.done.shift();
@@ -539,12 +518,22 @@ MODES.ring = {
   draw() {
     const ball = modeState.ball;
     const hoop = ringHoop();
+    const hits = modeState.hits;
+    const misses = RING_LIVES - modeState.lives;
+    const hitText = `${hits} ${plural(hits, 'попадание', 'попадания', 'попаданий')}`;
+    const missText = `${misses} ${plural(misses, 'промах', 'промаха', 'промахов')}`;
 
-    if (on('bush')) {
-      for (const path of modeState.done) {
-        const fresh = path === modeState.fresh;
-        poly(path, fresh ? RED : ink(0.2), fresh ? 0.005 : 0.004);
+    if (on('trace')) {
+      for (let i = 0; i < modeState.done.length; i += 1) {
+        const path = modeState.done[i];
+        if (path === modeState.fresh) continue;
+        const age = (i + 1) / modeState.done.length;
+        poly(path, ink(0.08 + age * 0.14), 0.0035);
       }
+    }
+
+    if (modeState.fresh && modeState.rest > 0) {
+      poly(modeState.fresh, RED, 0.005);
     }
 
     /* Стена целиком — ствол буквы, и отражает она вся. */
@@ -557,12 +546,11 @@ MODES.ring = {
     ctx.stroke();
     dot(hoop.x, hoop.y, ink(0.3), 0.004);
 
-    /* Подсказка: найденное решение целиком, пунктиром. */
-    if (on('hint') && modeState.solved && !modeState.fly) {
-      const shot = modeState.solved;
-      const shown = ringShot(ball, hoop, shot.angle, shot.power, num('weight'));
+    /* В начале путь виден как бледная форма К: человек понимает задачу до
+       первого броска. Подсказка делает тот же путь заметнее. */
+    if (modeState.guidePath && modeState.hits === 0 && !modeState.fly) {
       ctx.setLineDash([0.01 * S, 0.014 * S]);
-      poly(shown.path, ink(0.2), 0.0025);
+      poly(modeState.guidePath, ink(on('hint') ? 0.34 : 0.14), 0.0025);
       ctx.setLineDash([]);
     }
 
@@ -594,14 +582,661 @@ MODES.ring = {
     }
 
     for (let i = 0; i < RING_LIVES; i += 1) {
-      dot(0.94 - i * 0.028, 0.95, i < modeState.lives ? ink(0.55) : ink(0.14), 0.0075);
+      dot(0.94 - i * 0.028, 0.95, i < modeState.lives ? ink(0.55) : ink(0.14), 0.0085);
     }
 
     if (modeState.over) {
-      drawStatus(`${modeState.score} · партия окончена, R — заново`, true);
+      drawStatus(`${hitText} · партия окончена, R — заново`, true);
     } else {
-      drawStatus(`${modeState.score} · серия ${modeState.streak}`);
+      drawStatus(`${hitText} · ${missText}`);
     }
+  },
+};
+
+/* ---------- ворота: копия кольца ---------- */
+
+/* Здесь кольцо становится не мишенью, а воротами в верхней ветви К. Вход у
+   ворот вращается: бросок всё ещё один, но теперь нужно поймать момент, когда
+   открытый сектор смотрит навстречу мячу. Широкое окно оставляет механику
+   доступной, а несколько призрачных положений делают движение видимым. */
+
+const GATE_RATE = 0.012;
+
+function gateMouth() {
+  return lerp(0.62, 1.18, num('mouth'));
+}
+
+function gateAngleDiff(a, b) {
+  return Math.atan2(Math.sin(a - b), Math.cos(a - b));
+}
+
+function gateCrossing(ax, ay, bx, by, hoop) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const ox = ax - hoop.x;
+  const oy = ay - hoop.y;
+  const a = dx * dx + dy * dy;
+  if (!a) return null;
+  const b = 2 * (ox * dx + oy * dy);
+  const c = ox * ox + oy * oy - hoop.r * hoop.r;
+  const discriminant = b * b - 4 * a * c;
+  if (discriminant <= 0) return null;
+
+  const root = Math.sqrt(discriminant);
+  const roots = [(-b - root) / (2 * a), (-b + root) / (2 * a)].sort((one, two) => one - two);
+  for (const t of roots) {
+    if (t < 0 || t > 1) continue;
+    const before = Math.max(0, t - 0.002);
+    const after = Math.min(1, t + 0.002);
+    const beforeX = ax + dx * before;
+    const beforeY = ay + dy * before;
+    const afterX = ax + dx * after;
+    const afterY = ay + dy * after;
+    const beforeDist = Math.hypot(beforeX - hoop.x, beforeY - hoop.y);
+    const afterDist = Math.hypot(afterX - hoop.x, afterY - hoop.y);
+    if (beforeDist > hoop.r && afterDist <= hoop.r) {
+      const x = ax + dx * t;
+      const y = ay + dy * t;
+      return { angle: Math.atan2(y - hoop.y, x - hoop.x) };
+    }
+  }
+  return null;
+}
+
+function gateEntry(path, hoop) {
+  for (let i = 1; i < path.length; i += 1) {
+    const crossing = gateCrossing(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y, hoop);
+    if (crossing) return crossing.angle;
+  }
+  return Math.PI / 2;
+}
+
+function gatePass(ax, ay, bx, by, hoop) {
+  const crossing = gateCrossing(ax, ay, bx, by, hoop);
+  if (!crossing) return false;
+  return Math.abs(gateAngleDiff(crossing.angle, modeState.gateAngle)) <= gateMouth() * 0.62;
+}
+
+function gateDeal() {
+  ringDeal();
+  modeState.gatePath = null;
+  if (!modeState.solved) return;
+
+  const shown = ringShot(modeState.ball, modeState.hoop, modeState.solved.angle, modeState.solved.power, num('weight'));
+  if (!shown.hit) return;
+  modeState.gatePath = shown.path;
+  modeState.gateAngle = gateEntry(shown.path, modeState.hoop);
+}
+
+function gateArc(x, y, radius, start, end, color, width) {
+  ctx.beginPath();
+  ctx.arc(x * S, y * S, radius * S, start, end);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width * S;
+  ctx.lineCap = 'butt';
+  ctx.stroke();
+}
+
+function drawGateK(hoop) {
+  line(K.stem, K.top, K.stem, K.bottom, INK, 0.026);
+  line(K.stem, K.node, hoop.x - hoop.r * 0.78, hoop.y + hoop.r * 0.4, INK, 0.026);
+}
+
+function drawGateRing(hoop, alpha = 1) {
+  const mouth = gateMouth();
+  const gap = mouth * 0.72;
+  const start = modeState.gateAngle + gap;
+  const end = modeState.gateAngle + TAU - gap;
+  gateArc(hoop.x, hoop.y, hoop.r, start, end, ink(0.9 * alpha), 0.018);
+}
+
+MODES.gate = {
+  label: 'ворота',
+  note: 'К стала воротами: тяни мяч и отпускай после рикошета. Попасть мало — открытый сектор кольца должен встретить мяч. Кольцо вращается медленно, поэтому момент можно поймать без второго органа управления. Три промаха — конец, R — заново.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'weight', label: 'вес', min: 0.0001, max: 0.0012, step: 0.00005, value: 0.00045 },
+    { type: 'range', key: 'move', label: 'усложнение', min: 0, max: 1, step: 0.05, value: 0.55 },
+    { type: 'range', key: 'mouth', label: 'окно', min: 0, max: 1, step: 0.05, value: 0.7 },
+    { type: 'toggle', key: 'trace', label: 'история', value: false },
+    { type: 'button', label: 'заново', action() { MODES.gate.setup(); } },
+  ],
+
+  setup() {
+    modeState.hits = 0;
+    modeState.lives = RING_LIVES;
+    modeState.over = false;
+    modeState.fly = null;
+    modeState.aim = false;
+    modeState.fresh = null;
+    modeState.phase = 0;
+    modeState.gateAngle = 0;
+    modeState.gateFlash = 0;
+    modeState.rest = 0;
+    modeState.missed = null;
+    modeState.done = [];
+    gateDeal();
+  },
+
+  onDown() {
+    if (modeState.fly || modeState.over || modeState.rest > 0) return;
+    modeState.aim = true;
+  },
+
+  onUp() {
+    if (!modeState.aim) return;
+    modeState.aim = false;
+    const dx = pointer.x - modeState.ball.x;
+    const dy = pointer.y - modeState.ball.y;
+    if (Math.hypot(dx, dy) < 0.02) return;
+    ringFire(dx, dy);
+  },
+
+  step() {
+    const hard = ringHard();
+    modeState.phase += RING_RATE + hard * RING_RATE;
+    modeState.gateAngle += GATE_RATE + hard * GATE_RATE * 0.5;
+    modeState.gateFlash = Math.max(0, modeState.gateFlash - 1);
+
+    if (modeState.rest > 0) {
+      modeState.rest -= 1;
+      if (modeState.rest === 0 && !modeState.over) {
+        modeState.missed = null;
+        modeState.fresh = null;
+        gateDeal();
+      }
+      return;
+    }
+
+    const fly = modeState.fly;
+    if (!fly) return;
+
+    fly.age += 1;
+    const px = fly.x;
+    const py = fly.y;
+    fly.vy += num('weight');
+    fly.x += fly.vx;
+    fly.y += fly.vy;
+
+    if ((px - K.stem) * (fly.x - K.stem) < 0) {
+      const t = (K.stem - px) / (fly.x - px || 1e-6);
+      const at = py + (fly.y - py) * t;
+      if (at >= K.top && at <= K.bottom) {
+        fly.x = K.stem;
+        fly.y = at;
+        fly.vx = -fly.vx * RING_KICK;
+        fly.path.push({ x: fly.x, y: fly.y });
+        fly.hit = true;
+      }
+    }
+
+    fly.path.push({ x: fly.x, y: fly.y });
+
+    if (fly.hit) {
+      const hoop = ringHoop();
+      if (gatePass(px, py, fly.x, fly.y, hoop)) {
+        modeState.hits += 1;
+        modeState.fresh = fly.path;
+        modeState.done.push(fly.path);
+        if (modeState.done.length > RING_KEEP) modeState.done.shift();
+        modeState.fly = null;
+        modeState.missed = null;
+        modeState.gateFlash = 24;
+        modeState.rest = RING_REST;
+        return;
+      }
+    }
+
+    const gone = fly.x < -0.05 || fly.x > 1.05 || fly.y > 1.05;
+    if (gone || fly.age > RING_FLIGHT) ringMiss();
+  },
+
+  draw() {
+    const ball = modeState.ball;
+    const hoop = ringHoop();
+    const hits = modeState.hits;
+    const misses = RING_LIVES - modeState.lives;
+    const hitText = `${hits} ${plural(hits, 'попадание', 'попадания', 'попаданий')}`;
+    const missText = `${misses} ${plural(misses, 'промах', 'промаха', 'промахов')}`;
+
+    if (on('trace')) {
+      for (let i = 0; i < modeState.done.length; i += 1) {
+        const path = modeState.done[i];
+        if (path === modeState.fresh) continue;
+        poly(path, ink(0.08 + ((i + 1) / modeState.done.length) * 0.14), 0.0035);
+      }
+    }
+
+    drawGateK(hoop);
+    drawGateRing(hoop, 1);
+
+    if (modeState.gateFlash > 0) {
+      gateArc(hoop.x, hoop.y, hoop.r * 1.42, modeState.gateAngle - 0.7, modeState.gateAngle + 0.7, RED, 0.008);
+    }
+
+    if (modeState.fresh && modeState.rest > 0) poly(modeState.fresh, RED, 0.0055);
+
+    dot(ball.x, ball.y, modeState.over ? ink(0.25) : INK, 0.024);
+
+    if (modeState.missed) {
+      poly(modeState.missed, ink(0.22), 0.003);
+      const end = modeState.missed[modeState.missed.length - 1];
+      dot(end.x, end.y, ink(0.3), 0.011);
+    }
+
+    if (modeState.fly) {
+      ringTrail(modeState.fly.path, (fade) => ink(0.15 + fade * 0.7));
+      dot(modeState.fly.x, modeState.fly.y, INK, 0.018);
+    }
+
+    if (modeState.aim) {
+      const dx = pointer.x - ball.x;
+      const dy = pointer.y - ball.y;
+      const len = Math.hypot(dx, dy) || 1e-6;
+      const pull = Math.min(len, RING_REACH);
+      const start = ringShot(ball, hoop, Math.atan2(dy, dx), pull * RING_PULL, num('weight'), 34);
+      poly(start.path, ink(0.42), 0.0035);
+    }
+
+    for (let i = 0; i < RING_LIVES; i += 1) {
+      dot(0.94 - i * 0.028, 0.95, i < modeState.lives ? ink(0.55) : ink(0.14), 0.0085);
+    }
+
+    if (modeState.over) drawStatus(`${hitText} · партия окончена, R — заново`, true);
+    else drawStatus(`${hitText} · ${missText}`);
+  },
+};
+
+/* ---------- подвес: новая копия ---------- */
+
+/* В этой версии К не рисуется ветками заранее. Стойка — единственная чёрная
+   форма, а нижняя дуга рождается из самого броска. Кольцо висит отдельно на
+   тонкой нити и вращается вокруг неё: игрок выбирает не готовую линию, а силу
+   удара и момент. Удар двигает стойку, поэтому следующий бросок начинается
+   уже в другой геометрии. */
+
+const SUSP_STEM_X = 0.34;
+const SUSP_STEM_TOP = 0.2;
+const SUSP_STEM_BOTTOM = 0.8;
+const SUSP_RING = { x: 0.72, y: SUSP_STEM_TOP + 0.062, r: 0.062 };
+const SUSP_RING_SWAY = 0.06;
+const SUSP_BALL = { x: 0.72, y: 0.84 };
+const SUSP_PULL = 0.11;
+const SUSP_REACH = 0.34;
+const SUSP_KICK = 0.95;
+const SUSP_STEM_INERTIA = 2.4;
+const SUSP_FLIGHT = 700;
+const SUSP_REST = 35;
+const SUSP_TRAIL = 42;
+
+function suspendStem(angle = modeState.stemAngle) {
+  const length = SUSP_STEM_BOTTOM - SUSP_STEM_TOP;
+  return {
+    top: { x: SUSP_STEM_X, y: SUSP_STEM_TOP },
+    bottom: {
+      x: SUSP_STEM_X + Math.sin(angle) * length,
+      y: SUSP_STEM_TOP + Math.cos(angle) * length,
+    },
+  };
+}
+
+function suspendStemX(y, angle = modeState.stemAngle) {
+  return SUSP_STEM_X + Math.tan(angle) * (y - SUSP_STEM_TOP);
+}
+
+function suspendStemCrossing(ax, ay, bx, by, angleBefore, angleAfter) {
+  function sample(t) {
+    const angle = lerp(angleBefore, angleAfter, t);
+    const y = lerp(ay, by, t);
+    const x = lerp(ax, bx, t);
+    return { angle, y, x, gap: x - suspendStemX(y, angle) };
+  }
+
+  const start = sample(0);
+  const end = sample(1);
+  if (start.gap * end.gap > 0) return null;
+
+  let lowT = 0;
+  let highT = 1;
+  let lowGap = start.gap;
+  for (let i = 0; i < 9; i += 1) {
+    const t = (lowT + highT) / 2;
+    const point = sample(t);
+    if (lowGap * point.gap <= 0) highT = t;
+    else {
+      lowT = t;
+      lowGap = point.gap;
+    }
+  }
+
+  const hit = sample(highT);
+  const stem = suspendStem(hit.angle);
+  if (hit.y < stem.top.y || hit.y > stem.bottom.y) return null;
+  return {
+    t: highT,
+    x: suspendStemX(hit.y, hit.angle),
+    y: hit.y,
+    angle: hit.angle,
+    side: Math.sign(start.gap) || 1,
+  };
+}
+
+function suspendRing() {
+  const offset = modeState.ringOffset;
+  const string = SUSP_STEM_TOP;
+  const attachY = Math.sqrt(Math.max(0, string * string - offset * offset));
+  const squeeze = Math.max(0.045, Math.abs(Math.cos(modeState.ringAngle)));
+  return {
+    ...SUSP_RING,
+    x: SUSP_RING.x + offset,
+    y: attachY + SUSP_RING.r,
+    rx: SUSP_RING.r * squeeze,
+    ry: SUSP_RING.r,
+  };
+}
+
+function suspendThreadNear(ax, ay, bx, by, ring) {
+  const cx = SUSP_RING.x;
+  const cy = 0;
+  const dx = ring.x;
+  const dy = ring.y - ring.ry;
+  const side = (x1, y1, x2, y2, x3, y3) => (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1);
+  const one = side(ax, ay, bx, by, cx, cy);
+  const two = side(ax, ay, bx, by, dx, dy);
+  const three = side(cx, cy, dx, dy, ax, ay);
+  const four = side(cx, cy, dx, dy, bx, by);
+  if (one * two <= 0 && three * four <= 0) return 0;
+  return Math.min(
+    ringNear(ax, ay, bx, by, cx, cy),
+    ringNear(ax, ay, bx, by, dx, dy),
+    ringNear(cx, cy, dx, dy, ax, ay),
+    ringNear(cx, cy, dx, dy, bx, by),
+  );
+}
+
+function suspendEllipseCrossing(ax, ay, bx, by, ellipse) {
+  const dx = (bx - ax) / ellipse.rx;
+  const dy = (by - ay) / ellipse.ry;
+  const ox = (ax - ellipse.x) / ellipse.rx;
+  const oy = (ay - ellipse.y) / ellipse.ry;
+  const a = dx * dx + dy * dy;
+  if (!a) return null;
+  const b = 2 * (ox * dx + oy * dy);
+  const c = ox * ox + oy * oy - 1;
+  const discriminant = b * b - 4 * a * c;
+  if (discriminant <= 0) return null;
+
+  const root = Math.sqrt(discriminant);
+  const roots = [(-b - root) / (2 * a), (-b + root) / (2 * a)].sort((one, two) => one - two);
+  for (const t of roots) {
+    if (t < 0 || t > 1) continue;
+    const before = Math.max(0, t - 0.002);
+    const after = Math.min(1, t + 0.002);
+    const beforeDist = Math.hypot(ox + dx * before, oy + dy * before);
+    const afterDist = Math.hypot(ox + dx * after, oy + dy * after);
+    if (beforeDist > 1 && afterDist <= 1) return t;
+  }
+  return null;
+}
+
+function suspendPass(ax, ay, bx, by, ring) {
+  const inner = suspendEllipseCrossing(ax, ay, bx, by, {
+    x: ring.x,
+    y: ring.y,
+    rx: ring.rx * 0.78,
+    ry: ring.ry * 0.78,
+  });
+  return inner !== null;
+}
+
+function suspendLaunch(dx, dy) {
+  const len = Math.hypot(dx, dy) || 1;
+  const pull = Math.min(len, SUSP_REACH);
+  const ball = modeState.ball;
+  modeState.force = pull;
+  modeState.fly = {
+    x: ball.x,
+    y: ball.y,
+    vx: (dx / len) * pull * SUSP_PULL,
+    vy: (dy / len) * pull * SUSP_PULL,
+    path: [{ x: ball.x, y: ball.y }],
+    bounced: false,
+    scored: false,
+    threadHit: false,
+    age: 0,
+  };
+}
+
+function suspendMiss() {
+  modeState.fly = null;
+  modeState.lives -= 1;
+  if (modeState.lives <= 0) modeState.over = true;
+  else modeState.rest = SUSP_REST;
+}
+
+function suspendPreview(ball, dx, dy) {
+  const len = Math.hypot(dx, dy) || 1;
+  const pull = Math.min(len, SUSP_REACH);
+  let x = ball.x;
+  let y = ball.y;
+  let vx = (dx / len) * pull * SUSP_PULL;
+  let vy = (dy / len) * pull * SUSP_PULL;
+  const path = [{ x, y }];
+  let bounced = false;
+  for (let i = 0; i < 22; i += 1) {
+    const px = x;
+    const py = y;
+    vy += num('weight');
+    x += vx;
+    y += vy;
+    const hit = bounced ? null : suspendStemCrossing(px, py, x, y, modeState.stemAngle, modeState.stemAngle);
+    if (hit) {
+      x = hit.x;
+      y = hit.y;
+      vx = -vx * SUSP_KICK;
+      bounced = true;
+    }
+    path.push({ x, y });
+  }
+  return path;
+}
+
+function suspendTrail(path, color) {
+  const from = Math.max(0, path.length - SUSP_TRAIL);
+  for (let i = from + 1; i < path.length; i += 2) {
+    const fade = (i - from) / Math.max(path.length - from, 1);
+    poly(path.slice(Math.max(from, i - 2), i + 1), color(fade), 0.002 + fade * 0.003);
+  }
+}
+
+function drawSuspendRing(ring, color = INK, width = 0.012) {
+  ctx.beginPath();
+  ctx.ellipse(ring.x * S, ring.y * S, ring.rx * S, ring.ry * S, 0, 0, TAU);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width * S;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+}
+
+function drawSuspendForce() {
+  const x = 0.69;
+  const y = 0.95;
+  const width = 0.14;
+  line(x, y, x + width, y, ink(0.35), 0.009);
+  line(x, y, x + width * clamp(modeState.force / SUSP_REACH, 0, 1), y, RED, 0.009);
+}
+
+MODES.suspension = {
+  label: 'подвес',
+  note: 'Тяни мяч и отпускай: сила удара отмечается красной полосой. Мяч бьёт в стойку, стойка раскачивается и меняет следующую попытку. Кольцо вращается вокруг нити и колышется от касаний. Видна только короткая часть полёта — остальное приходится почувствовать. Три промаха — конец, R — заново.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'weight', label: 'вес', min: 0.0001, max: 0.0012, step: 0.00005, value: 0.00045 },
+    { type: 'range', key: 'spin', label: 'вращение', min: 0.2, max: 1.4, step: 0.05, value: 0.8 },
+    { type: 'toggle', key: 'trace', label: 'история', value: false },
+    { type: 'button', label: 'заново', action() { MODES.suspension.setup(); } },
+  ],
+
+  setup() {
+    modeState.ball = { ...SUSP_BALL };
+    modeState.force = 0;
+    modeState.lives = RING_LIVES;
+    modeState.hits = 0;
+    modeState.over = false;
+    modeState.fly = null;
+    modeState.aim = false;
+    modeState.stemAngle = 0;
+    modeState.stemAngularVelocity = 0;
+    modeState.ringAngle = 0;
+    modeState.ringOffset = 0;
+    modeState.ringVelocity = 0;
+    modeState.rest = 0;
+    modeState.fresh = null;
+    modeState.done = [];
+  },
+
+  onDown() {
+    if (modeState.fly || modeState.over || modeState.rest > 0) return;
+    modeState.aim = true;
+  },
+
+  onMove() {
+    if (!pointer.down) return;
+    modeState.force = Math.min(Math.hypot(pointer.x - modeState.ball.x, pointer.y - modeState.ball.y), SUSP_REACH);
+  },
+
+  onUp() {
+    if (!modeState.aim) return;
+    modeState.aim = false;
+    const dx = pointer.x - modeState.ball.x;
+    const dy = pointer.y - modeState.ball.y;
+    if (Math.hypot(dx, dy) < 0.02) return;
+    suspendLaunch(dx, dy);
+  },
+
+  step() {
+    const angleBefore = modeState.stemAngle;
+    modeState.ringAngle += num('spin') * 0.018;
+    modeState.ringOffset += modeState.ringVelocity;
+    modeState.ringVelocity *= 0.993;
+    modeState.ringVelocity -= modeState.ringOffset * 0.012;
+    modeState.ringOffset = clamp(modeState.ringOffset, -SUSP_RING_SWAY, SUSP_RING_SWAY);
+    modeState.stemAngle += modeState.stemAngularVelocity;
+    modeState.stemAngularVelocity *= 0.992;
+    modeState.stemAngularVelocity -= Math.sin(modeState.stemAngle) * 0.006;
+    modeState.stemAngle = clamp(modeState.stemAngle, -0.22, 0.22);
+    const angleAfter = modeState.stemAngle;
+
+    if (modeState.rest > 0) {
+      modeState.rest -= 1;
+      if (modeState.rest === 0 && !modeState.over) modeState.fresh = null;
+      return;
+    }
+
+    const fly = modeState.fly;
+    if (!fly) return;
+
+    fly.age += 1;
+    const px = fly.x;
+    const py = fly.y;
+    fly.vy += num('weight');
+    fly.x += fly.vx;
+    fly.y += fly.vy;
+
+    if (!fly.bounced) {
+      const hit = suspendStemCrossing(px, py, fly.x, fly.y, angleBefore, angleAfter);
+      if (hit) {
+        const length = SUSP_STEM_BOTTOM - SUSP_STEM_TOP;
+        const lever = clamp((hit.y - SUSP_STEM_TOP) / length, 0, 1);
+        const distance = length * lever;
+        const normalX = Math.cos(hit.angle) * hit.side;
+        const normalY = -Math.sin(hit.angle) * hit.side;
+        const ballNormal = fly.vx * normalX + fly.vy * normalY;
+        const stemNormal = modeState.stemAngularVelocity * distance * hit.side;
+        const relativeNormal = ballNormal - stemNormal;
+        if (relativeNormal < 0) {
+          const impulse = -(1 + SUSP_KICK) * relativeNormal
+            / (1 + distance * distance / SUSP_STEM_INERTIA);
+          fly.x = hit.x;
+          fly.y = hit.y;
+          fly.vx += impulse * normalX;
+          fly.vy += impulse * normalY;
+          fly.bounced = true;
+          modeState.stemAngularVelocity -= impulse * hit.side * distance / SUSP_STEM_INERTIA;
+        }
+      }
+    }
+
+    fly.path.push({ x: fly.x, y: fly.y });
+
+    const ring = suspendRing();
+    if (!fly.threadHit && suspendThreadNear(px, py, fly.x, fly.y, ring) <= 0.014) {
+      modeState.ringVelocity += clamp(fly.vx * 0.22, -0.007, 0.007);
+      fly.vx *= 0.93;
+      fly.threadHit = true;
+    }
+
+    if (!fly.scored && fly.bounced && suspendPass(px, py, fly.x, fly.y, ring)) {
+      modeState.hits += 1;
+      modeState.ringVelocity += clamp(fly.vx * 0.22, -0.007, 0.007);
+      fly.scored = true;
+      modeState.fresh = fly.path;
+      modeState.done.push(modeState.fresh);
+      if (modeState.done.length > RING_KEEP) modeState.done.shift();
+    }
+
+    const gone = fly.x < -0.05 || fly.x > 1.05 || fly.y > 1.05;
+    if (gone || fly.age > SUSP_FLIGHT) {
+      if (fly.scored) {
+        modeState.fly = null;
+        modeState.rest = SUSP_REST;
+      } else suspendMiss();
+    }
+  },
+
+  draw() {
+    const ring = suspendRing();
+    const stem = suspendStem();
+    const hits = modeState.hits;
+    const misses = RING_LIVES - modeState.lives;
+    const hitText = `${hits} ${plural(hits, 'попадание', 'попадания', 'попаданий')}`;
+    const missText = `${misses} ${plural(misses, 'промах', 'промаха', 'промахов')}`;
+
+    if (on('trace')) {
+      for (const path of modeState.done) {
+        if (path === modeState.fresh) continue;
+        poly(path, ink(0.18), 0.018);
+      }
+    }
+
+    line(SUSP_STEM_X, 0, stem.top.x, stem.top.y, ink(0.2), 0.002);
+    line(stem.top.x, stem.top.y, stem.bottom.x, stem.bottom.y, INK, 0.018);
+    line(SUSP_RING.x, 0, ring.x, ring.y - ring.ry, ink(0.2), 0.002);
+    drawSuspendRing(ring, INK, 0.012);
+
+    if (modeState.fresh && modeState.rest > 0) poly(modeState.fresh, INK, 0.018);
+
+    if (modeState.fly) {
+      if (modeState.fly.scored) poly(modeState.fly.path, INK, 0.018);
+      else suspendTrail(modeState.fly.path, (fade) => ink(0.2 + fade * 0.65));
+      dot(modeState.fly.x, modeState.fly.y, INK, 0.016);
+    } else {
+      dot(modeState.ball.x, modeState.ball.y, modeState.over ? ink(0.25) : INK, 0.022);
+    }
+
+    if (modeState.aim) {
+      const dx = pointer.x - modeState.ball.x;
+      const dy = pointer.y - modeState.ball.y;
+      poly(suspendPreview(modeState.ball, dx, dy), ink(0.34), 0.0025);
+    }
+
+    drawSuspendForce();
+    for (let i = 0; i < RING_LIVES; i += 1) {
+      dot(0.94 - i * 0.028, 0.95, i < modeState.lives ? ink(0.55) : ink(0.14), 0.0085);
+    }
+
+    if (modeState.over) drawStatus(`${hitText} · партия окончена, R — заново`, true);
+    else drawStatus(`${hitText} · ${missText}`);
   },
 };
 
