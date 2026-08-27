@@ -62,4 +62,8 @@ const LABS = [
     slug: 'k', letter: 'К', title: 'узел и два луча', tile: true,
     mechanics: ['кронштейн', 'кольцо', 'ножницы', 'раскол'],
   },
+  {
+    slug: 'ya', letter: 'Я', title: 'холст из чужих я', tile: true,
+    mechanics: ['холст', 'рост', 'касса'],
+  },
 ];
