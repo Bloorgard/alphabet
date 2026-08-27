@@ -102,8 +102,25 @@ function cell(index, grid, alpha, span = 1) {
   ctx.fillRect((index % grid) * step, Math.floor(index / grid) * step, step * span - gap, step * span - gap);
 }
 
+/* Канва — контур в одну клетку, а не залитая буква. Она подсказывает форму,
+   но не запирает в ней: ставить можно где угодно, и часть народу непременно
+   поставит мимо. */
+function outline(m) {
+  if (m.edge) return m.edge;
+  const edge = [];
+  const empty = (x, y) => x < 0 || y < 0 || x >= m.grid || y >= m.grid || !m.cells[y * m.grid + x];
+  for (let i = 0; i < m.cells.length; i += 1) {
+    if (!m.cells[i]) continue;
+    const x = i % m.grid;
+    const y = Math.floor(i / m.grid);
+    if (empty(x - 1, y) || empty(x + 1, y) || empty(x, y - 1) || empty(x, y + 1)) edge.push(i);
+  }
+  m.edge = edge;
+  return edge;
+}
+
 function guide(m) {
-  for (const index of m.list) cell(index, m.grid, 0.1);
+  for (const index of outline(m)) cell(index, m.grid, 0.22);
 }
 
 function percent(part, whole) {
@@ -176,24 +193,40 @@ MODES.growth = {
   tools: [
     { type: 'range', key: 'people', label: 'отметок всего', min: 0, max: 6000, step: 25, value: 600 },
     { type: 'range', key: 'edge', label: 'порог удвоения, %', min: 50, max: 95, step: 5, value: 85 },
+    { type: 'range', key: 'stray', label: 'мимо контура, %', min: 0, max: 60, step: 1, value: 20 },
     { type: 'toggle', key: 'floor', label: 'пол ¼', value: true },
     { type: 'toggle', key: 'guide', label: 'канва', value: true },
   ],
   draw() {
     const total = Math.round(num('people'));
     const edge = num('edge') / 100;
-    const key = `${total}:${edge}`;
+    const stray = num('stray') / 100;
+    const key = `${total}:${edge}:${stray}`;
     if (modeState.key !== key) {
       modeState.key = key;
       let level = 1;
-      let order = shuffled(mask(GRIDS[level]).list, 11);
+      let m = mask(GRIDS[level]);
+      let order = shuffled(m.list, 11);
+      let wide = shuffled(Array.from({ length: m.grid * m.grid }, (unused, i) => i).filter((i) => !m.cells[i]), 12);
       let used = 0;
+      let past = 0;
+      const rand = rng(13);
       const marks = [];
+      /* Заполнение считается от площади буквы: рисуют и мимо, но мерой
+         остаётся сама Я — иначе порог не наступит никогда. */
       for (let n = 0; n < total; n += 1) {
-        if (used >= order.length * edge && level < GRIDS.length - 1) {
+        if (used + past >= order.length * edge && level < GRIDS.length - 1) {
           level += 1;
-          order = shuffled(mask(GRIDS[level]).list, 11 + level);
+          m = mask(GRIDS[level]);
+          order = shuffled(m.list, 11 + level);
+          wide = shuffled(Array.from({ length: m.grid * m.grid }, (unused, i) => i).filter((i) => !m.cells[i]), 12 + level);
           used = 0;
+          past = 0;
+        }
+        if (rand() < stray && past < wide.length) {
+          marks.push({ index: wide[past], level });
+          past += 1;
+          continue;
         }
         if (used >= order.length) break;
         marks.push({ index: order[used], level });
@@ -229,64 +262,81 @@ MODES.growth = {
    Здесь их крутят руками и смотрят, жадно вышло или даром. */
 MODES.spend = {
   label: 'касса',
-  note: 'клик — поставить клетку · цена растёт с заполнением',
+  note: 'клик — поставить клетку · цена растёт с заполнением · сетка ×2 переводит холст на новый уровень',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'already', label: 'уже стоит', min: 0, max: 900, step: 10, value: 220 },
     { type: 'range', key: 'wallet', label: 'кошелёк', min: 1, max: 30, step: 1, value: 10 },
     { type: 'range', key: 'daily', label: 'в сутки', min: 1, max: 20, step: 1, value: 5 },
+    { type: 'toggle', key: 'guide', label: 'канва', value: true },
     { type: 'button', label: 'новый день', action() { modeState.today = 0; modeState.balance = Math.round(num('wallet')); } },
-    { type: 'button', label: 'сброс', action() { modeState.mine = new Set(); modeState.today = 0; modeState.balance = Math.round(num('wallet')); } },
+    { type: 'button', label: 'сброс', action() { modeState.mine = []; modeState.today = 0; modeState.balance = Math.round(num('wallet')); } },
   ],
   setup() {
-    modeState.mine = new Set();
+    modeState.mine = [];
+    modeState.others = [];
     modeState.today = 0;
-    modeState.balance = 10;
+    modeState.balance = Math.round(num('wallet'));
     modeState.refused = 0;
   },
   onTool(key) {
     if (key === 'wallet') modeState.balance = Math.round(num('wallet'));
   },
+  /* Занята только клетка текущего уровня: после удвоения поле снова пустое,
+     а прежние отметки живут бледной подложкой. */
+  taken(x, y) {
+    const here = (item) => item.level === yaLevel && item.x === x && item.y === y;
+    return modeState.mine.some(here) || modeState.others.some(here);
+  },
+  /* Тормоз: чем плотнее буква, тем дороже клетка. Мерой остаётся площадь Я,
+     даже если часть народу ставит мимо. Удвоение сбрасывает цену. */
+  price(m) {
+    const level = (item) => item.level === yaLevel;
+    const filled = (modeState.others.filter(level).length + modeState.mine.filter(level).length) / m.list.length;
+    return filled < 0.25 ? 1 : filled < 0.5 ? 2 : filled < 0.75 ? 3 : 4;
+  },
   onDown() {
     const grid = GRIDS[yaLevel];
-    const m = mask(grid);
     const x = Math.floor(clamp(pointer.x, 0, 0.999) * grid);
     const y = Math.floor(clamp(pointer.y, 0, 0.999) * grid);
-    const index = y * grid + x;
-    const taken = modeState.mine.has(index) || (modeState.others || new Set()).has(index);
-    const price = MODES.spend.price(m);
-    if (taken || modeState.today >= num('daily') || modeState.balance < price) {
+    const price = MODES.spend.price(mask(grid));
+    if (MODES.spend.taken(x, y) || modeState.today >= num('daily') || modeState.balance < price) {
       modeState.refused = 1;
       return;
     }
-    modeState.mine.add(index);
+    modeState.mine.push({ x, y, level: yaLevel });
     modeState.today += 1;
     modeState.balance -= price;
     modeState.refused = 0;
   },
-  /* Тормоз: чем плотнее буква, тем дороже следующая клетка. */
-  price(m) {
-    const filled = ((modeState.others?.size || 0) + (modeState.mine?.size || 0)) / m.list.length;
-    return filled < 0.25 ? 1 : filled < 0.5 ? 2 : filled < 0.75 ? 3 : 4;
-  },
   draw() {
     const grid = GRIDS[yaLevel];
     const m = mask(grid);
+
+    /* Чужие отметки пересыпаются на том уровне, где стоял холст в этот момент;
+       после удвоения они не переезжают, а крупнеют и бледнеют. */
     const already = Math.round(num('already'));
-    const key = `${grid}:${already}`;
-    if (modeState.key !== key) {
-      modeState.key = key;
-      modeState.others = new Set(shuffled(m.list, 3).slice(0, Math.min(already, m.list.length)));
+    if (modeState.key !== already) {
+      modeState.key = already;
+      modeState.others = shuffled(m.list, 3).slice(0, Math.min(already, m.list.length))
+        .map((index) => ({ x: index % grid, y: Math.floor(index / grid), level: yaLevel }));
     }
 
-    guide(m);
-    for (const index of modeState.others) cell(index, grid, 0.55);
-    for (const index of modeState.mine) cell(index, grid, 1);
+    if (on('guide')) guide(m);
+
+    const put = (item, base) => {
+      if (item.level > yaLevel) return;
+      const span = 1 << (yaLevel - item.level);
+      const alpha = span > 1 ? Math.max(0.25, base / span) : base;
+      cell(item.y * span * grid + item.x * span, grid, alpha, span);
+    };
+    for (const item of modeState.others) put(item, 0.55);
+    for (const item of modeState.mine) put(item, 1);
 
     if (pointer.seen) {
+      const step = S / grid;
       const x = Math.floor(clamp(pointer.x, 0, 0.999) * grid);
       const y = Math.floor(clamp(pointer.y, 0, 0.999) * grid);
-      const step = S / grid;
       ctx.strokeStyle = modeState.refused ? RED : INK;
       ctx.lineWidth = Math.max(1, step * 0.12);
       ctx.strokeRect(x * step, y * step, step, step);
@@ -295,7 +345,7 @@ MODES.spend = {
     const price = MODES.spend.price(m);
     const left = Math.round(num('daily')) - modeState.today;
     drawStatus(
-      `кошелёк ${modeState.balance} · клетка ${price} · сегодня осталось ${left}`,
+      `${grid}×${grid} · кошелёк ${modeState.balance} · клетка ${price} · сегодня осталось ${left}`,
       modeState.balance < price || left <= 0,
     );
   },

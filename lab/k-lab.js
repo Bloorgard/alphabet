@@ -241,113 +241,167 @@ MODES.truss = {
 
 /* ---------- кольцо ---------- */
 
-/* Мяч внизу справа, кольцо вверху справа, слева стена. Закинуть мяч в кольцо
-   можно только через отскок, и вот что тут главное: при упругом отражении
-   путь из точки в точку через одну стену единственный. Он идёт по прямой к
-   зеркальному образу кольца, и точка удара при симметричной расстановке
-   приходится ровно на середину стены. Значит стена — ствол, две ветви полёта
-   — ветви буквы, а попадание в кольцо и есть написанная К. Промахнулся —
-   буквы нет вовсе.
+/* Мяч внизу справа, кольцо вверху, слева стена. Закинуть мяч можно только
+   отскоком: без стены попадание не считается, и потому каждое очко — это
+   написанная К. Стена — ствол, две дуги полёта — ветви.
 
-   Из той же единственности растёт и сложность. Расстановка меняется каждый
-   бросок, поэтому угол каждый раз новый, а буква выходит своей пропорции —
-   поле набирается кустом разных К. Отражает при этом не вся стена, а пятно
-   вокруг узла, и оно сжимается с уровнем: сначала бить нужно примерно в
-   середину, дальше — точно в неё. Ушёл мимо пятна — мяч втыкается в стену.
+   Мяч тяжёлый, и это главное отличие от первой, прямой версии. Пока тяжести
+   не было, путь из точки в точку через стену был единственным: прямая к
+   зеркальному образу кольца, и больше никаких. С весом решений становится
+   семейство — можно кинуть внатяг понизу или навесом, — поэтому бросок задаёт
+   и угол, и силу, а ветви выходят дугами. Куст попаданий от этого и живёт:
+   прямые ложились одна в одну, дуги ложатся почерком.
 
-   Счёт: сотня за попадание, помноженная на серию, и добавка за то, насколько
-   близко к центру кольца прошёл мяч. Три промаха заканчивают партию.
+   Пятна на стене больше нет, отражает вся: оно ничего не давало игроку, кроме
+   лишнего запрета. Форму держит не запрет, а раздача — мяч и кольцо ставятся
+   так, чтобы попасть можно было, и чтобы путь читался буквой.
+
+   Уровень один и бесконечный. Сложность растёт с попаданиями: кольцо
+   уменьшается и начинает качаться, так что к двадцатому попаданию оно вдвое
+   меньше и не стоит на месте. Три промаха заканчивают партию.
 
    Красный тут событие: свежая К горит до следующего броска, прежние уходят
    в бледные чернила и остаются кустом. */
 
-const RING_SPOT = [0.055, 0.017]; // половина высоты зеркального пятна: старт и предел
-const RING_HOLE = [0.05, 0.015];  // радиус кольца там же
-const RING_STEPS = 12;            // за сколько уровней сложность доходит до предела
-const RING_MULT = 8;              // выше этого множитель серии не растёт
+const RING_HOLE = [0.04, 0.014];   // радиус кольца: первое попадание и предел
+const RING_SWAY = 0.07;            // насколько кольцо качается на пределе
+const RING_RATE = 0.011;           // и как быстро
+const RING_RAMP = 22;              // за сколько попаданий сложность доходит до предела
+const RING_PULL = 0.11;            // сколько скорости даёт доля тяги
+const RING_REACH = 0.34;           // дальше тянуть некуда
+const RING_KICK = 0.95;            // что остаётся от скорости после стены
 const RING_LIVES = 3;
-const RING_TRAIL = 110;           // длина шлейфа в шагах
-const RING_KEEP = 14;             // сколько написанных К держит поле
-const RING_FLIGHT = 900;          // дольше этого полёт считается промахом
+const RING_MULT = 8;               // выше этого множитель серии не растёт
+const RING_TRAIL = 130;            // длина шлейфа в шагах
+const RING_KEEP = 16;              // сколько написанных К держит поле
+const RING_FLIGHT = 700;           // дольше этого полёт считается промахом
+const RING_REST = 45;              // пауза показа: сколько кадров стоит результат
 
 function ringRand(from, to) {
   return from + Math.random() * (to - from);
 }
 
-/* Чем выше уровень, тем меньше и пятно на стене, и само кольцо. */
 function ringHard() {
-  const t = clamp((modeState.level - 1) / RING_STEPS, 0, 1) * num('narrow');
-  return {
-    spot: lerp(RING_SPOT[0], RING_SPOT[1], t),
-    hole: lerp(RING_HOLE[0], RING_HOLE[1], t),
-  };
+  return clamp(modeState.hits / RING_RAMP, 0, 1) * num('narrow');
 }
 
-/* Раздача проверяется трижды. Во-первых, на решаемость: точка отражения
-   считается через зеркальный образ кольца и должна попасть в пятно с запасом,
-   иначе уровень невыполним, а игрок об этом не узнает. Во-вторых и в-главных
-   — на букву. Отражение от вертикали симметрию ветвей даёт даром (угол к
-   нормали сохраняется), но не даёт ни наклона, ни пропорции: пологая пара
-   ветвей читается птичкой, а вчетверо разные плечи — галкой с хвостом.
-   Поэтому наклон держится около сорока градусов, как у самой К, а плечи —
-   в полутора разах друг от друга. Разброс внутри этих рамок и даёт куст
-   разных К, а не веер линий. */
+/* Кольцо качается по вертикали вокруг своего места; на старте амплитуда
+   нулевая, и оно просто висит. */
+function ringHoop() {
+  const hoop = modeState.hoop;
+  return { x: hoop.x, y: hoop.y + Math.sin(modeState.phase) * hoop.sway, r: hoop.r };
+}
 
-const RING_LEAN = [0.45, 1.0];    // наклон ветвей, радианы: 26° … 57°
-const RING_ARMS = [0.72, 1.45];   // во сколько плечи могут разойтись
-const RING_REACH = [0.3, 0.56];   // и насколько они длинные
+/* Один бросок целиком, без рисования, тем же законом, что и живой полёт.
+   На нём держится всё остальное: проверка раздачи на решаемость, подсказка
+   и показательный бросок при открытии. Иметь три копии баллистики, которые
+   разойдутся при первой же правке, того не стоит. */
+function ringShot(ball, hoop, angle, power, gravity, limit = RING_FLIGHT) {
+  const path = [{ x: ball.x, y: ball.y }];
+  let x = ball.x;
+  let y = ball.y;
+  let vx = Math.cos(angle) * power;
+  let vy = Math.sin(angle) * power;
+  let hit = false;
+  let near = Infinity;
+  for (let step = 0; step < limit; step += 1) {
+    const px = x;
+    const py = y;
+    vy += gravity;
+    x += vx;
+    y += vy;
+    if ((px - K.stem) * (x - K.stem) < 0) {
+      const t = (K.stem - px) / (x - px || 1e-6);
+      const at = py + (y - py) * t;
+      if (at >= K.top && at <= K.bottom) {
+        x = K.stem;
+        y = at;
+        vx = -vx * RING_KICK;
+        hit = true;
+        path.push({ x, y });
+      }
+    }
+    path.push({ x, y });
+    if (hit) {
+      const gap = ringNear(px, py, x, y, hoop.x, hoop.y);
+      near = Math.min(near, gap);
+      if (gap <= hoop.r) break;
+    }
+    if (x < -0.05 || x > 1.05 || y > 1.05) break;
+  }
+  return { hit, near, path };
+}
+
+/* Раздача проверяется перебором: если ни один бросок из сетки не попадает,
+   позиции не годятся. Так решаемость гарантируется при любой тяжести, а
+   считать баллистику отскока в уме не нужно ни здесь, ни в подсказке. */
+function ringSolve(ball, hoop, gravity) {
+  let best = null;
+  for (let a = 0; a < 34; a += 1) {
+    const angle = Math.PI + (a / 33) * (Math.PI * 0.62);   // вверх и влево
+    for (let p = 0; p < 14; p += 1) {
+      const power = lerp(0.1, 1, p / 13) * RING_REACH * RING_PULL;
+      const shot = ringShot(ball, hoop, angle, power, gravity);
+      if (!shot.hit || shot.near > hoop.r) continue;
+      if (!best || shot.near < best.near) best = { angle, power, near: shot.near };
+    }
+  }
+  return best;
+}
 
 function ringDeal() {
-  const { spot, hole } = ringHard();
-  for (let tries = 0; tries < 400; tries += 1) {
-    const ball = { x: ringRand(0.56, 0.88), y: ringRand(0.7, 0.9) };
-    /* Кольцо не поднимается под самую строку счёта: там ему тесно. */
-    const hoop = { x: ringRand(0.56, 0.86), y: ringRand(0.17, 0.32), r: hole };
-    const mirrorX = 2 * K.stem - hoop.x;
-    const t = (K.stem - ball.x) / (mirrorX - ball.x);
-    const at = ball.y + (hoop.y - ball.y) * t;
-    if (Math.abs(at - K.node) >= spot * 0.7) continue;
+  const t = ringHard();
+  const r = lerp(RING_HOLE[0], RING_HOLE[1], t);
+  /* Качание входит квадратом: первые попадания кольцо почти стоит, и сложность
+     сперва идёт от размера, то есть от точности броска, а не от тайминга. */
+  const sway = t * t * RING_SWAY;
+  const gravity = num('weight');
 
-    const lean = Math.atan2(Math.abs(hoop.y - ball.y), Math.abs(mirrorX - ball.x));
-    if (lean < RING_LEAN[0] || lean > RING_LEAN[1]) continue;
-
-    const low = Math.hypot(ball.x - K.stem, ball.y - at);
-    const high = Math.hypot(hoop.x - K.stem, hoop.y - at);
-    if (low < RING_REACH[0] || low > RING_REACH[1]) continue;
-    if (high < RING_REACH[0] || high > RING_REACH[1]) continue;
-    const ratio = low / high;
-    if (ratio < RING_ARMS[0] || ratio > RING_ARMS[1]) continue;
-
+  for (let tries = 0; tries < 60; tries += 1) {
+    const ball = { x: ringRand(0.58, 0.88), y: ringRand(0.74, 0.9) };
+    const hoop = { x: ringRand(0.5, 0.85), y: ringRand(0.16, 0.4), r, sway };
+    /* Кольцо должно стоять выше мяча и правее стены с запасом, иначе буквы
+       не выйдет даже при точном броске. */
+    if (hoop.y > ball.y - 0.3) continue;
+    if (hoop.x < K.stem + 0.14) continue;
+    const solved = ringSolve(ball, { ...hoop, y: hoop.y }, gravity);
+    if (!solved) continue;
     modeState.ball = ball;
     modeState.hoop = hoop;
-    modeState.spot = spot;
+    modeState.solved = solved;
+    modeState.phase = 0;
     return;
   }
-  /* Пятно сжалось так, что случай не помогает — ставим точно под него. */
-  modeState.ball = { x: 0.7, y: 0.8 };
-  modeState.hoop = { x: 0.7, y: 0.22, r: hole };
-  modeState.spot = spot;
+  modeState.ball = { x: 0.72, y: 0.82 };
+  modeState.hoop = { x: 0.66, y: 0.24, r, sway };
+  modeState.solved = ringSolve(modeState.ball, modeState.hoop, gravity);
+  modeState.phase = 0;
 }
 
 function ringFire(dx, dy) {
   const len = Math.hypot(dx, dy) || 1;
-  const speed = num('speed');
+  const pull = Math.min(len, RING_REACH);
   const ball = modeState.ball;
   modeState.fly = {
     x: ball.x, y: ball.y,
-    vx: (dx / len) * speed,
-    vy: (dy / len) * speed,
+    vx: (dx / len) * pull * RING_PULL,
+    vy: (dy / len) * pull * RING_PULL,
     path: [{ x: ball.x, y: ball.y }],
-    hit: null,
+    hit: false,
     age: 0,
   };
 }
 
+/* Промах и попадание сначала показываются, и только потом приходит новая
+   раздача: без паузы кольцо переезжает в тот же кадр, и написанная К повисает
+   рядом с чужим кольцом, а упавший мяч вообще не успевает попасться на глаза. */
 function ringMiss() {
+  modeState.missed = modeState.fly ? modeState.fly.path : null;
   modeState.fly = null;
   modeState.streak = 0;
   modeState.lives -= 1;
   if (modeState.lives <= 0) modeState.over = true;
+  else modeState.rest = RING_REST;
 }
 
 /* Ближайшее расстояние от отрезка хода до центра кольца: на скорости мяч
@@ -373,18 +427,18 @@ function ringTrail(path, color) {
 
 MODES.ring = {
   label: 'кольцо',
-  note: 'Тяни от мяча и отпускай: попасть в кольцо можно только отскоком от стены, и такой путь единственный — он и есть К. Пятно на стене отражает, остальная стена гасит мяч, и с каждым уровнем пятно уже. Сотня за попадание на серию, три промаха — конец, R — заново.',
+  note: 'Тяни от мяча и отпускай: тяга задаёт и угол, и силу. Мяч тяжёлый, летит дугой, и попасть в кольцо можно только отскоком от стены — такой путь и есть К. Уровень один и бесконечный: с каждым попаданием кольцо меньше и качается сильнее. Три промаха — конец, R — заново.',
   cursor: 'crosshair',
   tools: [
-    { type: 'range', key: 'speed', label: 'скорость', min: 0.006, max: 0.03, step: 0.001, value: 0.014 },
-    { type: 'range', key: 'narrow', label: 'сужение', min: 0, max: 1, step: 0.05, value: 1 },
+    { type: 'range', key: 'weight', label: 'вес', min: 0.0001, max: 0.0012, step: 0.00005, value: 0.00045 },
+    { type: 'range', key: 'narrow', label: 'сложность', min: 0, max: 1, step: 0.05, value: 1 },
     { type: 'toggle', key: 'hint', label: 'подсказка', value: false },
     { type: 'toggle', key: 'bush', label: 'куст', value: true },
     { type: 'button', label: 'заново', action() { MODES.ring.setup(); } },
   ],
 
   setup() {
-    modeState.level = 1;
+    modeState.hits = 0;
     modeState.score = 0;
     modeState.streak = 0;
     modeState.lives = RING_LIVES;
@@ -392,15 +446,22 @@ MODES.ring = {
     modeState.fly = null;
     modeState.aim = false;
     modeState.fresh = null;
-    /* Кадр не должен открываться пустым: одна К уже написана — образцом. */
-    modeState.done = [[
-      { x: K.armX, y: K.legY }, { x: K.stem, y: K.node }, { x: K.armX, y: K.armY },
-    ]];
+    modeState.phase = 0;
+    modeState.rest = 0;
+    modeState.missed = null;
+    modeState.done = [];
     ringDeal();
+    /* Кадр не должен открываться пустым: одна К уже написана — путь найденного
+       решения кладётся в куст напрямую, мимо счёта и жизней. */
+    const shot = modeState.solved;
+    if (shot) {
+      const shown = ringShot(modeState.ball, modeState.hoop, shot.angle, shot.power, num('weight'));
+      if (shown.hit) modeState.done.push(shown.path);
+    }
   },
 
   onDown() {
-    if (modeState.fly || modeState.over) return;
+    if (modeState.fly || modeState.over || modeState.rest > 0) return;
     modeState.aim = true;
   },
 
@@ -414,31 +475,38 @@ MODES.ring = {
   },
 
   step() {
+    modeState.phase += RING_RATE + ringHard() * RING_RATE;
+
+    if (modeState.rest > 0) {
+      modeState.rest -= 1;
+      if (modeState.rest === 0 && !modeState.over) {
+        modeState.missed = null;
+        ringDeal();
+      }
+      return;
+    }
+
     const fly = modeState.fly;
     if (!fly) return;
 
     fly.age += 1;
     const px = fly.x;
     const py = fly.y;
+    fly.vy += num('weight');
     fly.x += fly.vx;
     fly.y += fly.vy;
 
-    /* Стена: пятно отражает, остальная стена гасит. Проверяется отрезок хода,
-       иначе на скорости мяч проходит стену насквозь. */
+    /* Стена проверяется по отрезку хода: на скорости мяч за кадр проходит
+       больше своей толщины и иначе прошёл бы насквозь. */
     if ((px - K.stem) * (fly.x - K.stem) < 0) {
       const t = (K.stem - px) / (fly.x - px || 1e-6);
       const at = py + (fly.y - py) * t;
-      if (Math.abs(at - K.node) <= modeState.spot) {
+      if (at >= K.top && at <= K.bottom) {
         fly.x = K.stem;
         fly.y = at;
-        fly.vx = -fly.vx;
+        fly.vx = -fly.vx * RING_KICK;
         fly.path.push({ x: fly.x, y: fly.y });
-        fly.hit = { x: K.stem, y: at };
-      } else if (at >= K.top && at <= K.bottom) {
-        fly.path.push({ x: K.stem, y: at });
-        modeState.dead = { x: K.stem, y: at };
-        ringMiss();
-        return;
+        fly.hit = true;
       }
     }
 
@@ -446,46 +514,42 @@ MODES.ring = {
 
     /* Кольцо засчитывается только после отскока: без стены буквы нет. */
     if (fly.hit) {
-      const hoop = modeState.hoop;
+      const hoop = ringHoop();
       const near = ringNear(px, py, fly.x, fly.y, hoop.x, hoop.y);
       if (near <= hoop.r) {
         const closeness = 1 - near / hoop.r;
         modeState.streak += 1;
-        /* Множитель серии упирается в потолок: без него счёт к десятому
-           попаданию превращается в телефонный номер. */
+        modeState.hits += 1;
         const mult = Math.min(modeState.streak, RING_MULT);
         modeState.score += Math.round(100 * mult * (0.6 + 0.4 * closeness));
-        modeState.level += 1;
         modeState.fresh = fly.path;
         modeState.done.push(fly.path);
         if (modeState.done.length > RING_KEEP) modeState.done.shift();
         modeState.fly = null;
-        modeState.dead = null;
-        ringDeal();
+        modeState.missed = null;
+        modeState.rest = RING_REST;
         return;
       }
     }
 
-    const gone = fly.x < -0.05 || fly.x > 1.05 || fly.y < -0.05 || fly.y > 1.05;
+    const gone = fly.x < -0.05 || fly.x > 1.05 || fly.y > 1.05;
     if (gone || fly.age > RING_FLIGHT) ringMiss();
   },
 
   draw() {
-    const { ball, hoop, spot } = modeState;
+    const ball = modeState.ball;
+    const hoop = ringHoop();
 
-    /* Куст: всё, что уже написано, стоит бледным, свежая К горит. */
     if (on('bush')) {
       for (const path of modeState.done) {
         const fresh = path === modeState.fresh;
-        poly(path, fresh ? RED : ink(0.13), fresh ? 0.005 : 0.0035);
+        poly(path, fresh ? RED : ink(0.2), fresh ? 0.005 : 0.004);
       }
     }
 
-    /* Стена целиком — это ствол буквы, но отражает только пятно у узла. */
-    line(K.stem, K.top, K.stem, K.bottom, ink(0.55), 0.016);
-    line(K.stem, K.node - spot, K.stem, K.node + spot, INK, 0.021);
+    /* Стена целиком — ствол буквы, и отражает она вся. */
+    line(K.stem, K.top, K.stem, K.bottom, ink(0.6), 0.017);
 
-    /* Кольцо: обруч, сквозь который надо пройти. */
     ctx.beginPath();
     ctx.arc(hoop.x * S, hoop.y * S, hoop.r * S, 0, TAU);
     ctx.strokeStyle = ink(0.75);
@@ -493,47 +557,42 @@ MODES.ring = {
     ctx.stroke();
     dot(hoop.x, hoop.y, ink(0.3), 0.004);
 
-    /* Подсказка: зеркальный образ кольца и единственная прямая к нему. */
-    if (on('hint')) {
-      const mirrorX = 2 * K.stem - hoop.x;
-      ctx.setLineDash([0.012 * S, 0.012 * S]);
-      line(ball.x, ball.y, mirrorX, hoop.y, ink(0.22), 0.002);
+    /* Подсказка: найденное решение целиком, пунктиром. */
+    if (on('hint') && modeState.solved && !modeState.fly) {
+      const shot = modeState.solved;
+      const shown = ringShot(ball, hoop, shot.angle, shot.power, num('weight'));
+      ctx.setLineDash([0.01 * S, 0.014 * S]);
+      poly(shown.path, ink(0.2), 0.0025);
       ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.arc(mirrorX * S, hoop.y * S, hoop.r * S, 0, TAU);
-      ctx.strokeStyle = ink(0.14);
-      ctx.lineWidth = 0.003 * S;
-      ctx.stroke();
+    }
+
+    /* Промах держится на кадре, пока идёт пауза: видно, куда ушёл мяч. */
+    if (modeState.missed) {
+      poly(modeState.missed, ink(0.22), 0.003);
+      const end = modeState.missed[modeState.missed.length - 1];
+      dot(end.x, end.y, ink(0.3), 0.011);
     }
 
     if (modeState.fly) {
       ringTrail(modeState.fly.path, (fade) => ink(0.15 + fade * 0.7));
-      dot(modeState.fly.x, modeState.fly.y, INK, 0.012);
+      dot(modeState.fly.x, modeState.fly.y, INK, 0.013);
     } else {
-      dot(ball.x, ball.y, modeState.over ? ink(0.25) : INK, 0.014);
+      dot(ball.x, ball.y, modeState.over ? ink(0.25) : INK, 0.015);
     }
 
-    /* Мяч, воткнувшийся в стену мимо пятна: видно, куда именно не попал. */
-    if (modeState.dead) dot(modeState.dead.x, modeState.dead.y, ink(0.4), 0.01);
-
-    /* Прицел ведётся до стены и метит место удара. Куда уйдёт отскок, игрок
-       считает сам — в этом и игра, — но мазать вслепую не должен. */
+    /* Прицел: тяга даёт вектор броска, а рядом идёт начало дуги — чтобы вес
+       мяча читался ещё до того, как отпустишь. */
     if (modeState.aim) {
       const dx = pointer.x - ball.x;
       const dy = pointer.y - ball.y;
       const len = Math.hypot(dx, dy) || 1e-6;
-      const wall = dx < -1e-4 ? (K.stem - ball.x) / dx : Infinity;
-      const reach = Math.min(wall * len, 0.34);
-      line(ball.x, ball.y, ball.x + (dx / len) * reach, ball.y + (dy / len) * reach, ink(0.35), 0.0025);
-      if (wall !== Infinity && wall * len <= 0.34) {
-        const at = ball.y + dy * wall;
-        if (at >= K.top && at <= K.bottom) {
-          dot(K.stem, at, Math.abs(at - K.node) <= spot ? INK : ink(0.3), 0.008);
-        }
-      }
+      const pull = Math.min(len, RING_REACH);
+      line(ball.x, ball.y, ball.x + (dx / len) * pull, ball.y + (dy / len) * pull, ink(0.3), 0.0025);
+
+      const start = ringShot(ball, hoop, Math.atan2(dy, dx), pull * RING_PULL, num('weight'), 34);
+      poly(start.path, ink(0.28), 0.0022);
     }
 
-    /* Жизни — точками у нижнего края, чтобы не мешать строке счёта. */
     for (let i = 0; i < RING_LIVES; i += 1) {
       dot(0.94 - i * 0.028, 0.95, i < modeState.lives ? ink(0.55) : ink(0.14), 0.0075);
     }
@@ -541,7 +600,7 @@ MODES.ring = {
     if (modeState.over) {
       drawStatus(`${modeState.score} · партия окончена, R — заново`, true);
     } else {
-      drawStatus(`${modeState.score} · серия ${modeState.streak} · уровень ${modeState.level}`);
+      drawStatus(`${modeState.score} · серия ${modeState.streak}`);
     }
   },
 };
