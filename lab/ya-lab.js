@@ -188,7 +188,20 @@ function board(box, marks, mine, grid) {
   if (on('guide')) for (const index of outline(m)) put(index, 0.22);
   const order = shuffled(m.list, 5);
   for (let i = 0; i < Math.min(marks, order.length); i += 1) put(order[i], 0.72);
-  for (let i = 0; i < Math.min(mine, order.length); i += 1) put(order[order.length - 1 - i], 1);
+  /* Свои клетки видит только их владелец: для остальных они такие же, как
+     все. Поэтому краска здесь обозначает событие «тут был ты», а не заводит
+     вторую графику в общей картинке. */
+  for (let i = 0; i < Math.min(mine, order.length); i += 1) {
+    const index = order[order.length - 1 - i];
+    if (on('own')) {
+      const step = (box.size * S) / grid;
+      const gap = Math.max(0.5, step * 0.1);
+      ctx.fillStyle = RED;
+      ctx.fillRect(box.x * S + (index % grid) * step, box.y * S + Math.floor(index / grid) * step, step - gap, step - gap);
+    } else {
+      put(index, 1);
+    }
+  }
   return m;
 }
 
@@ -414,6 +427,7 @@ MODES.page = {
     { type: 'range', key: 'marks', label: 'отметок', min: 0, max: 393, step: 1, value: 148 },
     { type: 'range', key: 'mine', label: 'твоих', min: 0, max: 12, step: 1, value: 3 },
     { type: 'range', key: 'size', label: 'ширина холста', min: 0.14, max: 0.4, step: 0.01, value: 0.26 },
+    { type: 'toggle', key: 'own', label: 'свои красным', value: true },
     { type: 'toggle', key: 'guide', label: 'канва', value: true },
   ],
   draw() {
@@ -473,8 +487,13 @@ MODES.page = {
       ctx.strokeRect(x * S, y * S, wide * S, tall * S);
       yaText(letters[i], x + 0.012, y + 0.062, 0.038, INK, 600);
       yaText(`${String(i + 1).padStart(2, '0')} / 33`, x + 0.012, y + 0.098, 0.012, MUTED, 400, true);
-      /* Игровая буква помечена точкой: по ней видно, где берут клетки. */
-      if (playable.has(letters[i])) dot(x + wide - 0.018, y + 0.022, RED, 0.004);
+      /* Игровая буква помечена подписью, а не краской: красный на странице
+         означает ровно одно — «эту клетку поставил ты». */
+      if (playable.has(letters[i])) {
+        ctx.textAlign = 'right';
+        yaText('ИГРА', x + wide - 0.012, y + 0.028, 0.012, MUTED, 400, true);
+        ctx.textAlign = 'left';
+      }
     }
   },
 };
@@ -488,6 +507,7 @@ MODES.scene = {
     { type: 'range', key: 'marks', label: 'отметок', min: 0, max: 393, step: 1, value: 148 },
     { type: 'range', key: 'mine', label: 'твоих', min: 0, max: 12, step: 1, value: 3 },
     { type: 'range', key: 'wallet', label: 'кошелёк', min: 0, max: 10, step: 1, value: 4 },
+    { type: 'toggle', key: 'own', label: 'свои красным', value: true },
     { type: 'toggle', key: 'named', label: 'имя вписано', value: true },
     { type: 'toggle', key: 'rules', label: 'правила', value: false },
     { type: 'toggle', key: 'guide', label: 'канва', value: true },
