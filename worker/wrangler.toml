@@ -1,0 +1,16 @@
+name = "alphabet-wall"
+main = "src/index.js"
+compatibility_date = "2026-08-27"
+workers_dev = false
+
+routes = [
+  { pattern = "alphabet.pustota.link/api/*", zone_name = "pustota.link" },
+]
+
+[vars]
+CORS_ORIGIN = "https://alphabet.pustota.link"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "alphabet-wall"
+database_id = "11e5a8f8-be82-46b7-b1cf-82423d69fc8b"

@@ -132,7 +132,8 @@ Cloudflare D1:
 
 ```sql
 players (id TEXT PRIMARY KEY, name TEXT, created_at INTEGER, ip_hash TEXT, hidden INTEGER DEFAULT 0)
-scores  (player_id TEXT, letter TEXT, value REAL, updated_at INTEGER, PRIMARY KEY (player_id, letter))
+scores  (player_id TEXT, letter TEXT, value REAL, updated_at INTEGER, best_rank INTEGER, PRIMARY KEY (player_id, letter))
+score_claims (id TEXT PRIMARY KEY, player_id TEXT, letter TEXT, value REAL, points INTEGER, created_at INTEGER)
 events  (player_id TEXT, letter TEXT, created_at INTEGER, PRIMARY KEY (player_id, letter))
 wallet  (player_id TEXT PRIMARY KEY, earned INTEGER, spent INTEGER)
 marks   (id INTEGER PRIMARY KEY, player_id TEXT, x INTEGER, y INTEGER, level INTEGER, created_at INTEGER, UNIQUE (x, y, level))
@@ -144,19 +145,22 @@ canvas  (id INTEGER PRIMARY KEY CHECK (id = 1), level INTEGER, updated_at INTEGE
 
 ## API
 
-Cloudflare Worker, четыре ручки.
+Cloudflare Worker, пять ручек.
 
 `GET /api/state` — уровень, отметки, топ по буквам, число участников. Один
-запрос на загрузку главной, кэш на edge 15 секунд. Отметки идут компактным
-массивом чисел (x, y, level), имена — отдельным словарём и только для тех
-клеток, что видны; на 32×32 это единицы килобайт, а к 128×128 массив
-придётся паковать плотнее.
+запрос на загрузку главной, кэш на edge 15 секунд. Отметки идут массивом
+объектов с координатами, уровнем, владельцем и временем; имена — отдельным
+словарём только для видимых владельцев. На 32×32 это единицы килобайт, а к
+128×128 массив придётся паковать плотнее.
 
 `POST /api/join {name}` → `{token}`. Занимает имя, заводит игрока.
 
 `POST /api/score {letter, value}` → `{earned, wallet}`. Сервер сам решает,
 улучшен ли рекорд и затронут ли топ, и сам начисляет очки. Клиент присылает
 только результат.
+
+`POST /api/event {letter}` → `{earned, wallet}`. Сервер один раз за участника
+записывает событие неигровой буквы и начисляет очко.
 
 `POST /api/mark {x, y}` → `{ok, wallet}`. Проверяет баланс, суточный лимит,
 свободу клетки, попадание в границы уровня.
