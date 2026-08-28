@@ -428,7 +428,10 @@ MODES.page = {
     { type: 'range', key: 'mine', label: 'твоих', min: 0, max: 12, step: 1, value: 3 },
     { type: 'range', key: 'size', label: 'ширина холста', min: 0.14, max: 0.4, step: 0.01, value: 0.26 },
     { type: 'toggle', key: 'own', label: 'свои красным', value: true },
-    { type: 'toggle', key: 'guide', label: 'канва', value: true },
+    /* На главной канва погашена: там холст — часть страницы, и подсказка
+       контура спорит с заголовком. Канва нужна тому, кто пришёл рисовать,
+       то есть в сцене. */
+    { type: 'toggle', key: 'guide', label: 'канва', value: false },
   ],
   draw() {
     /* Кадр полигона квадратный, а страница широкая. Рисуем её в собственном
