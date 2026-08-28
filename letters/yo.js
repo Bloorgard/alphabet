@@ -1,3 +1,5 @@
+import { reportScore } from '../progress.js?v=3';
+
 const INK = '#161616';
 const PAPER = '#f1ede5';
 const RED = '#e0210f';
@@ -48,6 +50,11 @@ function noise1(x) {
 }
 
 export function mountYo(workspace) {
+  /* Рекорд уезжает на холст Я — см. букву З. Из песочницы не шлём. */
+  const record = (value) => {
+    if (!state.play || value <= state.best) return;
+    reportScore('Ё', value);
+  };
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const params = { ...PARAMS };
@@ -55,6 +62,7 @@ export function mountYo(workspace) {
   const touches = new Map();
   const bike = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, omega: 0, wheelsOn: [false, false] };
   const state = {
+    play: true,
     phase: 'intro',
     timer: 0,
     runStart: 0,
@@ -257,6 +265,7 @@ export function mountYo(workspace) {
       if (corner.y > ground(corner.x) + STROKE) {
         state.phase = 'fall';
         state.timer = 0;
+        record(distance());
         state.best = Math.max(state.best, distance());
         return;
       }
@@ -548,6 +557,50 @@ export function mountYo(workspace) {
   panel.hidden = true;
   panel.style.width = '178px';
 
+  /* Режим во главе панели — тот же порядок, что в К и З. */
+  const modes = document.createElement('div');
+  modes.className = 'sketch-modes';
+  panel.append(modes);
+
+  const modeNote = document.createElement('p');
+  panel.append(modeNote);
+
+  const knobs = [];
+
+  function modeButton(labelText, play) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sketch-mode';
+    button.textContent = labelText;
+    button.addEventListener('click', () => {
+      if (state.play === play) return;
+      state.play = play;
+      if (play) Object.assign(params, PARAMS);
+      applyTheme();
+      state.best = 0;
+      restart();
+      syncPanel();
+    });
+    modes.append(button);
+    return button;
+  }
+
+  const playButton = modeButton('на рекорд', true);
+  const freeButton = modeButton('песочница', false);
+
+  function syncPanel() {
+    playButton.setAttribute('aria-pressed', String(state.play));
+    freeButton.setAttribute('aria-pressed', String(!state.play));
+    modeNote.textContent = state.play
+      ? 'результат идёт в общий счёт'
+      : 'ручки открыты, результат не в зачёт';
+    for (const knob of knobs) {
+      knob.node.disabled = state.play;
+      if (knob.node.type === 'range') knob.node.value = params[knob.key];
+      else knob.node.setAttribute('aria-pressed', String(params[knob.key]));
+    }
+  }
+
   function makeSwitch(label, key, action) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -560,6 +613,7 @@ export function mountYo(workspace) {
       action?.(params[key]);
     });
     panel.append(button);
+    knobs.push({ key, node: button });
     return button;
   }
 
@@ -601,7 +655,10 @@ export function mountYo(workspace) {
     input.addEventListener('input', () => { params[control.key] = Number(input.value); });
     label.append(caption, input);
     panel.append(label);
+    knobs.push({ key: control.key, node: input });
   }
+
+  syncPanel();
 
   const again = document.createElement('button');
   again.type = 'button';

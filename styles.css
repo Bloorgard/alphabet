@@ -17,7 +17,7 @@ button { cursor: pointer; }
 h1, h2, p { margin: 0; }
 
 /* Единая мелкая моношкала для всех служебных подписей. */
-.masthead-meta, .eyebrow, .section-heading p, .site-footer, .letter-meta, .workspace-label, .sketch-panel {
+.masthead-meta, .eyebrow, .section-heading p, .site-footer, .letter-meta, .workspace-label, .sketch-panel, .wall-caption, .ya-panel, .ya-count, .ya-rules {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: .08em;
@@ -31,7 +31,14 @@ h1, h2, p { margin: 0; }
 .wordmark span { color: var(--muted); font-weight: 400; }
 .masthead-meta { display: flex; gap: 16px; color: var(--muted); }
 
-.intro { max-width: 640px; padding: clamp(56px, 10vw, 120px) 0 clamp(56px, 10vw, 120px); }
+.intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--gap); padding: clamp(56px, 10vw, 120px) 0 clamp(56px, 10vw, 120px); }
+.intro-copy { max-width: 640px; }
+
+/* Холст Я: квадрат объявлен рамкой — по нему видно, что клетку можно
+   поставить и мимо буквы. Появляется только когда состояние доехало. */
+.wall { width: clamp(150px, 24vw, 300px); }
+.wall canvas { display: block; width: 100%; aspect-ratio: 1 / 1; border: 1px solid var(--line); }
+.wall-caption { margin-top: 10px; color: var(--muted); text-align: right; }
 .eyebrow { margin-bottom: 20px; color: var(--muted); }
 h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; letter-spacing: -.02em; font-weight: 600; }
 .intro-text { max-width: 400px; color: var(--muted); font-size: 14px; line-height: 1.6; }
@@ -117,8 +124,96 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .sketch-panel input::-moz-range-track { height: 1px; background: rgba(241, 237, 229, .25); }
 .sketch-panel input::-moz-range-thumb { width: 9px; height: 9px; border: 0; border-radius: 50%; background: rgba(241, 237, 229, .8); }
 
+/* Сцена буквы Я: холст слева, всё остальное — узкой колонкой справа.
+   Служебный слой берёт общую моношкалу, цвета — чернила по бумаге. */
+.ya-panel { position: absolute; top: 14%; right: 6%; width: 28%; color: rgba(22, 22, 22, .55); }
+.ya-title { margin: 0 0 6px; color: rgba(22, 22, 22, .38); }
+.ya-panel p { margin: 0; }
+.ya-leaders { margin: 0 0 22px; padding: 0; list-style: none; }
+/* Строка таблицы — единая строка, а не три подчёркнутых куска. Наведение
+   берёт её целиком подложкой: так видно, что кликается строка. */
+.ya-leaders li { display: grid; color: var(--ink); }
+.ya-leaders li > button { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; width: 100%; margin: 0 -6px; border: 0; padding: 3px 6px; background: none; color: inherit; font: inherit; text-align: left; text-transform: uppercase; letter-spacing: .08em; text-decoration: none; }
+.ya-leaders li > button:hover, .ya-leaders li > button:focus-visible { background: rgba(22, 22, 22, .06); outline: none; }
+.ya-leaders b { font-weight: 400; color: rgba(22, 22, 22, .38); }
+.ya-row.is-picked > button { background: rgba(224, 33, 15, .1); }
+.ya-row.is-picked b { color: var(--red); }
+.ya-back { margin-bottom: 6px; }
+.ya-back button { border: 0; padding: 0; background: none; color: rgba(22, 22, 22, .38); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: none; }
+.ya-back button:hover { color: var(--ink); }
+.ya-leaders b { font-weight: 400; color: rgba(22, 22, 22, .38); }
+.ya-leaders i { font-style: normal; }
+.ya-empty { color: rgba(22, 22, 22, .38); }
+.ya-wallet { margin-bottom: 22px !important; color: var(--ink); font-size: 15px; letter-spacing: .04em; }
+.ya-place { margin-bottom: 22px; }
+.ya-place p { margin-bottom: 6px !important; }
+.ya-panel button { border: 0; padding: 0; background: none; color: var(--ink); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
+.ya-name { display: flex; gap: 8px; align-items: baseline; }
+/* display у flex-контейнера сильнее атрибута hidden — гасим явно. */
+.ya-name[hidden], .ya-place[hidden] { display: none; }
+.ya-name input { width: 72px; border: 0; border-bottom: 1px solid rgba(22, 22, 22, .3); padding: 2px 0; background: none; color: var(--ink); font: inherit; text-transform: uppercase; letter-spacing: .08em; }
+.ya-name input:focus-visible { outline: none; border-color: var(--ink); }
+.ya-name input[aria-invalid="true"] { border-color: var(--red); }
+/* Подчёркнуто только действие: имя — сведение, «(сменить)» — кнопка. */
+.ya-me { color: rgba(22, 22, 22, .55); }
+.ya-me button { border: 0; padding: 0; background: none; color: rgba(22, 22, 22, .38); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
+.ya-me button:hover { color: var(--ink); }
+.ya-me[hidden] { display: none; }
+
+/* Награда за рекорд показывается в самой букве: связь игры с холстом должна
+   читаться там, где её заработали. */
+/* Карточка награды: событие, ради которого игра и затевалась. Не перекрывает
+   сцену целиком — под ней всё продолжается, — но требует ответа кнопкой. */
+.wall-prize { position: absolute; left: 50%; top: 50%; display: grid; gap: 6px; padding: 18px 20px; background: rgba(22, 22, 22, .88); color: var(--paper); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; text-align: center; transform: translate(-50%, -50%); animation: wall-prize-in .3s ease; }
+.letter-workspace[data-ground="paper"] .wall-prize { background: rgba(22, 22, 22, .9); }
+.wall-prize-title { margin: 0; color: var(--red); }
+.wall-prize-note { margin: 0; color: rgba(241, 237, 229, .7); }
+.wall-prize-actions { display: flex; justify-content: center; gap: 14px; margin-top: 6px; }
+.wall-prize button { border: 0; padding: 0; background: none; color: var(--paper); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
+.wall-prize button[data-later] { color: rgba(241, 237, 229, .45); }
+
+@keyframes wall-prize-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 6px)); }
+}
+
+/* Запас клеток: в шапке сайта и в углу любой открытой буквы. В игровой
+   буква даёт клетки, и строка идёт чернилами; в остальных она приглушена,
+   чтобы не обещать заработка там, где его пока нет. */
+.wallet-badge { color: var(--ink); }
+/* Верхняя строка, левее крестика: низ кадра во всех буквах занят подсказками
+   и панелью, а сверху пусто во всех. */
+.wall-credit { position: absolute; right: 52px; top: 14px; text-align: right; margin: 0; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: rgba(241, 237, 229, .3); pointer-events: none; }
+.wall-credit[data-game="true"] { color: rgba(241, 237, 229, .62); }
+.letter-workspace[data-ground="paper"] .wall-credit { color: rgba(22, 22, 22, .3); }
+.letter-workspace[data-ground="paper"] .wall-credit[data-game="true"] { color: rgba(22, 22, 22, .62); }
+.letter-workspace[data-ground="paper"] 
+}
+
+.ya-count { position: absolute; top: 73%; left: 6%; margin: 0; color: rgba(22, 22, 22, .55); }
+.ya-rules { position: absolute; left: 6%; bottom: 7%; width: 56%; color: rgba(22, 22, 22, .38); }
+.ya-rules summary { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.ya-rules p { margin: 10px 0 0; line-height: 1.5; letter-spacing: .02em; text-transform: none; }
+
+/* Телефон: панель ложится под холст строкой, лидеры выстраиваются в ряд,
+   правила прячутся — в квадрат размером с ладонь всё не влезает. */
+@media (max-width: 560px) {
+  .ya-panel { top: 77%; right: 6%; bottom: auto; left: 6%; width: auto; }
+  /* Заголовки колонок съедают две строки из четырёх доступных: на телефоне
+     и так понятно, что имена — это лидеры, а число — твой запас. */
+  .ya-title { display: none; }
+  .ya-leaders { display: flex; gap: 12px; margin-bottom: 10px; }
+  .ya-leaders li { grid-template-columns: auto auto auto; gap: 4px; padding: 0; }
+  .ya-wallet { margin-bottom: 10px !important; font-size: 13px; }
+  .ya-place { margin-bottom: 10px; }
+  .ya-count { top: 74%; }
+  .ya-rules { display: none; }
+}
+
 @media (max-width: 850px) {
   :root { --gap: 16px; }
+  .intro { grid-template-columns: 1fr; }
+  .wall { width: min(70%, 260px); }
+  .wall-caption { text-align: left; }
   .letter-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .masthead-meta span:last-child { display: none; }
 }

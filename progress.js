@@ -13,9 +13,13 @@
    отправит накопленное сам. Очередь держит по одному, лучшему результату
    на букву — сервер всё равно начисляет только за улучшение рекорда. */
 
-const API = '/api';
+export const API = '/api';
 const TOKEN_KEY = 'alphabet.token';
 const QUEUE_KEY = 'alphabet.pending';
+
+/* Локальная копия сайта живёт без Worker: боевой API не пустит её по CORS,
+   а проверять связь игры с холстом надо. На localhost слой отвечает сам. */
+export const DEMO = location.hostname === 'localhost' || new URLSearchParams(location.search).has('demo');
 
 function readStore(key, fallback) {
   try {
@@ -31,6 +35,14 @@ function writeStore(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
     /* Приватный режим или переполненное хранилище: очередь просто не ведётся. */
+  }
+}
+
+export function saveToken(token) {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    /* Без хранилища участник живёт до перезагрузки — это лучше, чем отказ. */
   }
 }
 
@@ -62,6 +74,7 @@ function remember(kind, letter, value) {
 }
 
 async function post(path, body) {
+  if (DEMO) return { earned: 1, demo: true };
   const token = playerToken();
   if (!token) return null;
   try {
@@ -82,17 +95,55 @@ async function post(path, body) {
 export async function reportScore(letter, value) {
   const score = Number(value);
   if (!Number.isFinite(score) || score < 0) return null;
-  if (!playerToken()) {
+  if (!playerToken() && !DEMO) {
     remember('scores', letter, score);
     return null;
   }
-  return post('/score', { letter, value: score });
+  const result = await post('/score', { letter, value: score });
+  if (result?.earned > 0) award(result.earned);
+  return result;
+}
+
+/* Награда показывается там, где заработана: связь игры с холстом должна
+   читаться в самой букве, а не обнаруживаться потом на главной. Это карточка
+   с выходом на холст, а не подпись: клетку дали — значит есть что сделать,
+   и путь туда должен быть в один клик. Видимость держится на стилях, а не на
+   анимации — иначе при prefers-reduced-motion карточка не появится вовсе. */
+function award(earned) {
+  const workspace = document.querySelector('.letter-workspace');
+  if (!workspace) return;
+  workspace.querySelector('.wall-prize')?.remove();
+
+  const forms = ['клетка', 'клетки', 'клеток'];
+  const ten = earned % 10;
+  const hundred = earned % 100;
+  const form = ten === 1 && hundred !== 11 ? forms[0]
+    : ten >= 2 && ten <= 4 && (hundred < 10 || hundred >= 20) ? forms[1]
+    : forms[2];
+
+  const card = document.createElement('div');
+  card.className = 'wall-prize';
+  card.dataset.letterLayer = '';
+  card.innerHTML = `
+    <p class="wall-prize-title">рекорд побит</p>
+    <p class="wall-prize-note">начислено ${earned} ${form} на холсте Я</p>
+    <div class="wall-prize-actions">
+      <button type="button" data-go>поставить клетку</button>
+      <button type="button" data-later>потом</button>
+    </div>
+  `;
+  card.querySelector('[data-go]').addEventListener('click', () => {
+    card.remove();
+    document.dispatchEvent(new CustomEvent('open-letter', { detail: 'Я' }));
+  });
+  card.querySelector('[data-later]').addEventListener('click', () => card.remove());
+  workspace.append(card);
 }
 
 /* Событие неигровой буквы — то, ради чего буква сделана. Сервер засчитает
    его один раз за всё время, поэтому повторные вызовы безвредны. */
 export async function reportEvent(letter) {
-  if (!playerToken()) {
+  if (!playerToken() && !DEMO) {
     remember('events', letter, true);
     return null;
   }

@@ -4,12 +4,14 @@ import { mountV } from './letters/v.js?v=2';
 import { mountG } from './letters/g.js?v=2';
 import { mountD } from './letters/d.js?v=2';
 import { mountE } from './letters/e.js?v=4';
-import { mountYo } from './letters/yo.js?v=8';
+import { mountYo } from './letters/yo.js?v=11';
 import { mountZh } from './letters/zh.js?v=4';
-import { mountZ } from './letters/z.js?v=4';
+import { mountZ } from './letters/z.js?v=8';
 import { mountI } from './letters/i.js?v=9';
 import { mountJ } from './letters/j.js?v=1';
-import { mountK } from './letters/k.js?v=14';
+import { mountK } from './letters/k.js?v=15';
+import { mountYa } from './letters/ya.js?v=12';
+import { mountCredit } from './wall.js?v=7';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',
@@ -34,7 +36,8 @@ const READY = new Map([
   ['З', mountZ],
   ['И', mountI],
   ['Й', mountJ],
-  ['К', mountK]
+  ['К', mountK],
+  ['Я', mountYa]
 ]);
 
 const grid = document.querySelector('#letter-grid');
@@ -136,7 +139,9 @@ function openLetter(letter) {
   dialog.showModal();
   const unmountLetter = mount(workspace) || null;
   const unmountHint = mountWorkspaceHint(letter);
+  const unmountCredit = mountCredit(workspace, letter);
   unmountCurrent = () => {
+    unmountCredit();
     unmountHint();
     if (unmountLetter) unmountLetter();
   };
@@ -150,6 +155,11 @@ function closeLetter() {
   unmountCurrent = null;
   history.replaceState(null, '', window.location.pathname);
 }
+
+/* Холст на главной открывает букву Я тем же путём, что и клетка в сетке. */
+document.addEventListener('open-letter', (event) => {
+  if (READY.has(event.detail)) openLetter(event.detail);
+});
 
 grid.addEventListener('click', (event) => {
   const card = event.target.closest('[data-letter]');
