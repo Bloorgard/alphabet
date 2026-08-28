@@ -5,7 +5,10 @@ export const LETTERS = [
 ];
 
 export const YA_BASE_GRID = 32;
-export const YA_BASE_AREA = 393;
+/* Клеток внутри контура Я на сетке 32×32. Число не выдумано: столько даёт
+   растеризация Manrope 700 с порогом альфы 110 — тем же кодом, что рисует
+   холст на клиенте (см. lab/ya-lab.js). Меняется вместе с ним. */
+export const YA_BASE_AREA = 357;
 export const MAX_LEVEL = 2;
 export const WALLET_CAP = 10;
 export const DAILY_MARK_LIMIT = 5;

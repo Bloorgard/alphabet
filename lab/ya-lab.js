@@ -23,7 +23,9 @@ if (!document.querySelector('link[data-ya-font]')) {
   yaFont.dataset.yaFont = '';
   yaFont.href = 'https://fonts.googleapis.com/css2?family=Manrope:wght@700&display=swap';
   document.head.append(yaFont);
-  document.fonts?.ready.then(() => yaMasks.clear());
+  /* fonts.ready срабатывает раньше, чем начертание реально запрошено:
+     маска успевает построиться системным шрифтом и остаться такой. */
+  document.fonts?.load('700 32px Manrope').then(() => yaMasks.clear());
 }
 
 /* ---------- маска буквы ---------- */
@@ -139,6 +141,50 @@ const LEVEL_TOOLS = [
   { type: 'button', label: 'сетка ×2', action() { yaLevel = Math.min(yaLevel + 1, GRIDS.length - 1); } },
   { type: 'button', label: 'сетка ÷2', action() { yaLevel = Math.max(yaLevel - 1, 0); } },
 ];
+
+
+/* ---------- страница ---------- */
+
+/* Выдуманные участники: пять строк топа и подписи под клетками. Имена нужны
+   не для правдоподобия, а чтобы увидеть длину строки в моношкале. */
+const FAKE_TOP = [['ЗЕВ', 61], ['МУХА', 54], ['ОСЬ', 48], ['ПЕТЯ', 40], ['ЁЖ', 33]];
+
+const RULES = [
+  'Клетка достаётся за игру: за личный рекорд в букве',
+  'и за подъём в десятке. Не больше пяти клеток в день.',
+  'Ставить можно куда угодно — контур только подсказывает.',
+  '18 сентября Я выйдет такой, какой вы её нарисуете.',
+];
+
+function yaText(value, x, y, size, color = INK, weight = 400, mono = false) {
+  ctx.fillStyle = color;
+  ctx.font = mono
+    ? `${weight} ${size * S}px 'DM Mono', ui-monospace, monospace`
+    : `${weight} ${size * S}px Manrope, ui-sans-serif, system-ui, sans-serif`;
+  ctx.fillText(value, x * S, y * S);
+}
+
+/* Холст в произвольном месте кадра: главная и сцена рисуют его одним кодом,
+   меняется только место и размер. */
+function board(box, marks, mine, grid) {
+  const m = mask(grid);
+  const step = (box.size * S) / grid;
+  const gap = Math.max(0.5, step * 0.1);
+  const put = (index, alpha) => {
+    ctx.fillStyle = ink(alpha);
+    ctx.fillRect(
+      box.x * S + (index % grid) * step,
+      box.y * S + Math.floor(index / grid) * step,
+      step - gap,
+      step - gap,
+    );
+  };
+  if (on('guide')) for (const index of outline(m)) put(index, 0.22);
+  const order = shuffled(m.list, 5);
+  for (let i = 0; i < Math.min(marks, order.length); i += 1) put(order[i], 0.72);
+  for (let i = 0; i < Math.min(mine, order.length); i += 1) put(order[order.length - 1 - i], 1);
+  return m;
+}
 
 /* ---------- механики ---------- */
 
@@ -348,6 +394,143 @@ MODES.spend = {
       `${grid}×${grid} · кошелёк ${modeState.balance} · клетка ${price} · сегодня осталось ${left}`,
       modeState.balance < price || left <= 0,
     );
+  },
+};
+
+
+/* Блок на главной: холст и одна строка под ним, больше ничего. Остальное —
+   топ, кошелёк, правила, ввод имени — открывается кликом и живёт в сцене.
+   Вопрос режима один: какого размера Я не спорит с заголовком. */
+MODES.page = {
+  label: 'главная',
+  note: 'какого размера холст рядом с заголовком',
+  tools: [
+    { type: 'range', key: 'marks', label: 'отметок', min: 0, max: 393, step: 1, value: 148 },
+    { type: 'range', key: 'mine', label: 'твоих', min: 0, max: 12, step: 1, value: 3 },
+    { type: 'range', key: 'size', label: 'ширина холста', min: 0.14, max: 0.4, step: 0.01, value: 0.26 },
+    { type: 'toggle', key: 'guide', label: 'канва', value: true },
+  ],
+  draw() {
+    /* Кадр полигона квадратный, а страница широкая. Рисуем её в собственном
+       отношении сторон — иначе колонки врут и композиция не проверяется. */
+    const h = 0.5625;
+    const top = 0.16;
+    const yy = (t) => top + t * h;
+    const pad = 0.05;
+
+    ctx.fillStyle = paper(1);
+    ctx.fillRect(0, yy(0) * S, S, h * S);
+    ctx.strokeStyle = GHOST;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, yy(0) * S, S - 1, h * S);
+
+    yaText('PUSTOTA.LINK', pad, yy(0.09), 0.016, INK, 700, true);
+    ctx.textAlign = 'right';
+    yaText('БУКВАЛЬНЫЙ ЧЕЛЛЕНДЖ · 2026', 1 - pad, yy(0.09), 0.014, MUTED, 400, true);
+    ctx.textAlign = 'left';
+    line(pad, yy(0.14), 1 - pad, yy(0.14), FAINT, 0.0015);
+
+    yaText('КИРИЛЛИЧЕСКИЙ АЛФАВИТ', pad, yy(0.34), 0.014, MUTED, 400, true);
+    yaText('Каждый день', pad, yy(0.52), 0.062, INK, 600);
+    yaText('одна буква', pad, yy(0.66), 0.062, INK, 600);
+    yaText('Я рисую буквы кодом. Здесь они появляются', pad, yy(0.79), 0.018, MUTED);
+    yaText('по одной, превращаясь в маленькие миры.', pad, yy(0.85), 0.018, MUTED);
+
+    const size = num('size');
+    const marks = Math.round(num('marks'));
+    const mine = Math.round(num('mine'));
+    const box = { x: 1 - pad - size, y: yy(0.26), size };
+    const m = board(box, marks, mine, 32);
+
+    ctx.textAlign = 'right';
+    yaText(`${marks} ИЗ ${m.list.length} КЛЕТОК · ТВОИХ ${mine}`, 1 - pad, box.y + size + 0.032, 0.014, MUTED, 400, true);
+    ctx.textAlign = 'left';
+
+    /* Сетка алфавита начинается за нижним краем первого экрана: её видно
+       ровно настолько, насколько видно при загрузке. */
+    line(pad, yy(1) - 0.001, 1 - pad, yy(1) - 0.001, FAINT, 0.0015);
+    const cells = 6;
+    const wide = (1 - pad * 2) / cells;
+    const tall = 0.115;
+    const letters = ['А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й', 'К'];
+    const playable = new Set(['Ё', 'З', 'К']);
+    for (let i = 0; i < letters.length; i += 1) {
+      const x = pad + (i % cells) * wide;
+      const y = yy(1) + Math.floor(i / cells) * tall;
+      ctx.strokeStyle = FAINT;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x * S, y * S, wide * S, tall * S);
+      yaText(letters[i], x + 0.012, y + 0.062, 0.038, INK, 600);
+      yaText(`${String(i + 1).padStart(2, '0')} / 33`, x + 0.012, y + 0.098, 0.012, MUTED, 400, true);
+      /* Игровая буква помечена точкой: по ней видно, где берут клетки. */
+      if (playable.has(letters[i])) dot(x + wide - 0.018, y + 0.022, RED, 0.004);
+    }
+  },
+};
+
+/* Сцена, которая открывается кликом по холсту: тут и топ, и кошелёк,
+   и правила, и ввод имени. Главная про них молчит. */
+MODES.scene = {
+  label: 'сцена',
+  note: 'что видно, когда холст открыт',
+  tools: [
+    { type: 'range', key: 'marks', label: 'отметок', min: 0, max: 393, step: 1, value: 148 },
+    { type: 'range', key: 'mine', label: 'твоих', min: 0, max: 12, step: 1, value: 3 },
+    { type: 'range', key: 'wallet', label: 'кошелёк', min: 0, max: 10, step: 1, value: 4 },
+    { type: 'toggle', key: 'named', label: 'имя вписано', value: true },
+    { type: 'toggle', key: 'rules', label: 'правила', value: false },
+    { type: 'toggle', key: 'guide', label: 'канва', value: true },
+  ],
+  draw() {
+    const pad = 0.055;
+    yaText('Я · 33 / 33', pad, 0.075, 0.021, MUTED, 400, true);
+
+    const size = 0.58;
+    const box = { x: pad, y: 0.115, size };
+    const m = board(box, Math.round(num('marks')), Math.round(num('mine')), 32);
+
+    const marks = Math.round(num('marks'));
+    yaText(`${marks} ИЗ ${m.list.length} КЛЕТОК`, pad, box.y + size + 0.05, 0.019, MUTED, 400, true);
+    yaText(`ТВОИХ ${Math.round(num('mine'))}`, pad, box.y + size + 0.08, 0.019, INK, 500, true);
+
+    /* Топ живёт справа от холста: имена короткие, колонка узкая. */
+    const right = pad + size + 0.06;
+    yaText('ЛУЧШИЕ В З', right, 0.155, 0.019, MUTED, 400, true);
+    FAKE_TOP.forEach(([name, value], i) => {
+      const y = 0.2 + i * 0.042;
+      const own = i === 2 && on('named');
+      yaText(name, right, y, 0.026, own ? INK : ink(0.7), own ? 600 : 400, true);
+      ctx.textAlign = 'right';
+      yaText(String(value), 1 - pad, y, 0.026, own ? INK : ink(0.7), own ? 600 : 400, true);
+      ctx.textAlign = 'left';
+    });
+
+    const wallet = Math.round(num('wallet'));
+    yaText('У ТЕБЯ', right, 0.46, 0.019, MUTED, 400, true);
+    yaText(`${wallet} ${plural(wallet, ['КЛЕТКА', 'КЛЕТКИ', 'КЛЕТОК'])}`, right, 0.505, 0.032, wallet ? INK : MUTED, 600, true);
+    yaText('СЕГОДНЯ ОСТАЛОСЬ 2', right, 0.54, 0.019, MUTED, 400, true);
+    yaText('ДО 18 СЕНТЯБРЯ', right, 0.575, 0.019, ink(0.35), 400, true);
+
+    if (on('named')) {
+      yaText('ТЫ — ПЕТЯ', right, 0.65, 0.019, MUTED, 400, true);
+    } else {
+      /* Пока имя не вписано, клетку ставить некому: это единственное место,
+         где человека о чём-то просят. */
+      ctx.strokeStyle = RED;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(right * S, 0.62 * S, (1 - pad - right) * S, 0.055 * S);
+      yaText('ВПИШИ ИМЯ', right + 0.015, 0.655, 0.021, RED, 500, true);
+    }
+
+    const bottom = box.y + size + 0.14;
+    if (on('rules')) {
+      RULES.forEach((row, i) => yaText(row, pad, bottom + i * 0.038, 0.024, MUTED));
+    } else {
+      yaText('ПРАВИЛА', pad, bottom, 0.019, MUTED, 400, true);
+      line(pad, bottom + 0.008, pad + 0.075, bottom + 0.008, FAINT, 0.0015);
+    }
+
+    drawStatus(on('named') ? 'клик по клетке ставит отметку' : 'сначала имя, потом клетка', !on('named'));
   },
 };
 

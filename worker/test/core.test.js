@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  YA_BASE_AREA,
   areaAt,
   dailyStart,
   gridSize,
@@ -21,17 +22,21 @@ test('normalizes only short alphabetic names', () => {
 test('keeps canvas powers of two and letter area proportional', () => {
   assert.equal(gridSize(0), 32);
   assert.equal(gridSize(2), 128);
-  assert.equal(areaAt(1), 393 * 4);
+  assert.equal(areaAt(1), YA_BASE_AREA * 4);
   assert.equal(validCoordinate(31, 0), true);
   assert.equal(validCoordinate(32, 0), false);
 });
 
 test('raises the mark price by fill ratio', () => {
+  /* Пороги считаются от площади буквы, а не от вбитого числа: она снята
+     с растеризации и меняется вместе со шрифтом. */
+  const area = areaAt(0);
+  const at = (ratio) => Math.ceil(area * ratio);
   assert.equal(priceForCount(0, 0), 1);
-  assert.equal(priceForCount(98, 0), 1);
-  assert.equal(priceForCount(99, 0), 2);
-  assert.equal(priceForCount(197, 0), 3);
-  assert.equal(priceForCount(295, 0), 4);
+  assert.equal(priceForCount(at(0.25) - 1, 0), 1);
+  assert.equal(priceForCount(at(0.25), 0), 2);
+  assert.equal(priceForCount(at(0.5), 0), 3);
+  assert.equal(priceForCount(at(0.75), 0), 4);
 });
 
 test('uses UTC day boundaries', () => {
