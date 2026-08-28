@@ -99,6 +99,15 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .sketch-panel[hidden] { display: none; }
 .sketch-panel label { display: grid; gap: 3px; }
 .sketch-panel p { color: rgba(241, 237, 229, .3); }
+/* Режим партии возглавляет панель: игра или песочница, и сразу видно, идёт ли
+   результат в общий счёт. Активное состояние — инверсия, как у выбранной
+   механики на полигоне; краска тут не годится, она занята событиями. */
+.sketch-modes { display: flex; gap: 6px; }
+.sketch-mode { border: 1px solid rgba(241, 237, 229, .25); padding: 4px 8px; background: none; color: rgba(241, 237, 229, .55); font: inherit; text-transform: uppercase; letter-spacing: .08em; }
+.sketch-mode:hover { border-color: rgba(241, 237, 229, .5); color: rgba(241, 237, 229, .8); }
+.sketch-mode[aria-pressed="true"] { border-color: rgba(241, 237, 229, .9); background: rgba(241, 237, 229, .9); color: #161616; }
+.letter-workspace[data-ground="paper"] .sketch-mode { border-color: rgba(22, 22, 22, .25); color: rgba(22, 22, 22, .55); }
+.letter-workspace[data-ground="paper"] .sketch-mode[aria-pressed="true"] { border-color: rgba(22, 22, 22, .9); background: rgba(22, 22, 22, .9); color: #f1ede5; }
 .sketch-switch { justify-self: start; border: 0; padding: 0; background: none; color: inherit; font: inherit; text-transform: uppercase; letter-spacing: .08em; opacity: .55; }
 .sketch-switch[aria-pressed="true"] { opacity: 1; text-decoration: underline; text-underline-offset: 3px; }
 .sketch-panel :disabled { opacity: .35; cursor: default; }
@@ -138,6 +147,17 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
    prefers-reduced-motion она схлопывается, и подпись бы не появилась вовсе. */
 .wall-award { position: absolute; left: 50%; bottom: 12%; margin: 0; padding: 8px 14px; background: rgba(22, 22, 22, .82); color: var(--paper); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; transform: translateX(-50%); transition: opacity .3s ease; animation: wall-award-in .3s ease; pointer-events: none; }
 .wall-award.is-gone { opacity: 0; }
+
+/* Запас клеток: в шапке сайта и в углу любой открытой буквы. В игровой
+   буква даёт клетки, и строка идёт чернилами; в остальных она приглушена,
+   чтобы не обещать заработка там, где его пока нет. */
+.wallet-badge { color: var(--ink); }
+/* Верхняя строка, левее крестика: низ кадра во всех буквах занят подсказками
+   и панелью, а сверху пусто во всех. */
+.wall-credit { position: absolute; right: 52px; top: 14px; text-align: right; margin: 0; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: rgba(241, 237, 229, .3); pointer-events: none; }
+.wall-credit[data-game="true"] { color: rgba(241, 237, 229, .62); }
+.letter-workspace[data-ground="paper"] .wall-credit { color: rgba(22, 22, 22, .3); }
+.letter-workspace[data-ground="paper"] .wall-credit[data-game="true"] { color: rgba(22, 22, 22, .62); }
 .letter-workspace[data-ground="paper"] .wall-award { background: rgba(22, 22, 22, .86); }
 
 @keyframes wall-award-in {

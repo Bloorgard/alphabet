@@ -8,13 +8,16 @@
    страница живёт как прежде. */
 
 import { YA_AREA, maskCells } from './ya-mask.js?v=1';
-
-const API = 'https://alphabet.pustota.link/api';
-const TOKEN_KEY = 'alphabet-player';
-
-/* На локальной копии боевой API недоступен по CORS, а смотреть надо.
-   Демонстрационное состояние детерминировано и живёт до перезагрузки. */
-export const DEMO = location.hostname === 'localhost' || new URLSearchParams(location.search).has('demo');
+import {
+  API,
+  DEMO,
+  clearPendingProgress,
+  pendingProgress,
+  playerToken,
+  reportEvent,
+  reportScore,
+  saveToken,
+} from './progress.js?v=2';
 
 const demo = {
   level: 0,
@@ -53,7 +56,19 @@ export function shuffled(list, seed) {
 }
 
 export function token() {
-  return localStorage.getItem(TOKEN_KEY) || '';
+  return playerToken() || '';
+}
+
+/* Пока участник не представился, буквы складывают результаты в очередь.
+   Появилось имя — отправляем накопленное: холст берёт это на себя, потому
+   что буква про очередь ничего не знает. */
+async function flushPending() {
+  const queue = pendingProgress();
+  const scores = queue.scores || {};
+  const events = queue.events || {};
+  for (const [letter, value] of Object.entries(scores)) await reportScore(letter, value);
+  for (const letter of Object.keys(events)) await reportEvent(letter);
+  clearPendingProgress();
 }
 
 /* Состояние холста: уровень, отметки, лидеры игровых букв, свой кошелёк. */
@@ -100,57 +115,9 @@ export async function joinPlayer(name) {
   });
   if (!response.ok) throw new Error('имя не принято');
   const data = await response.json();
-  localStorage.setItem(TOKEN_KEY, data.token);
+  saveToken(data.token);
+  await flushPending();
   return data;
-}
-
-/* Результат в игровой букве. Сервер сам решает, улучшен ли рекорд и сколько
-   клеток за это причитается; буква только сообщает число и получает ответ,
-   который тут же показывает игроку. */
-export async function reportScore(letter, value, workspace) {
-  try {
-    const earned = await sendScore(letter, value);
-    if (earned > 0 && workspace) award(workspace, `+${earned} ${plural(earned, ['клетка', 'клетки', 'клеток'])} на холсте Я`);
-    return earned;
-  } catch (error) {
-    return 0;
-  }
-}
-
-async function sendScore(letter, value) {
-  if (DEMO) {
-    demo.wallet += 1;
-    return 1;
-  }
-  if (!token()) return 0;
-  const response = await fetch(`${API}/score`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token()}` },
-    body: JSON.stringify({ letter, value }),
-  });
-  if (!response.ok) return 0;
-  const data = await response.json();
-  return data.earned || 0;
-}
-
-/* Награда показывается там, где заработана: связь игры с холстом должна
-   читаться в самой букве, а не обнаруживаться потом на главной. */
-function award(workspace, text) {
-  const note = document.createElement('p');
-  note.className = 'wall-award';
-  note.dataset.letterLayer = '';
-  note.textContent = text;
-  workspace.append(note);
-  setTimeout(() => note.classList.add('is-gone'), 3000);
-  setTimeout(() => note.remove(), 3400);
-}
-
-function plural(n, forms) {
-  const ten = n % 10;
-  const hundred = n % 100;
-  if (ten === 1 && hundred !== 11) return forms[0];
-  if (ten >= 2 && ten <= 4 && (hundred < 10 || hundred >= 20)) return forms[1];
-  return forms[2];
 }
 
 export async function renamePlayer(name) {
@@ -181,6 +148,52 @@ export async function putMark(x, y) {
   });
   if (!response.ok) return { ok: false };
   return response.json();
+}
+
+/* ---------- строка состояния ---------- */
+
+/* Запас клеток виден не только в холсте: человек должен понимать, что у него
+   есть, где бы он ни находился. Последнее состояние держим в модуле, чтобы
+   строка не заказывала его заново на каждой букве. */
+let known = null;
+const GAMES = new Set(['З', 'Ё', 'К']);
+
+function creditText() {
+  if (!known?.name) return 'впиши имя в Я';
+  const n = known.wallet;
+  const forms = ['клетка', 'клетки', 'клеток'];
+  const ten = n % 10;
+  const hundred = n % 100;
+  const form = ten === 1 && hundred !== 11 ? forms[0]
+    : ten >= 2 && ten <= 4 && (hundred < 10 || hundred >= 20) ? forms[1]
+    : forms[2];
+  return `${known.name} · ${n} ${form}`;
+}
+
+function paintBadge() {
+  const badge = document.querySelector('#wallet-badge');
+  if (!badge) return;
+  badge.textContent = creditText();
+  badge.hidden = !known;
+}
+
+/* Строка в букве. В игровой она живёт чернилами: здесь клетки зарабатывают.
+   В неигровой — приглушена, чтобы не обещать того, чего буква не даёт. */
+export function mountCredit(workspace, letter) {
+  /* В самой Я запас и так на виду — второй раз не повторяем. */
+  if (letter === 'Я') return () => {};
+  const line = document.createElement('p');
+  line.className = 'wall-credit';
+  line.dataset.letterLayer = '';
+  line.dataset.game = String(GAMES.has(letter));
+  const paint = () => { line.textContent = creditText(); };
+  paint();
+  workspace.append(line);
+  document.addEventListener('wall-changed', paint);
+  return () => {
+    document.removeEventListener('wall-changed', paint);
+    line.remove();
+  };
 }
 
 /* ---------- блок на главной ---------- */
@@ -225,9 +238,15 @@ function draw(state) {
 }
 
 async function start() {
+  try {
+    known = await loadState();
+    paintBadge();
+  } catch (error) {
+    known = null;
+  }
   if (!wall || !canvas || !caption) return;
   try {
-    const state = await loadState();
+    const state = known || await loadState();
     wall.hidden = false;
     draw(state);
     window.addEventListener('resize', () => draw(state));
@@ -236,7 +255,14 @@ async function start() {
     canvas.addEventListener('click', () => {
       document.dispatchEvent(new CustomEvent('open-letter', { detail: 'Я' }));
     });
-    document.addEventListener('wall-changed', async () => draw(await loadState()));
+    /* Состояние приходит вместе с событием: сцена Я его уже загрузила,
+       и заказывать заново — значит показать устаревшие цифры тем, кто
+       подписан после нас. */
+    document.addEventListener('wall-changed', async (event) => {
+      known = event.detail || await loadState();
+      paintBadge();
+      draw(known);
+    });
   } catch (error) {
     /* Сайт живёт на одном сервере, холст на другом. Молчит холст — молчит
        и блок: страница остаётся прежней. */

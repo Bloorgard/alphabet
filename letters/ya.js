@@ -7,7 +7,7 @@
    подсказывает форму, но не запирает в ней, ставить можно и мимо. */
 
 import { YA_AREA, YA_MASK, maskCells } from '../ya-mask.js?v=1';
-import { DEMO, joinPlayer, loadState, putMark, renamePlayer } from '../wall.js?v=4';
+import { joinPlayer, loadState, putMark, renamePlayer } from '../wall.js?v=6';
 
 const BOX = { x: 0.06, y: 0.14, size: 0.56 };
 /* На телефоне сцена — тот же квадрат, но панель уезжает под холст, поэтому
@@ -209,7 +209,7 @@ export function mountYa(workspace) {
   async function refresh() {
     state = await loadState();
     render();
-    document.dispatchEvent(new CustomEvent('wall-changed'));
+    document.dispatchEvent(new CustomEvent('wall-changed', { detail: state }));
   }
 
   const onMove = (event) => {

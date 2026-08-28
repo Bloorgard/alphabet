@@ -4,12 +4,14 @@ import { mountV } from './letters/v.js?v=2';
 import { mountG } from './letters/g.js?v=2';
 import { mountD } from './letters/d.js?v=2';
 import { mountE } from './letters/e.js?v=4';
-import { mountYo } from './letters/yo.js?v=10';
+import { mountYo } from './letters/yo.js?v=11';
 import { mountZh } from './letters/zh.js?v=4';
-import { mountZ } from './letters/z.js?v=6';
+import { mountZ } from './letters/z.js?v=7';
 import { mountI } from './letters/i.js?v=9';
 import { mountJ } from './letters/j.js?v=1';
-import { mountYa } from './letters/ya.js?v=6';
+import { mountK } from './letters/k.js?v=11';
+import { mountYa } from './letters/ya.js?v=8';
+import { mountCredit } from './wall.js?v=6';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',
@@ -34,6 +36,7 @@ const READY = new Map([
   ['З', mountZ],
   ['И', mountI],
   ['Й', mountJ],
+  ['К', mountK],
   ['Я', mountYa]
 ]);
 
@@ -136,7 +139,9 @@ function openLetter(letter) {
   dialog.showModal();
   const unmountLetter = mount(workspace) || null;
   const unmountHint = mountWorkspaceHint(letter);
+  const unmountCredit = mountCredit(workspace, letter);
   unmountCurrent = () => {
+    unmountCredit();
     unmountHint();
     if (unmountLetter) unmountLetter();
   };

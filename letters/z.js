@@ -1,4 +1,4 @@
-import { reportScore } from '../wall.js?v=4';
+import { reportScore } from '../progress.js?v=2';
 
 const STEP = 1 / 60;
 const INK = '#161616';
@@ -115,19 +115,23 @@ const APPLE_ZONES = [
 
 export function mountZ(workspace) {
   /* Рекорд уезжает на холст Я: клетка достаётся за то, что человек играл
-     лучше себя прежнего. Считает и решает сервер, буква только сообщает. */
+     лучше себя прежнего. Считает и решает сервер, буква только сообщает.
+     Из песочницы не шлём: там ручки открыты, и счёт ставится не рукой. */
   const record = (value) => {
-    if (value <= state.best) return;
-    reportScore('З', value, workspace);
+    if (!state.play || value <= state.best) return;
+    reportScore('З', value);
   };
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
-  const params = { ...PARAMS };
+  /* На рекорде игра бесконечна: предел в 29 яблок — авторская веха, а не
+     финиш, и обрывать им партию на счёт нельзя. */
+  const params = { ...PARAMS, endless: true };
   const pointer = { x: 0.5, y: 0.5, seen: false };
   const state = {
     points: [], segment: 0, dir: Math.PI, apple: null,
     dots: [], eaten: 0, best: 0, zone: 0, dead: null,
     full: false, finishing: false, started: false, mouseTarget: false,
+    play: true,
   };
 
   workspace.dataset.ground = 'paper';
@@ -534,7 +538,7 @@ export function mountZ(workspace) {
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = 'веди мышью или стрелками · собери 29 яблок · клик после финала — заново';
+  hint.textContent = 'веди мышью или стрелками · игра идёт на рекорд';
 
   const panel = document.createElement('div');
   panel.className = 'sketch-panel';
@@ -542,6 +546,55 @@ export function mountZ(workspace) {
   panel.hidden = true;
   panel.style.maxHeight = 'calc(100% - 64px)';
   panel.style.overflowY = 'auto';
+
+  /* Панель начинается с режима: сперва человек видит, во что играет,
+     и уже потом — ручки. Порядок тот же, что в букве К. */
+  const modes = document.createElement('div');
+  modes.className = 'sketch-modes';
+  panel.append(modes);
+
+  const modeNote = document.createElement('p');
+  panel.append(modeNote);
+
+  const knobs = [];
+
+  function modeButton(labelText, play) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sketch-mode';
+    button.textContent = labelText;
+    button.addEventListener('click', () => {
+      if (state.play === play) return;
+      state.play = play;
+      /* Возврат на рекорд восстанавливает снаряжение: накрученное
+         в песочнице не должно уезжать в зачётную партию. */
+      if (play) Object.assign(params, PARAMS, { endless: true });
+      applyNight();
+      reset();
+      syncPanel();
+    });
+    modes.append(button);
+    return button;
+  }
+
+  const playButton = modeButton('на рекорд', true);
+  const freeButton = modeButton('песочница', false);
+
+  function syncPanel() {
+    playButton.setAttribute('aria-pressed', String(state.play));
+    freeButton.setAttribute('aria-pressed', String(!state.play));
+    modeNote.textContent = state.play
+      ? 'результат идёт в общий счёт'
+      : 'ручки открыты, результат не в зачёт';
+    hint.textContent = state.play
+      ? 'веди мышью или стрелками · игра идёт на рекорд'
+      : 'веди мышью или стрелками · песочница';
+    for (const knob of knobs) {
+      knob.node.disabled = state.play;
+      if (knob.node.type === 'range') knob.node.value = params[knob.key];
+      else knob.node.setAttribute('aria-pressed', String(params[knob.key]));
+    }
+  }
 
   function addRange(key, label, min, max, step) {
     const control = document.createElement('label');
@@ -555,6 +608,7 @@ export function mountZ(workspace) {
     input.addEventListener('input', () => { params[key] = Number(input.value); });
     control.append(input);
     panel.append(control);
+    knobs.push({ key, node: input });
   }
 
   function addSwitch(key, label, action) {
@@ -569,6 +623,7 @@ export function mountZ(workspace) {
       action?.();
     });
     panel.append(button);
+    knobs.push({ key, node: button });
   }
 
   addRange('speed', 'скорость', 0.08, 0.55, 0.01);
@@ -593,6 +648,8 @@ export function mountZ(workspace) {
       state.apple = null;
     }
   });
+
+  syncPanel();
 
   const again = document.createElement('button');
   again.type = 'button';
