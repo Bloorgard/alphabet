@@ -1,59 +1,107 @@
+/* К — подвес.
+
+   Стойка висит на нити, кольцо висит на своей. Мяч тяжёлый, летит дугой и
+   засчитывается только после удара о стойку: без отскока попадания нет, а
+   значит нет и буквы. Стойка — ствол К, дуга до удара и дуга после — её
+   ветви, и написанная буква проступает чернилами по следу мяча.
+
+   Удар не бесплатен для стойки. Она принимает импульс с учётом своей массы
+   и момента инерции, поэтому после каждого броска висит уже иначе: качается
+   вбок и поворачивается. Следующий бросок начинается в изменившейся
+   геометрии — это и есть сложность, растущая сама, без уровней и таблиц.
+   Кольцо от касаний тоже раскачивается, а вращаясь вокруг нити, показывает
+   то полный круг, то узкую щель: попасть в него можно не всегда.
+
+   Красный тут событие и только оно: свежая К, пока она пишется. Полоса силы
+   удара служебная и живёт в чернилах — постоянный индикатор краски не
+   заслуживает.
+
+   Результат партии уходит в копилку холста Я: сервер сам решит, улучшен ли
+   рекорд и сдвинулось ли место в топе. Не отправилось — партия не заметит. */
+
+import { reportScore } from '../progress.js?v=1';
+
 const STEP = 1 / 60;
-const RED = '#e0210f';
 const INK = '#f1ede5';
-const MUTED = 'rgba(241, 237, 229, .45)';
-const FAINT = 'rgba(241, 237, 229, .18)';
+const RED = '#e0210f';
+
+const STEM_X = 0.34;
+const STEM_TOP = 0.2;
+const STEM_BOTTOM = 0.8;
+const RING_HOME = { x: 0.72, y: STEM_TOP + 0.062 };
+const RING_SWAY = 0.06;
+const STEM_SWAY = 0.055;
+const BALL_HOME = { x: 0.72, y: STEM_BOTTOM };
+const BALL_LAYOUTS = [
+  { x: 0.66, y: 0.76 },
+  { x: 0.79, y: 0.82 },
+  { x: 0.84, y: 0.74 },
+  { x: 0.63, y: 0.85 },
+  { x: 0.75, y: 0.88 },
+  { x: 0.86, y: 0.8 },
+  { x: 0.69, y: 0.72 },
+  { x: 0.81, y: 0.87 },
+];
+
+const PULL = 0.11;          // сколько скорости даёт доля тяги
+const REACH = 0.34;         // дальше тянуть некуда
+const KICK = 0.95;          // что остаётся от скорости после стойки
+const STEM_MASS = 12;
+const STEM_INERTIA = 2.4;
+const INK_RATE = 0.055;     // как быстро пишется чернильная К
+const FLIGHT = 700;         // дольше этого полёт считается промахом
+const REST = 35;            // пауза показа после попадания
+const TRAIL = 42;           // длина шлейфа в шагах
+const KEEP = 12;            // сколько написанных К держит поле
+const LIVES = 3;
 
 const PARAMS = {
-  span: 0.14,
-  spread: 40,
-  decay: 0.52,
-  waver: 0.15,
+  weight: 0.00045,
+  stemWeight: 1,
+  radius: 0.0625,
+  spin: 0.8,
+  trace: true,
 };
 
-const K = {
-  stem: 0.34,
-  top: 0.2,
-  node: 0.5,
-  right: 0.7,
-  upper: 0.2,
-  lower: 0.8,
-};
-
-const MAX_TIPS = 180;
-const MAX_PATHS = 260;
-const SPEED = 0.0045;
-const WEAR = 0.8;
-const MIN_ENERGY = 0.15;
+const CONTROLS = [
+  ['weight', 'вес мяча', 0.0001, 0.0012, 0.00005],
+  ['stemWeight', 'вес стойки', 0.5, 2.5, 0.1],
+  ['radius', 'кольцо', 0.035, 0.085, 0.0025],
+  ['spin', 'вращение', 0.2, 1.4, 0.05],
+];
 
 function clamp(value, min, max) {
   return value < min ? min : value > max ? max : value;
 }
 
-function plural(count) {
-  const tens = count % 100;
-  if (tens > 10 && tens < 20) return 'трещин';
-  const unit = count % 10;
-  if (unit === 1) return 'трещина';
-  if (unit >= 2 && unit <= 4) return 'трещины';
-  return 'трещин';
+function lerp(a, b, t) {
+  return a + (b - a) * t;
 }
 
-function makeTip(x, y, dir, energy, side, seed) {
-  return {
-    x, y, dir, energy, side, seed,
-    run: 0,
-    total: 0,
-    path: [{ x, y }],
-    hot: 1,
-  };
+function plural(count) {
+  const tens = count % 100;
+  if (tens > 10 && tens < 20) return 'попаданий';
+  const unit = count % 10;
+  if (unit === 1) return 'попадание';
+  if (unit >= 2 && unit <= 4) return 'попадания';
+  return 'попаданий';
+}
+
+/* Ближайшее расстояние от отрезка до точки: на скорости мяч проскакивает
+   и кольцо, и нить между кадрами, поэтому проверять одну точку мало. */
+function segmentNear(ax, ay, bx, by, cx, cy) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 ? clamp(((cx - ax) * dx + (cy - ay) * dy) / len2, 0, 1) : 0;
+  return Math.hypot(ax + dx * t - cx, ay + dy * t - cy);
 }
 
 export function mountK(workspace) {
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const params = { ...PARAMS };
-  const state = { done: [], tips: [], seed: 0.3, impacts: 0, hot: 0 };
+  const state = {};
   let W = 1;
   let H = 1;
   let S = 1;
@@ -62,18 +110,474 @@ export function mountK(workspace) {
   let frameId = 0;
   let last = performance.now();
   let debt = 0;
-  const pointer = { x: 0.5, y: 0.5 };
+  let sent = false;
+  const pointer = { x: 0.5, y: 0.5, down: false };
+
+  function ink(alpha) {
+    return `rgba(241, 237, 229, ${alpha})`;
+  }
+
+  function point(x, y) {
+    return { x: ox + x * S, y: oy + y * S };
+  }
+
+  function line(x1, y1, x2, y2, color, width) {
+    const a = point(x1, y1);
+    const b = point(x2, y2);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width * S;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+
+  function dot(x, y, color, radius) {
+    const at = point(x, y);
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, radius * S, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  function poly(path, color, width) {
+    if (path.length < 2) return;
+    ctx.beginPath();
+    const first = point(path[0].x, path[0].y);
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < path.length; i += 1) {
+      const next = point(path[i].x, path[i].y);
+      ctx.lineTo(next.x, next.y);
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width * S;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+
+  /* ---------- стойка ---------- */
+
+  /* Стойка подвешена за верх: смещение уводит точку подвеса по дуге нити,
+     угол поворачивает саму планку вокруг этой точки. */
+  function stemAt(angle = state.stemAngle, offset = state.stemOffset) {
+    const length = STEM_BOTTOM - STEM_TOP;
+    const top = {
+      x: STEM_X + offset,
+      y: Math.sqrt(Math.max(0, STEM_TOP * STEM_TOP - offset * offset)),
+    };
+    return {
+      top,
+      bottom: { x: top.x + Math.sin(angle) * length, y: top.y + Math.cos(angle) * length },
+    };
+  }
+
+  function stemXAt(y, angle = state.stemAngle, offset = state.stemOffset) {
+    const top = stemAt(angle, offset).top;
+    return top.x + Math.tan(angle) * (y - top.y);
+  }
+
+  /* Стойка за кадр успевает сдвинуться, поэтому пересечение ищется по
+     движущейся планке: половинным делением между её положениями. */
+  function stemCrossing(ax, ay, bx, by, angleBefore, angleAfter, offsetBefore, offsetAfter) {
+    function sample(t) {
+      const angle = lerp(angleBefore, angleAfter, t);
+      const offset = lerp(offsetBefore, offsetAfter, t);
+      const y = lerp(ay, by, t);
+      const x = lerp(ax, bx, t);
+      return { angle, offset, y, x, gap: x - stemXAt(y, angle, offset) };
+    }
+
+    const start = sample(0);
+    const end = sample(1);
+    if (start.gap * end.gap > 0) return null;
+
+    let lowT = 0;
+    let highT = 1;
+    let lowGap = start.gap;
+    for (let i = 0; i < 9; i += 1) {
+      const t = (lowT + highT) / 2;
+      const probe = sample(t);
+      if (lowGap * probe.gap <= 0) highT = t;
+      else {
+        lowT = t;
+        lowGap = probe.gap;
+      }
+    }
+    const hit = sample(highT);
+    const stem = stemAt(hit.angle, hit.offset);
+    if (hit.y < stem.top.y || hit.y > stem.bottom.y) return null;
+    return {
+      x: stemXAt(hit.y, hit.angle, hit.offset),
+      y: hit.y,
+      angle: hit.angle,
+      offset: hit.offset,
+      side: Math.sign(start.gap) || 1,
+    };
+  }
+
+  /* ---------- кольцо ---------- */
+
+  /* Кольцо вращается вокруг своей нити, поэтому в кадре оно эллипс: то полный
+     круг, то щель. Сплющенное кольцо поймать почти нельзя — это и есть его
+     собственный ритм, добавленный к качанию стойки. */
+  function ringAt() {
+    const offset = state.ringOffset;
+    const radius = params.radius;
+    const attachY = Math.sqrt(Math.max(0, STEM_TOP * STEM_TOP - offset * offset));
+    const squeeze = Math.max(0.045, Math.abs(Math.cos(state.ringAngle)));
+    return {
+      x: RING_HOME.x + offset,
+      y: attachY + radius,
+      r: radius,
+      rx: radius * squeeze,
+      ry: radius,
+    };
+  }
+
+  function threadNear(ax, ay, bx, by, ring) {
+    const cx = RING_HOME.x;
+    const cy = 0;
+    const dx = ring.x;
+    const dy = ring.y - ring.ry;
+    const side = (x1, y1, x2, y2, x3, y3) => (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1);
+    const one = side(ax, ay, bx, by, cx, cy);
+    const two = side(ax, ay, bx, by, dx, dy);
+    const three = side(cx, cy, dx, dy, ax, ay);
+    const four = side(cx, cy, dx, dy, bx, by);
+    if (one * two <= 0 && three * four <= 0) return 0;
+    return Math.min(
+      segmentNear(ax, ay, bx, by, cx, cy),
+      segmentNear(ax, ay, bx, by, dx, dy),
+      segmentNear(cx, cy, dx, dy, ax, ay),
+      segmentNear(cx, cy, dx, dy, bx, by),
+    );
+  }
+
+  /* Мяч прошёл сквозь кольцо, если отрезок хода пересёк эллипс снаружи
+     внутрь. Радиус берётся с запасом: попадание в самый край засчитывать
+     нечестно, кольцо там уже задето. */
+  function passesRing(ax, ay, bx, by, ring) {
+    const rx = ring.rx * 0.78;
+    const ry = ring.ry * 0.78;
+    const dx = (bx - ax) / rx;
+    const dy = (by - ay) / ry;
+    const oxr = (ax - ring.x) / rx;
+    const oyr = (ay - ring.y) / ry;
+    const a = dx * dx + dy * dy;
+    if (!a) return false;
+    const b = 2 * (oxr * dx + oyr * dy);
+    const c = oxr * oxr + oyr * oyr - 1;
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant <= 0) return false;
+    const root = Math.sqrt(discriminant);
+    const roots = [(-b - root) / (2 * a), (-b + root) / (2 * a)].sort((one, two) => one - two);
+    for (const t of roots) {
+      if (t < 0 || t > 1) continue;
+      const before = Math.hypot(oxr + dx * Math.max(0, t - 0.002), oyr + dy * Math.max(0, t - 0.002));
+      const after = Math.hypot(oxr + dx * Math.min(1, t + 0.002), oyr + dy * Math.min(1, t + 0.002));
+      if (before > 1 && after <= 1) return true;
+    }
+    return false;
+  }
+
+  /* ---------- партия ---------- */
+
+  function placeBall() {
+    const shots = state.shots;
+    state.ball = shots < 10 ? { ...BALL_HOME } : { ...BALL_LAYOUTS[(shots - 10) % BALL_LAYOUTS.length] };
+  }
 
   function reset() {
-    state.done = [
-      { path: [{ x: K.stem, y: K.top }, { x: K.stem, y: K.node }], hot: 0 },
-      { path: [{ x: K.stem, y: K.node }, { x: K.right, y: K.upper }], hot: 0 },
-      { path: [{ x: K.stem, y: K.node }, { x: K.right, y: K.lower }], hot: 0 },
-    ];
-    state.tips = [];
-    state.seed = 0.3;
-    state.impacts = 0;
-    state.hot = 0;
+    state.shots = 0;
+    state.hits = 0;
+    state.lives = LIVES;
+    state.over = false;
+    state.fly = null;
+    state.aim = false;
+    state.force = 0;
+    state.stemAngle = 0;
+    state.stemAngularVelocity = 0;
+    state.stemOffset = 0;
+    state.stemVelocity = 0;
+    state.ringAngle = 0;
+    state.ringOffset = 0;
+    state.ringVelocity = 0;
+    state.rest = 0;
+    state.fresh = null;
+    state.inkLength = 0;
+    state.done = [];
+    sent = false;
+    placeBall();
+  }
+
+  /* Партия кончилась — результат уходит в копилку холста. Один раз: сервер
+     начисляет за улучшение рекорда, но повторами его дёргать незачем. */
+  function finish() {
+    state.over = true;
+    if (sent) return;
+    sent = true;
+    reportScore('К', state.hits);
+  }
+
+  function launch(dx, dy) {
+    const len = Math.hypot(dx, dy) || 1;
+    const pull = Math.min(len, REACH);
+    state.force = pull;
+    state.fly = {
+      x: state.ball.x,
+      y: state.ball.y,
+      vx: (dx / len) * pull * PULL,
+      vy: (dy / len) * pull * PULL,
+      path: [{ x: state.ball.x, y: state.ball.y }],
+      bounced: false,
+      scored: false,
+      threadHit: false,
+      age: 0,
+    };
+    state.shots += 1;
+  }
+
+  function miss() {
+    state.fly = null;
+    state.lives -= 1;
+    if (state.lives <= 0) finish();
+    else state.rest = REST;
+  }
+
+  function preview(dx, dy) {
+    const len = Math.hypot(dx, dy) || 1;
+    const pull = Math.min(len, REACH);
+    let x = state.ball.x;
+    let y = state.ball.y;
+    let vx = (dx / len) * pull * PULL;
+    let vy = (dy / len) * pull * PULL;
+    const path = [{ x, y }];
+    let bounced = false;
+    for (let i = 0; i < 22; i += 1) {
+      const px = x;
+      const py = y;
+      vy += params.weight;
+      x += vx;
+      y += vy;
+      const hit = bounced
+        ? null
+        : stemCrossing(px, py, x, y, state.stemAngle, state.stemAngle, state.stemOffset, state.stemOffset);
+      if (hit) {
+        x = hit.x;
+        y = hit.y;
+        vx = -vx * KICK;
+        bounced = true;
+      }
+      path.push({ x, y });
+    }
+    return path;
+  }
+
+  function step() {
+    const angleBefore = state.stemAngle;
+    const offsetBefore = state.stemOffset;
+
+    state.ringAngle += params.spin * 0.018;
+    state.ringOffset += state.ringVelocity;
+    state.ringVelocity *= 0.993;
+    state.ringVelocity -= state.ringOffset * 0.012;
+    state.ringOffset = clamp(state.ringOffset, -RING_SWAY, RING_SWAY);
+    state.stemOffset += state.stemVelocity;
+    state.stemVelocity *= 0.993;
+    state.stemVelocity -= state.stemOffset * 0.012;
+    state.stemOffset = clamp(state.stemOffset, -STEM_SWAY, STEM_SWAY);
+    state.stemAngle += state.stemAngularVelocity;
+    state.stemAngularVelocity *= 0.992;
+    state.stemAngularVelocity -= Math.sin(state.stemAngle) * 0.006;
+    state.stemAngle = clamp(state.stemAngle, -0.22, 0.22);
+
+    const angleAfter = state.stemAngle;
+    const offsetAfter = state.stemOffset;
+
+    if (state.fresh) state.inkLength += INK_RATE;
+
+    if (state.rest > 0) {
+      state.rest -= 1;
+      if (state.rest === 0 && !state.over) {
+        state.fresh = null;
+        placeBall();
+      }
+      return;
+    }
+
+    const fly = state.fly;
+    if (!fly) return;
+
+    fly.age += 1;
+    const px = fly.x;
+    const py = fly.y;
+    fly.vy += params.weight;
+    fly.x += fly.vx;
+    fly.y += fly.vy;
+
+    /* Удар о стойку: импульс делится между мячом и планкой по её массе и
+       моменту инерции, поэтому чем ближе к низу пришёлся удар, тем сильнее
+       стойка проворачивается. */
+    if (!fly.bounced) {
+      const hit = stemCrossing(px, py, fly.x, fly.y, angleBefore, angleAfter, offsetBefore, offsetAfter);
+      if (hit) {
+        const length = STEM_BOTTOM - STEM_TOP;
+        const contact = stemAt(hit.angle, hit.offset);
+        const distance = clamp((hit.y - contact.top.y) / Math.max(0.001, Math.cos(hit.angle)), 0, length);
+        const normalX = Math.cos(hit.angle) * hit.side;
+        const normalY = -Math.sin(hit.angle) * hit.side;
+        const ballNormal = fly.vx * normalX + fly.vy * normalY;
+        const before = stemAt(angleBefore, offsetBefore);
+        const after = stemAt(angleAfter, offsetAfter);
+        const anchorNormal = (after.top.x - before.top.x) * normalX + (after.top.y - before.top.y) * normalY;
+        const stemNormal = anchorNormal + state.stemAngularVelocity * distance * hit.side;
+        const relativeNormal = ballNormal - stemNormal;
+        if (relativeNormal < 0) {
+          const weight = params.stemWeight;
+          const mass = STEM_MASS * weight;
+          const inertia = STEM_INERTIA * weight;
+          const impulse = -(1 + KICK) * relativeNormal / (1 + 1 / mass + (distance * distance) / inertia);
+          fly.x = hit.x;
+          fly.y = hit.y;
+          fly.vx += impulse * normalX;
+          fly.vy += impulse * normalY;
+          fly.bounced = true;
+          state.stemVelocity -= (impulse * normalX) / mass;
+          state.stemAngularVelocity -= (impulse * hit.side * distance) / inertia;
+        }
+      }
+    }
+
+    fly.path.push({ x: fly.x, y: fly.y });
+
+    const ring = ringAt();
+    if (!fly.threadHit && threadNear(px, py, fly.x, fly.y, ring) <= 0.014) {
+      state.ringVelocity += clamp(fly.vx * 0.22, -0.007, 0.007);
+      fly.vx *= 0.93;
+      fly.threadHit = true;
+    }
+
+    if (!fly.scored && fly.bounced && passesRing(px, py, fly.x, fly.y, ring)) {
+      state.hits += 1;
+      state.ringVelocity += clamp(fly.vx * 0.22, -0.007, 0.007);
+      fly.scored = true;
+      state.fresh = fly.path;
+      state.inkLength = 0;
+      state.done.push(state.fresh);
+      if (state.done.length > KEEP) state.done.shift();
+    }
+
+    const gone = fly.x < -0.05 || fly.x > 1.05 || fly.y > 1.05;
+    if (gone || fly.age > FLIGHT) {
+      if (fly.scored) {
+        state.fly = null;
+        state.rest = REST;
+      } else miss();
+    }
+  }
+
+  /* ---------- рисование ---------- */
+
+  /* Чернильная К пишется по следу мяча — ровно столько, сколько успело
+     набежать с момента попадания. */
+  function inkPrefix(path, length) {
+    if (!path.length) return [];
+    const prefix = [path[0]];
+    let left = length;
+    for (let i = 1; i < path.length && left > 0; i += 1) {
+      const from = path[i - 1];
+      const to = path[i];
+      const segment = Math.hypot(to.x - from.x, to.y - from.y);
+      if (segment <= left) {
+        prefix.push(to);
+        left -= segment;
+      } else {
+        const t = segment ? left / segment : 0;
+        prefix.push({ x: lerp(from.x, to.x, t), y: lerp(from.y, to.y, t) });
+        break;
+      }
+    }
+    return prefix;
+  }
+
+  function drawInk(path, color) {
+    const prefix = inkPrefix(path, state.inkLength);
+    if (prefix.length > 1) poly(prefix, color, 0.018);
+  }
+
+  function drawTrail(path) {
+    const from = Math.max(0, path.length - TRAIL);
+    for (let i = from + 1; i < path.length; i += 2) {
+      const fade = (i - from) / Math.max(path.length - from, 1);
+      poly(path.slice(Math.max(from, i - 2), i + 1), ink(0.2 + fade * 0.65), 0.002 + fade * 0.003);
+    }
+  }
+
+  function drawRing(ring) {
+    const at = point(ring.x, ring.y);
+    ctx.beginPath();
+    ctx.ellipse(at.x, at.y, ring.rx * S, ring.ry * S, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 0.012 * S;
+    ctx.stroke();
+  }
+
+  function status() {
+    const hits = state.hits;
+    const text = state.over
+      ? `${hits} ${plural(hits)} · клик — заново`
+      : `${hits} ${plural(hits)}`;
+    ctx.fillStyle = state.fresh ? RED : ink(0.45);
+    ctx.font = "10px 'DM Mono', ui-monospace, monospace";
+    ctx.textAlign = 'center';
+    ctx.fillText(text.toUpperCase(), ox + S / 2, oy + 25);
+    ctx.textAlign = 'left';
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    const ring = ringAt();
+    const stem = stemAt();
+
+    if (params.trace) {
+      for (const path of state.done) {
+        if (path === state.fresh) continue;
+        poly(path, ink(0.16), 0.018);
+      }
+    }
+
+    line(STEM_X, 0, stem.top.x, stem.top.y, ink(0.2), 0.002);
+    line(stem.top.x, stem.top.y, stem.bottom.x, stem.bottom.y, INK, 0.018);
+    line(RING_HOME.x, 0, ring.x, ring.y - ring.ry, ink(0.2), 0.002);
+    drawRing(ring);
+
+    /* Свежая К горит, пока пишется, и остывает вместе с паузой показа. */
+    if (state.fresh && state.rest > 0) drawInk(state.fresh, RED);
+
+    if (state.fly) {
+      drawTrail(state.fly.path);
+      if (state.fly.scored) drawInk(state.fly.path, RED);
+      dot(state.fly.x, state.fly.y, INK, 0.016);
+    } else {
+      dot(state.ball.x, state.ball.y, state.over ? ink(0.25) : INK, 0.022);
+    }
+
+    if (state.aim) poly(preview(pointer.x - state.ball.x, pointer.y - state.ball.y), ink(0.34), 0.0025);
+
+    /* Служебный слой держится выше нижнего края кадра: у самого низа канву
+       перекрывают подпись «параметры» и кнопка подсказки, и на узком экране
+       жизни оказывались прямо в тексте. */
+    const shelf = 0.88;
+    line(0.69, shelf, 0.83, shelf, ink(0.2), 0.009);
+    line(0.69, shelf, 0.69 + 0.14 * clamp(state.force / REACH, 0, 1), shelf, ink(0.6), 0.009);
+
+    for (let i = 0; i < LIVES; i += 1) {
+      dot(0.17 + i * 0.028, shelf, i < state.lives ? ink(0.55) : ink(0.14), 0.0085);
+    }
+
+    status();
   }
 
   function resize() {
@@ -89,118 +593,6 @@ export function mountK(workspace) {
     canvas.style.width = `${W}px`;
     canvas.style.height = `${H}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-
-  function point(x, y) {
-    return { x: ox + x * S, y: oy + y * S };
-  }
-
-  function addImpact(x, y) {
-    if (state.tips.length + state.done.length >= MAX_PATHS) return;
-    const tip = makeTip(clamp(x, 0.04, 0.96), clamp(y, 0.04, 0.96), Math.PI / 2, 1, 1, state.seed);
-    state.seed += 1.7;
-    state.tips.push(tip);
-    state.impacts += 1;
-    state.hot = 1;
-  }
-
-  function settle(tip) {
-    state.done.push({ path: tip.path, hot: tip.hot });
-  }
-
-  function step() {
-    state.hot = Math.max(0, state.hot - STEP * 0.7);
-    const born = [];
-    const half = (params.spread * Math.PI) / 180;
-
-    for (let i = state.tips.length - 1; i >= 0; i -= 1) {
-      const tip = state.tips[i];
-      tip.hot = Math.max(0, tip.hot - STEP * 0.45);
-      tip.dir += (Math.sin(tip.seed + tip.total * 41) + Math.sin(tip.seed * 2.3 + tip.total * 17) * 0.5)
-        * params.waver * 0.03;
-      tip.x += Math.cos(tip.dir) * SPEED;
-      tip.y += Math.sin(tip.dir) * SPEED;
-      tip.run += SPEED;
-      tip.total += SPEED;
-      tip.path.push({ x: tip.x, y: tip.y });
-
-      const gone = tip.x < 0 || tip.x > 1 || tip.y < 0 || tip.y > 1;
-      if (gone || tip.energy < MIN_ENERGY) {
-        settle(tip);
-        state.tips.splice(i, 1);
-        continue;
-      }
-
-      if (tip.run < params.span * tip.energy) continue;
-      tip.run = 0;
-      const perp = tip.dir - (Math.PI / 2) * tip.side;
-      const canBranch = state.tips.length + born.length < MAX_TIPS
-        && state.done.length + born.length < MAX_PATHS;
-      if (canBranch) {
-        const side = -tip.side;
-        born.push(makeTip(tip.x, tip.y, perp - half, tip.energy * params.decay, side, tip.seed + 3.1));
-        born.push(makeTip(tip.x, tip.y, perp + half, tip.energy * params.decay, side, tip.seed + 5.7));
-        state.hot = 1;
-      }
-      tip.energy *= WEAR;
-      tip.side = -tip.side;
-    }
-
-    state.tips.push(...born);
-  }
-
-  function drawPath(track, width, color) {
-    if (track.path.length < 2) return;
-    ctx.beginPath();
-    const first = point(track.path[0].x, track.path[0].y);
-    ctx.moveTo(first.x, first.y);
-    for (let i = 1; i < track.path.length; i += 1) {
-      const next = point(track.path[i].x, track.path[i].y);
-      ctx.lineTo(next.x, next.y);
-    }
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width * S;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-  }
-
-  function line(x1, y1, x2, y2, color, width) {
-    const a = point(x1, y1);
-    const b = point(x2, y2);
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width * S;
-    ctx.lineCap = 'round';
-    ctx.stroke();
-  }
-
-  function status() {
-    const text = state.impacts ? `${state.impacts} ${plural(state.impacts)}` : 'клик — удар';
-    ctx.fillStyle = state.hot > 0.08 ? RED : MUTED;
-    ctx.font = "10px 'DM Mono', ui-monospace, monospace";
-    /* По центру сверху, как у И и Й: в правом углу строка уходит под крестик
-       закрытия и режется им пополам. */
-    ctx.textAlign = 'center';
-    ctx.fillText(text.toUpperCase(), ox + S / 2, oy + 25);
-    ctx.textAlign = 'left';
-  }
-
-  function draw() {
-    ctx.clearRect(0, 0, W, H);
-    for (const track of state.done) {
-      const color = track.hot > 0.08 ? RED : INK;
-      drawPath(track, 0.009, color);
-    }
-    for (const tip of state.tips) {
-      const width = 0.004 + tip.energy * 0.008;
-      drawPath(tip, width, tip.hot > 0.08 ? RED : INK);
-    }
-
-    line(0.18, 0.91, 0.82, 0.91, FAINT, 0.0015);
-    status();
   }
 
   function frame(now) {
@@ -222,43 +614,69 @@ export function mountK(workspace) {
 
   function onDown(event) {
     track(event);
-    addImpact(pointer.x, pointer.y);
+    pointer.down = true;
+    if (state.over) {
+      reset();
+      return;
+    }
+    if (state.fly || state.rest > 0) return;
+    state.aim = true;
+  }
+
+  function onMove(event) {
+    track(event);
+    if (!pointer.down || !state.aim) return;
+    state.force = Math.min(Math.hypot(pointer.x - state.ball.x, pointer.y - state.ball.y), REACH);
+  }
+
+  function onUp(event) {
+    track(event);
+    pointer.down = false;
+    if (!state.aim) return;
+    state.aim = false;
+    const dx = pointer.x - state.ball.x;
+    const dy = pointer.y - state.ball.y;
+    if (Math.hypot(dx, dy) < 0.02) return;
+    launch(dx, dy);
   }
 
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = 'клик — удар · узел отдаёт две ветви и помнит каждый раскол';
+  hint.textContent = 'тяни мяч и отпускай · попадание считается только после удара о стойку, и след пишет К';
 
   const panel = document.createElement('div');
   panel.className = 'sketch-panel';
   panel.dataset.letterLayer = '';
   panel.hidden = true;
 
-  const controls = [
-    ['span', 'до развилки', 0.06, 0.3, 0.01],
-    ['spread', 'раствор', 10, 70, 1],
-    ['decay', 'затухание', 0.3, 0.95, 0.01],
-    ['waver', 'виляние', 0, 1, 0.02],
-  ];
-  for (const [key, labelText, min, max, step] of controls) {
+  for (const [key, labelText, min, max, stepValue] of CONTROLS) {
     const label = document.createElement('label');
     label.textContent = labelText;
     const input = document.createElement('input');
     input.type = 'range';
     input.min = min;
     input.max = max;
-    input.step = step;
+    input.step = stepValue;
     input.value = params[key];
     input.addEventListener('input', () => { params[key] = Number(input.value); });
     label.append(input);
     panel.append(label);
   }
 
+  const traceLabel = document.createElement('label');
+  traceLabel.textContent = 'след';
+  const traceInput = document.createElement('input');
+  traceInput.type = 'checkbox';
+  traceInput.checked = params.trace;
+  traceInput.addEventListener('change', () => { params.trace = traceInput.checked; });
+  traceLabel.append(traceInput);
+  panel.append(traceLabel);
+
   const resetButton = document.createElement('button');
   resetButton.type = 'button';
   resetButton.className = 'sketch-action';
-  resetButton.textContent = 'чистый лист';
+  resetButton.textContent = 'заново';
   resetButton.addEventListener('click', reset);
   panel.append(resetButton);
 
@@ -284,6 +702,8 @@ export function mountK(workspace) {
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(workspace);
   canvas.addEventListener('pointerdown', onDown);
+  canvas.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
   document.addEventListener('keydown', onKeyDown);
   resize();
   frameId = requestAnimationFrame(frame);
@@ -292,6 +712,8 @@ export function mountK(workspace) {
     cancelAnimationFrame(frameId);
     resizeObserver.disconnect();
     canvas.removeEventListener('pointerdown', onDown);
+    canvas.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
     document.removeEventListener('keydown', onKeyDown);
     hint.remove();
     panel.remove();
