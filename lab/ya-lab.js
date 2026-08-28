@@ -468,7 +468,7 @@ MODES.page = {
     const m = board(box, marks, mine, 32);
 
     ctx.textAlign = 'right';
-    yaText(`${marks} ИЗ ${m.list.length} КЛЕТОК · ТВОИХ ${mine}`, 1 - pad, box.y + size + 0.032, 0.014, MUTED, 400, true);
+    yaText(`${marks}/${m.list.length} · ТВОИХ ${mine}`, 1 - pad, box.y + size + 0.032, 0.014, MUTED, 400, true);
     ctx.textAlign = 'left';
 
     /* Сетка алфавита начинается за нижним краем первого экрана: её видно
@@ -524,8 +524,8 @@ MODES.scene = {
     const m = board(box, Math.round(num('marks')), Math.round(num('mine')), 32);
 
     const marks = Math.round(num('marks'));
-    yaText(`${marks} ИЗ ${m.list.length} КЛЕТОК`, pad, box.y + size + 0.05, 0.019, MUTED, 400, true);
-    yaText(`ТВОИХ ${Math.round(num('mine'))}`, pad, box.y + size + 0.08, 0.019, INK, 500, true);
+    yaText(`${marks}/${m.list.length}`, pad, box.y + size + 0.05, 0.019, MUTED, 400, true);
+    yaText(`ТВОИХ ${Math.round(num('mine'))}`, pad + 0.075, box.y + size + 0.05, 0.019, INK, 500, true);
 
     /* Лидер каждой игровой буквы, а не топ одной: единицы у букв разные,
        и складывать их незачем — сравнивается только первое место. */
