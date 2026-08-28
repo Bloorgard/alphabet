@@ -7,7 +7,7 @@
    подсказывает форму, но не запирает в ней, ставить можно и мимо. */
 
 import { YA_AREA, YA_MASK, maskCells } from '../ya-mask.js?v=1';
-import { joinPlayer, loadState, putMark, renamePlayer } from '../wall.js?v=9';
+import { joinPlayer, loadState, plural, putMark, renamePlayer } from '../wall.js?v=10';
 
 const BOX = { x: 0.06, y: 0.14, size: 0.56 };
 /* На телефоне сцена — тот же квадрат, но панель уезжает под холст, поэтому
@@ -176,7 +176,7 @@ export function mountYa(workspace) {
     }
 
     count.textContent = mine
-      ? `${state.marks.length}/${YA_AREA} · твоих ${mine}`
+      ? `${state.marks.length}/${YA_AREA} · ${plural(mine, ['твоя', 'твои', 'твоих'])} ${mine}`
       : `${state.marks.length}/${YA_AREA}`;
   }
 
@@ -235,14 +235,6 @@ export function mountYa(workspace) {
       place.hidden = true;
     }
     draw();
-  }
-
-  function plural(n, forms) {
-    const ten = n % 10;
-    const hundred = n % 100;
-    if (ten === 1 && hundred !== 11) return forms[0];
-    if (ten >= 2 && ten <= 4 && (hundred < 10 || hundred >= 20)) return forms[1];
-    return forms[2];
   }
 
   async function refresh() {

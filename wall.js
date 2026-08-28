@@ -193,16 +193,21 @@ export async function putMark(x, y) {
 let known = null;
 const GAMES = new Set(['З', 'Ё', 'К']);
 
+/* Числительное согласуется везде, где показывается: «1 клетка», «2 клетки»,
+   «5 клеток», «твоя 1», «твои 2». Форма живёт в одном месте, потому что
+   строк с числами на холсте уже три. */
+export function plural(n, forms) {
+  const ten = n % 10;
+  const hundred = n % 100;
+  if (ten === 1 && hundred !== 11) return forms[0];
+  if (ten >= 2 && ten <= 4 && (hundred < 10 || hundred >= 20)) return forms[1];
+  return forms[2];
+}
+
 function creditText() {
   if (!known?.name) return 'впиши имя в Я';
   const n = known.wallet;
-  const forms = ['клетка', 'клетки', 'клеток'];
-  const ten = n % 10;
-  const hundred = n % 100;
-  const form = ten === 1 && hundred !== 11 ? forms[0]
-    : ten >= 2 && ten <= 4 && (hundred < 10 || hundred >= 20) ? forms[1]
-    : forms[2];
-  return `${known.name} · ${n} ${form}`;
+  return `${known.name} · ${n} ${plural(n, ['клетка', 'клетки', 'клеток'])}`;
 }
 
 function paintBadge() {
@@ -268,7 +273,7 @@ function draw(state) {
   ctx.globalAlpha = 1;
 
   caption.textContent = mine
-    ? `${state.marks.length}/${YA_AREA} · твоих ${mine}`
+    ? `${state.marks.length}/${YA_AREA} · ${plural(mine, ['твоя', 'твои', 'твоих'])} ${mine}`
     : `${state.marks.length}/${YA_AREA}`;
 }
 
