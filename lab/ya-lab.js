@@ -23,9 +23,10 @@ if (!document.querySelector('link[data-ya-font]')) {
   yaFont.dataset.yaFont = '';
   yaFont.href = 'https://fonts.googleapis.com/css2?family=Manrope:wght@700&display=swap';
   document.head.append(yaFont);
-  /* fonts.ready срабатывает раньше, чем начертание реально запрошено:
-     маска успевает построиться системным шрифтом и остаться такой. */
-  document.fonts?.load('700 32px Manrope').then(() => yaMasks.clear());
+  document.fonts?.load('700 32px Manrope').then(() => {
+    yaFontReady = true;
+    yaMasks.clear();
+  });
 }
 
 /* ---------- маска буквы ---------- */
@@ -33,6 +34,11 @@ if (!document.querySelector('link[data-ya-font]')) {
 /* Клетки, попавшие внутрь контура Я. Растеризуем саму букву, а не рисуем
    контур руками: на 16×16 и на 128×128 это должна быть одна и та же Я. */
 const yaMasks = new Map();
+
+/* Маску, построенную до приезда Manrope, не кэшируем: она отличается от
+   настоящей на десятки клеток, а число клеток — величина, от которой зависят
+   и цена, и порог удвоения. Пусть лучше пересоберётся на следующем кадре. */
+let yaFontReady = false;
 
 function mask(grid) {
   const hit = yaMasks.get(grid);
@@ -69,7 +75,7 @@ function mask(grid) {
   }
 
   const built = { grid, cells, list };
-  yaMasks.set(grid, built);
+  if (yaFontReady) yaMasks.set(grid, built);
   return built;
 }
 
@@ -439,7 +445,12 @@ MODES.page = {
     const size = num('size');
     const marks = Math.round(num('marks'));
     const mine = Math.round(num('mine'));
-    const box = { x: 1 - pad - size, y: yy(0.26), size };
+    /* Поле квадратное, и это надо объявить: рамка показывает, что клетку
+       можно поставить и мимо буквы. Верх холста выровнен по надзаголовку. */
+    const box = { x: 1 - pad - size, y: yy(0.3), size };
+    ctx.strokeStyle = FAINT;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(box.x * S - 6, box.y * S - 6, size * S + 12, size * S + 12);
     const m = board(box, marks, mine, 32);
 
     ctx.textAlign = 'right';
@@ -487,6 +498,9 @@ MODES.scene = {
 
     const size = 0.58;
     const box = { x: pad, y: 0.115, size };
+    ctx.strokeStyle = FAINT;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(box.x * S - 8, box.y * S - 8, size * S + 16, size * S + 16);
     const m = board(box, Math.round(num('marks')), Math.round(num('mine')), 32);
 
     const marks = Math.round(num('marks'));
