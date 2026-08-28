@@ -686,9 +686,39 @@ export function mountK(workspace) {
   panel.dataset.letterLayer = '';
   panel.hidden = true;
 
-  /* Ползунки — снаряжение партии, поэтому в игре они закрыты: иначе рекорд
-     ставится не рукой, а кольцом пошире. Открывает их песочница, и она же
-     отменяет зачёт. */
+  /* Панель начинается с режима: сперва человек видит, во что играет, и уже
+     потом — ручки. Раньше переключатель стоял в хвосте списка, оторванный от
+     того, чем он управляет, и прочитать его было нечем. */
+  const modes = document.createElement('div');
+  modes.className = 'sketch-modes';
+  panel.append(modes);
+
+  const modeNote = document.createElement('p');
+  panel.append(modeNote);
+
+  function modeButton(labelText, play) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sketch-mode';
+    button.textContent = labelText;
+    button.addEventListener('click', () => {
+      if (state.play === play) return;
+      state.play = play;
+      /* Возврат в игру восстанавливает снаряжение: накрученное в песочнице
+         не должно уезжать в зачётную партию. */
+      if (play) Object.assign(params, PARAMS);
+      reset();
+      syncPanel();
+    });
+    modes.append(button);
+    return button;
+  }
+
+  const playButton = modeButton('на рекорд', true);
+  const freeButton = modeButton('песочница', false);
+
+  /* Ползунки — снаряжение партии, поэтому на рекорде они закрыты: иначе
+     результат ставится не рукой, а кольцом пошире. */
   const knobs = [];
   for (const [key, labelText, min, max, stepValue] of CONTROLS) {
     const label = document.createElement('label');
@@ -708,6 +738,11 @@ export function mountK(workspace) {
   const switches = [];
 
   function syncPanel() {
+    playButton.setAttribute('aria-pressed', String(state.play));
+    freeButton.setAttribute('aria-pressed', String(!state.play));
+    modeNote.textContent = state.play
+      ? 'результат идёт в общий счёт'
+      : 'ручки открыты, результат не в зачёт';
     for (const knob of knobs) {
       knob.input.disabled = state.play;
       knob.input.value = params[knob.key];
@@ -730,14 +765,6 @@ export function mountK(workspace) {
   }
 
   switchButton('след', () => params.trace, () => { params.trace = !params.trace; });
-
-  switchButton('песочница', () => !state.play, () => {
-    state.play = !state.play;
-    /* Возврат в игру восстанавливает снаряжение: накрученное в песочнице
-       не должно уезжать в зачётную партию. */
-    if (state.play) Object.assign(params, PARAMS);
-    reset();
-  });
 
   const resetButton = document.createElement('button');
   resetButton.type = 'button';

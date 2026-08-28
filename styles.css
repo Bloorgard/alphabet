@@ -92,6 +92,15 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .sketch-panel[hidden] { display: none; }
 .sketch-panel label { display: grid; gap: 3px; }
 .sketch-panel p { color: rgba(241, 237, 229, .3); }
+/* Режим партии возглавляет панель: игра или песочница, и сразу видно, идёт ли
+   результат в общий счёт. Активное состояние — инверсия, как у выбранной
+   механики на полигоне; краска тут не годится, она занята событиями. */
+.sketch-modes { display: flex; gap: 6px; }
+.sketch-mode { border: 1px solid rgba(241, 237, 229, .25); padding: 4px 8px; background: none; color: rgba(241, 237, 229, .55); font: inherit; text-transform: uppercase; letter-spacing: .08em; }
+.sketch-mode:hover { border-color: rgba(241, 237, 229, .5); color: rgba(241, 237, 229, .8); }
+.sketch-mode[aria-pressed="true"] { border-color: rgba(241, 237, 229, .9); background: rgba(241, 237, 229, .9); color: #161616; }
+.letter-workspace[data-ground="paper"] .sketch-mode { border-color: rgba(22, 22, 22, .25); color: rgba(22, 22, 22, .55); }
+.letter-workspace[data-ground="paper"] .sketch-mode[aria-pressed="true"] { border-color: rgba(22, 22, 22, .9); background: rgba(22, 22, 22, .9); color: #f1ede5; }
 .sketch-switch { justify-self: start; border: 0; padding: 0; background: none; color: inherit; font: inherit; text-transform: uppercase; letter-spacing: .08em; opacity: .55; }
 .sketch-switch[aria-pressed="true"] { opacity: 1; text-decoration: underline; text-underline-offset: 3px; }
 .sketch-panel :disabled { opacity: .35; cursor: default; }
