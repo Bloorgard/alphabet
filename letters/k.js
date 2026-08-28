@@ -31,13 +31,15 @@ const STEM_BOTTOM = 0.8;
 const RING_HOME = { x: 0.72, y: STEM_TOP + 0.062 };
 const RING_SWAY = 0.06;
 const STEM_SWAY = 0.055;
-/* Мяч отъезжает от стойки по мере счёта — и только по горизонтали: высота
-   постоянна, поэтому кадр не пляшет, а растёт одна величина, дистанция.
-   Дальше мяч — длиннее обе ветви буквы и уже угол, под которым кольцо
-   вообще достижимо. */
+/* Мяч ставится по обе стороны от своего места и только по горизонтали:
+   высота постоянна, поэтому кадр не пляшет. Со счётом растёт не дистанция,
+   а размах — точка каждый раз перескакивает через середину, и пристреляться
+   к одной удачной невозможно. Дальняя половина размаха удлиняет обе ветви
+   буквы, ближняя ломает уже наработанный замах. */
 const BALL_Y = STEM_BOTTOM;
-const BALL_NEAR = 0.72;
-const BALL_FAR = 0.88;
+const BALL_HOME_X = 0.79;
+const BALL_SPREAD = [0.025, 0.09];
+const BALL_STEP = 0.4;      // ближе этой доли размаха точка не ставится
 
 /* Кольцо ужимается с каждым попаданием: сложность растёт из результата, а не
    из уровней. К двенадцатому попаданию оно почти вдвое меньше стартового и
@@ -59,6 +61,9 @@ const FLIGHT = 700;         // дольше этого полёт считает
 const REST = 35;            // пауза показа после попадания
 const TRAIL = 42;           // длина шлейфа в шагах
 const KEEP = 12;            // сколько написанных К держит поле
+const BAR_SECTOR = Math.PI / 3;   // дужка занимает ±60° от вершины обода
+const BAR_STEPS = 7;              // на столько отрезков дужка разбита для столкновений
+const BAR_KICK = 0.55;            // рикошет от дужки гасит сильнее, чем стойка
 const LIVES = 3;
 
 const PARAMS = {
@@ -261,12 +266,54 @@ export function mountK(workspace) {
     );
   }
 
-  /* Мяч прошёл сквозь кольцо, если отрезок хода пересёк эллипс снаружи
-     внутрь. Радиус берётся с запасом: попадание в самый край засчитывать
-     нечестно, кольцо там уже задето. */
+  /* Обод материален не весь. Поперёк полёта стоят верхняя и нижняя дужки —
+     их мяч задевает и отлетает; бока обода это вход и выход, сквозь них он
+     и проходит. Раньше кольцо было прозрачным насквозь, и задевший его мяч
+     засчитывался то попаданием, то промахом — по тому лишь, попала ли
+     середина хода внутрь. Теперь зачёт достаётся только чистому пролёту, а
+     касание сверху или снизу читается рикошетом. */
+  function hoopBars(ring) {
+    const bars = [];
+    for (const base of [Math.PI / 2, -Math.PI / 2]) {
+      let prev = null;
+      for (let i = 0; i <= BAR_STEPS; i += 1) {
+        const t = base - BAR_SECTOR + (2 * BAR_SECTOR * i) / BAR_STEPS;
+        const at = { x: ring.x + ring.rx * Math.cos(t), y: ring.y + ring.ry * Math.sin(t) };
+        if (prev) bars.push([prev, at]);
+        prev = at;
+      }
+    }
+    return bars;
+  }
+
+  function crossSegments(ax, ay, bx, by, cx, cy, dx, dy) {
+    const rx = bx - ax;
+    const ry = by - ay;
+    const sx = dx - cx;
+    const sy = dy - cy;
+    const denominator = rx * sy - ry * sx;
+    if (!denominator) return null;
+    const t = ((cx - ax) * sy - (cy - ay) * sx) / denominator;
+    const u = ((cx - ax) * ry - (cy - ay) * rx) / denominator;
+    if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+    return { t, x: ax + rx * t, y: ay + ry * t };
+  }
+
+  function hitBar(ax, ay, bx, by, ring) {
+    let best = null;
+    for (const [from, to] of hoopBars(ring)) {
+      const cross = crossSegments(ax, ay, bx, by, from.x, from.y, to.x, to.y);
+      if (cross && (!best || cross.t < best.t)) best = cross;
+    }
+    return best;
+  }
+
+  /* Мяч прошёл сквозь кольцо, если отрезок хода пересёк створ снаружи внутрь.
+     Створ — эллипс без толщины обода: край теперь стерегут дужки, и запас,
+     который раньше стоял тут вместо них, только съедал честные пролёты. */
   function passesRing(ax, ay, bx, by, ring) {
-    const rx = ring.rx * 0.78;
-    const ry = ring.ry * 0.78;
+    const rx = ring.rx * 0.92;
+    const ry = ring.ry * 0.92;
     const dx = (bx - ax) / rx;
     const dy = (by - ay) / ry;
     const oxr = (ax - ring.x) / rx;
@@ -304,7 +351,12 @@ export function mountK(workspace) {
   }
 
   function placeBall() {
-    state.ball = { x: lerp(BALL_NEAR, BALL_FAR, tension()), y: BALL_Y };
+    const spread = lerp(BALL_SPREAD[0], BALL_SPREAD[1], tension());
+    /* Сторона чередуется, а насколько далеко от середины — случайно, но не
+       ближе BALL_STEP: иначе две подряд точки оказываются почти одной. */
+    state.ballSide = -(state.ballSide || 1);
+    const reach = lerp(BALL_STEP, 1, Math.random());
+    state.ball = { x: BALL_HOME_X + state.ballSide * spread * reach, y: BALL_Y };
   }
 
   function reset() {
@@ -326,6 +378,7 @@ export function mountK(workspace) {
     state.fresh = null;
     state.inkLength = 0;
     state.done = [];
+    state.ballSide = 1;
     sent = false;
     placeBall();
   }
@@ -479,7 +532,25 @@ export function mountK(workspace) {
       fly.threadHit = true;
     }
 
-    if (!fly.scored && fly.bounced && passesRing(px, py, fly.x, fly.y, ring)) {
+    /* Дужка проверяется раньше пролёта: задел обод — значит внутрь не попал,
+       что бы ни говорила середина хода. */
+    const bar = fly.scored ? null : hitBar(px, py, fly.x, fly.y, ring);
+    if (bar) {
+      const nx = (bar.x - ring.x) / (ring.rx * ring.rx);
+      const ny = (bar.y - ring.y) / (ring.ry * ring.ry);
+      const length = Math.hypot(nx, ny) || 1;
+      const ux = nx / length;
+      const uy = ny / length;
+      const along = fly.vx * ux + fly.vy * uy;
+      fly.x = bar.x;
+      fly.y = bar.y;
+      fly.vx = (fly.vx - 2 * along * ux) * BAR_KICK;
+      fly.vy = (fly.vy - 2 * along * uy) * BAR_KICK;
+      fly.path.push({ x: fly.x, y: fly.y });
+      state.ringVelocity += clamp(fly.vx * 0.18, -0.006, 0.006);
+    }
+
+    if (!bar && !fly.scored && fly.bounced && passesRing(px, py, fly.x, fly.y, ring)) {
       state.hits += 1;
       state.ringVelocity += clamp(fly.vx * 0.22, -0.007, 0.007);
       fly.scored = true;
@@ -535,13 +606,22 @@ export function mountK(workspace) {
     }
   }
 
+  /* Дужки рисуются толще боков: видно, обо что мяч отскочит, а где проход. */
   function drawRing(ring) {
     const at = point(ring.x, ring.y);
     ctx.beginPath();
     ctx.ellipse(at.x, at.y, ring.rx * S, ring.ry * S, 0, 0, Math.PI * 2);
-    ctx.strokeStyle = INK;
-    ctx.lineWidth = 0.012 * S;
+    ctx.strokeStyle = ink(0.4);
+    ctx.lineWidth = 0.006 * S;
     ctx.stroke();
+    for (const base of [Math.PI / 2, -Math.PI / 2]) {
+      ctx.beginPath();
+      ctx.ellipse(at.x, at.y, ring.rx * S, ring.ry * S, 0, base - BAR_SECTOR, base + BAR_SECTOR);
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 0.014 * S;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
   }
 
   /* Счёт и жизни — одна строка: сколько набрал и сколько осталось, читается
