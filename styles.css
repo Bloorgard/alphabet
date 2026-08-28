@@ -17,7 +17,7 @@ button { cursor: pointer; }
 h1, h2, p { margin: 0; }
 
 /* Единая мелкая моношкала для всех служебных подписей. */
-.masthead-meta, .eyebrow, .section-heading p, .site-footer, .letter-meta, .workspace-label, .sketch-panel {
+.masthead-meta, .eyebrow, .section-heading p, .site-footer, .letter-meta, .workspace-label, .sketch-panel, .wall-caption {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: .08em;
@@ -31,7 +31,14 @@ h1, h2, p { margin: 0; }
 .wordmark span { color: var(--muted); font-weight: 400; }
 .masthead-meta { display: flex; gap: 16px; color: var(--muted); }
 
-.intro { max-width: 640px; padding: clamp(56px, 10vw, 120px) 0 clamp(56px, 10vw, 120px); }
+.intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--gap); padding: clamp(56px, 10vw, 120px) 0 clamp(56px, 10vw, 120px); }
+.intro-copy { max-width: 640px; }
+
+/* Холст Я: квадрат объявлен рамкой — по нему видно, что клетку можно
+   поставить и мимо буквы. Появляется только когда состояние доехало. */
+.wall { width: clamp(150px, 24vw, 300px); }
+.wall canvas { display: block; width: 100%; aspect-ratio: 1 / 1; border: 1px solid var(--line); }
+.wall-caption { margin-top: 10px; color: var(--muted); text-align: right; }
 .eyebrow { margin-bottom: 20px; color: var(--muted); }
 h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; letter-spacing: -.02em; font-weight: 600; }
 .intro-text { max-width: 400px; color: var(--muted); font-size: 14px; line-height: 1.6; }
@@ -104,6 +111,9 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 
 @media (max-width: 850px) {
   :root { --gap: 16px; }
+  .intro { grid-template-columns: 1fr; }
+  .wall { width: min(70%, 260px); }
+  .wall-caption { text-align: left; }
   .letter-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .masthead-meta span:last-child { display: none; }
 }
