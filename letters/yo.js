@@ -1,3 +1,5 @@
+import { reportScore } from '../wall.js?v=4';
+
 const INK = '#161616';
 const PAPER = '#f1ede5';
 const RED = '#e0210f';
@@ -48,6 +50,11 @@ function noise1(x) {
 }
 
 export function mountYo(workspace) {
+  /* Рекорд уезжает на холст Я — см. букву З. */
+  const record = (value) => {
+    if (value <= state.best) return;
+    reportScore('Ё', value, workspace);
+  };
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const params = { ...PARAMS };
@@ -257,6 +264,7 @@ export function mountYo(workspace) {
       if (corner.y > ground(corner.x) + STROKE) {
         state.phase = 'fall';
         state.timer = 0;
+        record(distance());
         state.best = Math.max(state.best, distance());
         return;
       }

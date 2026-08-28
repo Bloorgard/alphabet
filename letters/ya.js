@@ -7,7 +7,7 @@
    подсказывает форму, но не запирает в ней, ставить можно и мимо. */
 
 import { YA_AREA, YA_MASK, maskCells } from '../ya-mask.js?v=1';
-import { DEMO, joinPlayer, loadState, putMark } from '../wall.js?v=2';
+import { DEMO, joinPlayer, loadState, putMark, renamePlayer } from '../wall.js?v=4';
 
 const BOX = { x: 0.06, y: 0.14, size: 0.56 };
 /* На телефоне сцена — тот же квадрат, но панель уезжает под холст, поэтому
@@ -59,7 +59,7 @@ export function mountYa(workspace) {
       <input id="ya-name-input" maxlength="5" placeholder="имя" aria-label="Твоё имя">
       <button type="submit">вписать</button>
     </form>
-    <p class="ya-me" id="ya-me" hidden></p>
+    <button class="ya-me" id="ya-me" type="button" hidden></button>
   `;
 
   const count = document.createElement('p');
@@ -93,6 +93,7 @@ export function mountYa(workspace) {
   let box = BOX;
   let hover = null;
   let chosen = null;
+  let renaming = false;
 
   function grid() {
     return GRID * (2 ** (state?.level || 0));
@@ -177,9 +178,9 @@ export function mountYa(workspace) {
       ? `${state.wallet} ${plural(state.wallet, ['клетка', 'клетки', 'клеток'])}`
       : 'сначала имя';
 
-    nameForm.hidden = Boolean(state.name);
-    me.hidden = !state.name;
-    me.textContent = state.name ? `ты — ${state.name}` : '';
+    nameForm.hidden = Boolean(state.name) && !renaming;
+    me.hidden = !state.name || renaming;
+    me.textContent = state.name ? `ты — ${state.name}, сменить` : '';
 
     /* Постановка в два шага: клетка выбирается, потом подтверждается.
        На телефоне навести нечем, а промахнуться легко. */
@@ -242,8 +243,20 @@ export function mountYa(workspace) {
       nameInput.setAttribute('aria-invalid', 'true');
       return;
     }
-    await joinPlayer(name);
+    /* Имя хранится у участника, поэтому смена переподписывает и прежние
+       клетки: человек остаётся собой, меняется только подпись. */
+    await (state?.name ? renamePlayer(name) : joinPlayer(name));
+    renaming = false;
+    nameInput.value = '';
     await refresh();
+  };
+
+  const onRename = () => {
+    renaming = true;
+    nameInput.value = state?.name || '';
+    render();
+    nameInput.focus();
+    nameInput.select();
   };
 
   /* Enter в поле имени: неявная отправка формы срабатывает не везде,
@@ -261,6 +274,7 @@ export function mountYa(workspace) {
   placeDo.addEventListener('click', onPlace);
   nameForm.addEventListener('submit', onName);
   nameInput.addEventListener('keydown', onKey);
+  me.addEventListener('click', onRename);
   window.addEventListener('resize', onResize);
 
   refresh().catch(() => {
@@ -273,6 +287,7 @@ export function mountYa(workspace) {
     placeDo.removeEventListener('click', onPlace);
     nameForm.removeEventListener('submit', onName);
     nameInput.removeEventListener('keydown', onKey);
+    me.removeEventListener('click', onRename);
     window.removeEventListener('resize', onResize);
     panel.remove();
     count.remove();

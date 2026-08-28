@@ -28,6 +28,7 @@ sqlite3 :memory: '.read schema.sql'
 - `POST /api/join` — `{ "name": "ПЕТЯ" }`
 - `POST /api/event` — `{ "letter": "А" }`
 - `POST /api/score` — `{ "letter": "З", "value": 12 }`
+- `POST /api/name` — `{ "name": "МУХА" }`, смена имени участника
 - `POST /api/mark` — `{ "x": 4, "y": 7 }`
 
 Все POST после `/api/join` требуют `Authorization: Bearer <token>`.

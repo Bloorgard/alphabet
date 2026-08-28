@@ -171,6 +171,16 @@ async function event(request, env, player) {
   return json(request, env, { earned: claimed?.count ? 1 : 0, wallet: wallet?.balance || 0 });
 }
 
+/* Имя живёт у участника, а не в клетке: смена имени задним числом
+   переподписывает все его отметки. */
+async function rename(request, env, player) {
+  const data = await body(request);
+  const name = normalizeName(data?.name);
+  if (!name) return error(request, env, 'Имя: от 1 до 5 букв, кириллица или латиница');
+  await env.DB.prepare('UPDATE players SET name = ? WHERE id = ?').bind(name, player.id).run();
+  return json(request, env, { name });
+}
+
 async function mark(request, env, player) {
   const data = await body(request);
   if (!Number.isInteger(data?.x) || !Number.isInteger(data?.y)) return error(request, env, 'Координаты должны быть целыми');
@@ -246,6 +256,7 @@ export default {
       if (!player) return error(request, env, 'Нужен токен участника', 401);
       if (url.pathname === '/api/score') return await score(request, env, player);
       if (url.pathname === '/api/event') return await event(request, env, player);
+      if (url.pathname === '/api/name') return await rename(request, env, player);
       if (url.pathname === '/api/mark') return await mark(request, env, player);
       return error(request, env, 'Not found', 404);
     } catch (cause) {

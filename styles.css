@@ -129,7 +129,20 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .ya-name input { width: 72px; border: 0; border-bottom: 1px solid rgba(22, 22, 22, .3); padding: 2px 0; background: none; color: var(--ink); font: inherit; text-transform: uppercase; letter-spacing: .08em; }
 .ya-name input:focus-visible { outline: none; border-color: var(--ink); }
 .ya-name input[aria-invalid="true"] { border-color: var(--red); }
-.ya-me { color: rgba(22, 22, 22, .55); }
+.ya-me { border: 0; padding: 0; background: none; color: rgba(22, 22, 22, .55); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
+.ya-me[hidden] { display: none; }
+
+/* Награда за рекорд показывается в самой букве: связь игры с холстом должна
+   читаться там, где её заработали. */
+/* Видимость держится на базовом стиле, а не на анимации: при
+   prefers-reduced-motion она схлопывается, и подпись бы не появилась вовсе. */
+.wall-award { position: absolute; left: 50%; bottom: 12%; margin: 0; padding: 8px 14px; background: rgba(22, 22, 22, .82); color: var(--paper); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; transform: translateX(-50%); transition: opacity .3s ease; animation: wall-award-in .3s ease; pointer-events: none; }
+.wall-award.is-gone { opacity: 0; }
+.letter-workspace[data-ground="paper"] .wall-award { background: rgba(22, 22, 22, .86); }
+
+@keyframes wall-award-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+}
 
 .ya-count { position: absolute; top: 73%; left: 6%; margin: 0; color: rgba(22, 22, 22, .55); }
 .ya-rules { position: absolute; left: 6%; bottom: 7%; width: 56%; color: rgba(22, 22, 22, .38); }

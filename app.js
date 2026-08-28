@@ -4,12 +4,12 @@ import { mountV } from './letters/v.js?v=2';
 import { mountG } from './letters/g.js?v=2';
 import { mountD } from './letters/d.js?v=2';
 import { mountE } from './letters/e.js?v=4';
-import { mountYo } from './letters/yo.js?v=8';
+import { mountYo } from './letters/yo.js?v=10';
 import { mountZh } from './letters/zh.js?v=4';
-import { mountZ } from './letters/z.js?v=4';
+import { mountZ } from './letters/z.js?v=6';
 import { mountI } from './letters/i.js?v=9';
 import { mountJ } from './letters/j.js?v=1';
-import { mountYa } from './letters/ya.js?v=4';
+import { mountYa } from './letters/ya.js?v=6';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',

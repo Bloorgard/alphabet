@@ -104,6 +104,69 @@ export async function joinPlayer(name) {
   return data;
 }
 
+/* Результат в игровой букве. Сервер сам решает, улучшен ли рекорд и сколько
+   клеток за это причитается; буква только сообщает число и получает ответ,
+   который тут же показывает игроку. */
+export async function reportScore(letter, value, workspace) {
+  try {
+    const earned = await sendScore(letter, value);
+    if (earned > 0 && workspace) award(workspace, `+${earned} ${plural(earned, ['клетка', 'клетки', 'клеток'])} на холсте Я`);
+    return earned;
+  } catch (error) {
+    return 0;
+  }
+}
+
+async function sendScore(letter, value) {
+  if (DEMO) {
+    demo.wallet += 1;
+    return 1;
+  }
+  if (!token()) return 0;
+  const response = await fetch(`${API}/score`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token()}` },
+    body: JSON.stringify({ letter, value }),
+  });
+  if (!response.ok) return 0;
+  const data = await response.json();
+  return data.earned || 0;
+}
+
+/* Награда показывается там, где заработана: связь игры с холстом должна
+   читаться в самой букве, а не обнаруживаться потом на главной. */
+function award(workspace, text) {
+  const note = document.createElement('p');
+  note.className = 'wall-award';
+  note.dataset.letterLayer = '';
+  note.textContent = text;
+  workspace.append(note);
+  setTimeout(() => note.classList.add('is-gone'), 3000);
+  setTimeout(() => note.remove(), 3400);
+}
+
+function plural(n, forms) {
+  const ten = n % 10;
+  const hundred = n % 100;
+  if (ten === 1 && hundred !== 11) return forms[0];
+  if (ten >= 2 && ten <= 4 && (hundred < 10 || hundred >= 20)) return forms[1];
+  return forms[2];
+}
+
+export async function renamePlayer(name) {
+  if (DEMO) {
+    demo.name = name;
+    return { name };
+  }
+  const response = await fetch(`${API}/name`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token()}` },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) throw new Error('имя не принято');
+  return response.json();
+}
+
 export async function putMark(x, y) {
   if (DEMO) {
     if (!demo.wallet) return { ok: false };

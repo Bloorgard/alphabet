@@ -1,3 +1,5 @@
+import { reportScore } from '../wall.js?v=4';
+
 const STEP = 1 / 60;
 const INK = '#161616';
 const PAPER = '#f1ede5';
@@ -112,6 +114,12 @@ const APPLE_ZONES = [
 ];
 
 export function mountZ(workspace) {
+  /* Рекорд уезжает на холст Я: клетка достаётся за то, что человек играл
+     лучше себя прежнего. Считает и решает сервер, буква только сообщает. */
+  const record = (value) => {
+    if (value <= state.best) return;
+    reportScore('З', value, workspace);
+  };
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const params = { ...PARAMS };
@@ -213,6 +221,7 @@ export function mountZ(workspace) {
     state.full = true;
     state.finishing = false;
     state.apple = null;
+    record(state.eaten);
     state.best = Math.max(state.best, state.eaten);
   }
 
@@ -240,6 +249,7 @@ export function mountZ(workspace) {
     const bite = params.bite && state.points.slice(9).some((point) => Math.hypot(x - point.x, y - point.y) < radius * 1.6);
     if (out || block || bite) {
       state.dead = { why: out ? 'край' : block ? 'круг' : 'укус' };
+      record(state.eaten);
       state.best = Math.max(state.best, state.eaten);
       return;
     }
