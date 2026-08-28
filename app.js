@@ -11,7 +11,7 @@ import { mountI } from './letters/i.js?v=9';
 import { mountJ } from './letters/j.js?v=1';
 import { mountK } from './letters/k.js?v=15';
 import { mountYa } from './letters/ya.js?v=13';
-import { mountCredit } from './wall.js?v=8';
+import { mountCredit } from './wall.js?v=9';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',

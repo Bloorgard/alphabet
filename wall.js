@@ -101,24 +101,25 @@ export async function loadState() {
   const response = await fetch(`${API}/state`);
   if (!response.ok) throw new Error('нет состояния');
   const state = await response.json();
-  const mine = token();
   /* Кошелёк приходит отдельно и только по токену: публичный ответ общий
      для всех и лежит в кэше, а запас клеток — личный и обязан быть свежим
-     сразу после перезагрузки. */
-  const own = mine ? await loadOwn() : null;
+     сразу после перезагрузки. Оттуда же приходит публичный псевдоним: по
+     нему узнаются свои клетки, потому что наружу токен не выходит. */
+  const own = token() ? await loadOwn() : null;
+  const mine = own?.id || '';
   const leaders = Object.entries(state.top)
     .filter(([, rows]) => rows.length)
     .map(([letter, rows]) => [letter, rows[0].name, rows[0].value]);
   return {
     level: state.canvas.level,
-    marks: state.marks.map((mark) => ({ ...mark, owner: mark.playerId })),
+    marks: state.marks,
     names: state.names,
     top: Object.fromEntries(
       Object.entries(state.top).map(([letter, rows]) => [letter, rows.map((row) => [row.name, row.value])]),
     ),
     leaders,
     me: mine,
-    name: own?.name || state.names[mine] || null,
+    name: own?.name || null,
     wallet: own?.wallet ?? 0,
     today: own?.today ?? 0,
     limit: own?.limit ?? 5,

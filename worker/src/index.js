@@ -66,6 +66,16 @@ async function hashIp(request, env) {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/* Публичный псевдоним участника. Токен и первичный ключ у нас одно и то же,
+   поэтому отдавать `players.id` наружу нельзя: по нему кто угодно
+   представился бы чужим человеком и потратил его клетки. Хеш стабилен —
+   свои клетки владелец узнаёт, посчитав его от собственного токена. */
+async function publicId(id) {
+  const data = new TextEncoder().encode(`public:${id}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 16);
+}
+
 async function state(request, env) {
   const [canvas, marks, scores, players] = await Promise.all([
     env.DB.prepare('SELECT level, updated_at FROM canvas WHERE id = 1').first(),
@@ -74,7 +84,9 @@ async function state(request, env) {
     env.DB.prepare('SELECT id, name, hidden FROM players').all(),
   ]);
 
-  const names = Object.fromEntries(players.results.filter((player) => !player.hidden).map((player) => [player.id, player.name]));
+  const visible = players.results.filter((player) => !player.hidden);
+  const aliases = new Map(await Promise.all(visible.map(async (player) => [player.id, await publicId(player.id)])));
+  const names = Object.fromEntries(visible.map((player) => [aliases.get(player.id), player.name]));
   const top = Object.fromEntries(LETTERS.map((letter) => [letter, []]));
   for (const score of scores.results) {
     /* Десятка: попадание в неё и подъём внутри неё — то, за что начисляются
@@ -87,8 +99,8 @@ async function state(request, env) {
 
   return json(request, env, {
     canvas: { level: canvas?.level || 0, updatedAt: canvas?.updated_at || 0 },
-    marks: marks.results.filter((mark) => names[mark.player_id]).map((mark) => ({
-      x: mark.x, y: mark.y, level: mark.level, playerId: mark.player_id, createdAt: mark.created_at,
+    marks: marks.results.filter((mark) => aliases.has(mark.player_id)).map((mark) => ({
+      x: mark.x, y: mark.y, level: mark.level, owner: aliases.get(mark.player_id), createdAt: mark.created_at,
     })),
     names,
     top,
@@ -185,6 +197,7 @@ async function me(request, env, player) {
     env.DB.prepare('SELECT COUNT(*) AS count FROM marks WHERE player_id = ? AND created_at >= ?').bind(player.id, day).first(),
   ]);
   return json(request, env, {
+    id: await publicId(player.id),
     name: player.hidden ? null : player.name,
     wallet: wallet?.balance || 0,
     today: today?.count || 0,
