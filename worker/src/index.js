@@ -173,6 +173,25 @@ async function event(request, env, player) {
   return json(request, env, { earned: claimed?.count ? 1 : 0, wallet: wallet?.balance || 0 });
 }
 
+/* Своё состояние: кошелёк, имя, остаток суточного лимита. В публичном
+   `/api/state` этому места нет — тот ответ общий и лежит в кэше 15 секунд,
+   а кошелёк принадлежит одному человеку и обязан быть свежим. Без этой
+   ручки заработанное видно ровно один раз, в ответе на собственную партию,
+   и после перезагрузки страница считает, что у человека пусто. */
+async function me(request, env, player) {
+  const day = dailyStart(Date.now());
+  const [wallet, today] = await Promise.all([
+    env.DB.prepare('SELECT earned - spent AS balance FROM wallet WHERE player_id = ?').bind(player.id).first(),
+    env.DB.prepare('SELECT COUNT(*) AS count FROM marks WHERE player_id = ? AND created_at >= ?').bind(player.id, day).first(),
+  ]);
+  return json(request, env, {
+    name: player.hidden ? null : player.name,
+    wallet: wallet?.balance || 0,
+    today: today?.count || 0,
+    limit: DAILY_MARK_LIMIT,
+  });
+}
+
 /* Имя живёт у участника, а не в клетке: смена имени задним числом
    переподписывает все его отметки. */
 async function rename(request, env, player) {
@@ -252,6 +271,11 @@ export default {
     if (!url.pathname.startsWith('/api/')) return error(request, env, 'Not found', 404);
     try {
       if (request.method === 'GET' && url.pathname === '/api/state') return await state(request, env);
+      if (request.method === 'GET' && url.pathname === '/api/me') {
+        const owner = await playerFrom(request, env);
+        if (!owner) return error(request, env, 'Нужен токен участника', 401);
+        return await me(request, env, owner);
+      }
       if (request.method !== 'POST') return error(request, env, 'Method not allowed', 405);
       if (url.pathname === '/api/join') return await join(request, env);
       const player = await playerFrom(request, env);
