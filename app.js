@@ -9,6 +9,7 @@ import { mountZh } from './letters/zh.js?v=4';
 import { mountZ } from './letters/z.js?v=4';
 import { mountI } from './letters/i.js?v=9';
 import { mountJ } from './letters/j.js?v=1';
+import { mountYa } from './letters/ya.js?v=4';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',
@@ -32,7 +33,8 @@ const READY = new Map([
   ['Ж', mountZh],
   ['З', mountZ],
   ['И', mountI],
-  ['Й', mountJ]
+  ['Й', mountJ],
+  ['Я', mountYa]
 ]);
 
 const grid = document.querySelector('#letter-grid');
@@ -148,6 +150,11 @@ function closeLetter() {
   unmountCurrent = null;
   history.replaceState(null, '', window.location.pathname);
 }
+
+/* Холст на главной открывает букву Я тем же путём, что и клетка в сетке. */
+document.addEventListener('open-letter', (event) => {
+  if (READY.has(event.detail)) openLetter(event.detail);
+});
 
 grid.addEventListener('click', (event) => {
   const card = event.target.closest('[data-letter]');

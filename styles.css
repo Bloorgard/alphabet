@@ -17,7 +17,7 @@ button { cursor: pointer; }
 h1, h2, p { margin: 0; }
 
 /* Единая мелкая моношкала для всех служебных подписей. */
-.masthead-meta, .eyebrow, .section-heading p, .site-footer, .letter-meta, .workspace-label, .sketch-panel, .wall-caption {
+.masthead-meta, .eyebrow, .section-heading p, .site-footer, .letter-meta, .workspace-label, .sketch-panel, .wall-caption, .ya-panel, .ya-count, .ya-rules {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: .08em;
@@ -108,6 +108,48 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .sketch-panel input::-webkit-slider-thumb { appearance: none; width: 9px; height: 9px; margin-top: -4px; border-radius: 50%; background: rgba(241, 237, 229, .8); }
 .sketch-panel input::-moz-range-track { height: 1px; background: rgba(241, 237, 229, .25); }
 .sketch-panel input::-moz-range-thumb { width: 9px; height: 9px; border: 0; border-radius: 50%; background: rgba(241, 237, 229, .8); }
+
+/* Сцена буквы Я: холст слева, всё остальное — узкой колонкой справа.
+   Служебный слой берёт общую моношкалу, цвета — чернила по бумаге. */
+.ya-panel { position: absolute; top: 14%; right: 6%; width: 28%; color: rgba(22, 22, 22, .55); }
+.ya-title { margin: 0 0 6px; color: rgba(22, 22, 22, .38); }
+.ya-panel p { margin: 0; }
+.ya-leaders { margin: 0 0 22px; padding: 0; list-style: none; }
+.ya-leaders li { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; padding: 3px 0; color: var(--ink); }
+.ya-leaders b { font-weight: 400; color: rgba(22, 22, 22, .38); }
+.ya-leaders i { font-style: normal; }
+.ya-empty { color: rgba(22, 22, 22, .38); }
+.ya-wallet { margin-bottom: 22px !important; color: var(--ink); font-size: 15px; letter-spacing: .04em; }
+.ya-place { margin-bottom: 22px; }
+.ya-place p { margin-bottom: 6px !important; }
+.ya-panel button { border: 0; padding: 0; background: none; color: var(--ink); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
+.ya-name { display: flex; gap: 8px; align-items: baseline; }
+/* display у flex-контейнера сильнее атрибута hidden — гасим явно. */
+.ya-name[hidden], .ya-place[hidden] { display: none; }
+.ya-name input { width: 72px; border: 0; border-bottom: 1px solid rgba(22, 22, 22, .3); padding: 2px 0; background: none; color: var(--ink); font: inherit; text-transform: uppercase; letter-spacing: .08em; }
+.ya-name input:focus-visible { outline: none; border-color: var(--ink); }
+.ya-name input[aria-invalid="true"] { border-color: var(--red); }
+.ya-me { color: rgba(22, 22, 22, .55); }
+
+.ya-count { position: absolute; top: 73%; left: 6%; margin: 0; color: rgba(22, 22, 22, .55); }
+.ya-rules { position: absolute; left: 6%; bottom: 7%; width: 56%; color: rgba(22, 22, 22, .38); }
+.ya-rules summary { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.ya-rules p { margin: 10px 0 0; line-height: 1.5; letter-spacing: .02em; text-transform: none; }
+
+/* Телефон: панель ложится под холст строкой, лидеры выстраиваются в ряд,
+   правила прячутся — в квадрат размером с ладонь всё не влезает. */
+@media (max-width: 560px) {
+  .ya-panel { top: 77%; right: 6%; bottom: auto; left: 6%; width: auto; }
+  /* Заголовки колонок съедают две строки из четырёх доступных: на телефоне
+     и так понятно, что имена — это лидеры, а число — твой запас. */
+  .ya-title { display: none; }
+  .ya-leaders { display: flex; gap: 12px; margin-bottom: 10px; }
+  .ya-leaders li { grid-template-columns: auto auto auto; gap: 4px; padding: 0; }
+  .ya-wallet { margin-bottom: 10px !important; font-size: 13px; }
+  .ya-place { margin-bottom: 10px; }
+  .ya-count { top: 74%; }
+  .ya-rules { display: none; }
+}
 
 @media (max-width: 850px) {
   :root { --gap: 16px; }
