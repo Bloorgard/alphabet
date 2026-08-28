@@ -105,25 +105,39 @@ export async function reportScore(letter, value) {
 }
 
 /* Награда показывается там, где заработана: связь игры с холстом должна
-   читаться в самой букве, а не обнаруживаться потом на главной. Видимость
-   держится на стилях, а не на анимации — иначе при prefers-reduced-motion
-   подпись не появится вовсе. */
+   читаться в самой букве, а не обнаруживаться потом на главной. Это карточка
+   с выходом на холст, а не подпись: клетку дали — значит есть что сделать,
+   и путь туда должен быть в один клик. Видимость держится на стилях, а не на
+   анимации — иначе при prefers-reduced-motion карточка не появится вовсе. */
 function award(earned) {
   const workspace = document.querySelector('.letter-workspace');
   if (!workspace) return;
-  const note = document.createElement('p');
-  note.className = 'wall-award';
-  note.dataset.letterLayer = '';
+  workspace.querySelector('.wall-prize')?.remove();
+
   const forms = ['клетка', 'клетки', 'клеток'];
   const ten = earned % 10;
   const hundred = earned % 100;
   const form = ten === 1 && hundred !== 11 ? forms[0]
     : ten >= 2 && ten <= 4 && (hundred < 10 || hundred >= 20) ? forms[1]
     : forms[2];
-  note.textContent = `+${earned} ${form} на холсте Я`;
-  workspace.append(note);
-  setTimeout(() => note.classList.add('is-gone'), 3000);
-  setTimeout(() => note.remove(), 3400);
+
+  const card = document.createElement('div');
+  card.className = 'wall-prize';
+  card.dataset.letterLayer = '';
+  card.innerHTML = `
+    <p class="wall-prize-title">рекорд побит</p>
+    <p class="wall-prize-note">начислено ${earned} ${form} на холсте Я</p>
+    <div class="wall-prize-actions">
+      <button type="button" data-go>поставить клетку</button>
+      <button type="button" data-later>потом</button>
+    </div>
+  `;
+  card.querySelector('[data-go]').addEventListener('click', () => {
+    card.remove();
+    document.dispatchEvent(new CustomEvent('open-letter', { detail: 'Я' }));
+  });
+  card.querySelector('[data-later]').addEventListener('click', () => card.remove());
+  workspace.append(card);
 }
 
 /* Событие неигровой буквы — то, ради чего буква сделана. Сервер засчитает

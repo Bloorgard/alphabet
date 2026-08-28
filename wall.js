@@ -17,7 +17,7 @@ import {
   reportEvent,
   reportScore,
   saveToken,
-} from './progress.js?v=2';
+} from './progress.js?v=3';
 
 const demo = {
   level: 0,
@@ -77,8 +77,19 @@ export async function loadState() {
     return {
       level: demo.level,
       marks: demo.marks,
-      names: { me: demo.name, 'player-3': 'ЗЕВ', 'player-7': 'ОСЬ' },
+      /* Имена всем выдуманным участникам: иначе карточка занятой клетки
+         молчит там, где на бою будет имя. */
+      names: Object.fromEntries([
+        ['me', demo.name],
+        ...['ЗЕВ', 'МУХА', 'ОСЬ', 'ПЕТЯ', 'ЁЖ', 'ДЫМ', 'СОМ', 'ЛУЧ', 'ТИК', 'АХ']
+          .flatMap((name, i) => [[`player-${i}`, name], [`player-${i + 10}`, name], [`player-${i + 20}`, name], [`player-${i + 30}`, name]]),
+      ]),
       leaders: [['З', 'ЗЕВ', 61], ['Ё', 'МУХА', 54], ['К', 'ОСЬ', 48]],
+      top: {
+        З: [['ЗЕВ', 61], ['ОСЬ', 54], ['МУХА', 48], ['ПЕТЯ', 40], ['ЁЖ', 33], ['ДЫМ', 29], ['СОМ', 24], ['ЛУЧ', 19], ['ТИК', 12], ['АХ', 7]],
+        Ё: [['МУХА', 54], ['ЗЕВ', 41], ['ОСЬ', 33]],
+        К: [['ОСЬ', 48], ['ПЕТЯ', 31]],
+      },
       me: demo.name ? 'me' : '',
       name: demo.name,
       wallet: demo.wallet,
@@ -96,6 +107,9 @@ export async function loadState() {
     level: state.canvas.level,
     marks: state.marks.map((mark) => ({ ...mark, owner: mark.playerId })),
     names: state.names,
+    top: Object.fromEntries(
+      Object.entries(state.top).map(([letter, rows]) => [letter, rows.map((row) => [row.name, row.value])]),
+    ),
     leaders,
     me: mine,
     name: state.names[mine] || null,

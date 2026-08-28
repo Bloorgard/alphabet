@@ -1,4 +1,4 @@
-import { reportScore } from '../progress.js?v=2';
+import { reportScore } from '../progress.js?v=3';
 
 const STEP = 1 / 60;
 const INK = '#161616';
@@ -540,6 +540,7 @@ export function mountZ(workspace) {
   hint.dataset.letterLayer = '';
   hint.textContent = 'веди мышью или стрелками · игра идёт на рекорд';
 
+
   const panel = document.createElement('div');
   panel.className = 'sketch-panel';
   panel.dataset.letterLayer = '';
@@ -568,7 +569,9 @@ export function mountZ(workspace) {
       state.play = play;
       /* Возврат на рекорд восстанавливает снаряжение: накрученное
          в песочнице не должно уезжать в зачётную партию. */
-      if (play) Object.assign(params, PARAMS, { endless: true });
+      /* Бесконечность — свойство режима, а не отдельная ручка: на рекорде
+         игра не кончается, в песочнице буква собирается до конца. */
+      Object.assign(params, play ? { ...PARAMS, endless: true } : { ...PARAMS, endless: false });
       applyNight();
       reset();
       syncPanel();
@@ -636,18 +639,6 @@ export function mountZ(workspace) {
   addSwitch('bite', 'укус');
   addSwitch('paint', 'краска');
   addSwitch('night', 'ночь', applyNight);
-  addSwitch('endless', 'бесконечная игра', () => {
-    if (state.dead) return;
-    if (params.endless && (state.full || state.finishing)) {
-      state.full = false;
-      state.finishing = false;
-      placeApple();
-    } else if (!params.endless && state.dots.length >= dotLayout().capacity) {
-      state.full = false;
-      state.finishing = true;
-      state.apple = null;
-    }
-  });
 
   syncPanel();
 

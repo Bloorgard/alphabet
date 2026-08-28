@@ -77,7 +77,9 @@ async function state(request, env) {
   const names = Object.fromEntries(players.results.filter((player) => !player.hidden).map((player) => [player.id, player.name]));
   const top = Object.fromEntries(LETTERS.map((letter) => [letter, []]));
   for (const score of scores.results) {
-    if (top[score.letter].length >= 5) continue;
+    /* Десятка: попадание в неё и подъём внутри неё — то, за что начисляются
+       клетки, значит человек должен видеть её целиком. */
+    if (top[score.letter].length >= 10) continue;
     const player = players.results.find((item) => item.id === score.player_id);
     if (!player || player.hidden) continue;
     top[score.letter].push({ name: player.name, value: score.value });

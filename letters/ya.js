@@ -7,7 +7,7 @@
    подсказывает форму, но не запирает в ней, ставить можно и мимо. */
 
 import { YA_AREA, YA_MASK, maskCells } from '../ya-mask.js?v=1';
-import { joinPlayer, loadState, putMark, renamePlayer } from '../wall.js?v=6';
+import { joinPlayer, loadState, putMark, renamePlayer } from '../wall.js?v=7';
 
 const BOX = { x: 0.06, y: 0.14, size: 0.56 };
 /* На телефоне сцена — тот же квадрат, но панель уезжает под холст, поэтому
@@ -47,7 +47,7 @@ export function mountYa(workspace) {
   panel.className = 'ya-panel';
   panel.dataset.letterLayer = '';
   panel.innerHTML = `
-    <p class="ya-title">Лидеры</p>
+    <p class="ya-title" id="ya-leaders-title">Лидеры</p>
     <ul class="ya-leaders" id="ya-leaders"></ul>
     <p class="ya-title">У тебя</p>
     <p class="ya-wallet" id="ya-wallet">—</p>
@@ -80,6 +80,7 @@ export function mountYa(workspace) {
   workspace.append(panel, count, rules);
 
   const leaders = panel.querySelector('#ya-leaders');
+  const leadersTitle = panel.querySelector('#ya-leaders-title');
   const wallet = panel.querySelector('#ya-wallet');
   const place = panel.querySelector('#ya-place');
   const placeNote = panel.querySelector('#ya-place-note');
@@ -94,6 +95,7 @@ export function mountYa(workspace) {
   let hover = null;
   let chosen = null;
   let renaming = false;
+  let opened = null;   // буква, чью десятку сейчас смотрят
 
   function grid() {
     return GRID * (2 ** (state?.level || 0));
@@ -168,11 +170,34 @@ export function mountYa(workspace) {
       : `${state.marks.length}/${YA_AREA}`;
   }
 
+  /* Одна фраза про клетку: кто занял и когда, или что она свободна.
+     Нужна и наведению, и выбору — текст обязан быть один и тот же. */
+  function describe(cell) {
+    if (!cell) return '';
+    const mark = markAt(cell);
+    if (!mark) return `клетка ${cell.x}, ${cell.y} свободна`;
+    const owner = state.names[mark.owner];
+    const day = mark.createdAt ? `, ${when(mark.createdAt)}` : '';
+    return `занято${owner ? `: ${owner}` : ''}${day}`;
+  }
+
   function render() {
     if (!state) return;
-    leaders.innerHTML = state.leaders.length
-      ? state.leaders.map(([letter, name, value]) => `<li><b>${letter}</b><span>${name}</span><i>${value}</i></li>`).join('')
-      : '<li class="ya-empty">пока никто не играл</li>';
+
+    leadersTitle.textContent = opened ? `Лучшие в ${opened}` : 'Лидеры';
+    if (opened) {
+      /* Десятка раскрывается на месте лидеров: в неё попадают за игру,
+         значит смотреть её ходят отсюда же. */
+      const rows = state.top?.[opened] || [];
+      leaders.innerHTML = `<li class="ya-back"><button type="button" data-back>← лидеры</button></li>`
+        + (rows.length
+          ? rows.map(([name, value], i) => `<li><b>${i + 1}</b><span>${name}</span><i>${value}</i></li>`).join('')
+          : '<li class="ya-empty">в этой букве ещё не играли</li>');
+    } else {
+      leaders.innerHTML = state.leaders.length
+        ? state.leaders.map(([letter, name, value]) => `<li><button type="button" data-letter-top="${letter}"><b>${letter}</b><span>${name}</span><i>${value}</i></button></li>`).join('')
+        : '<li class="ya-empty">пока никто не играл</li>';
+    }
 
     wallet.textContent = state.name
       ? `${state.wallet} ${plural(state.wallet, ['клетка', 'клетки', 'клеток'])}`
@@ -184,14 +209,11 @@ export function mountYa(workspace) {
 
     /* Постановка в два шага: клетка выбирается, потом подтверждается.
        На телефоне навести нечем, а промахнуться легко. */
-    if (chosen) {
-      const mark = markAt(chosen);
-      const owner = mark && state.names[mark.owner];
+    const shown = chosen || hover;
+    if (shown) {
       place.hidden = false;
-      placeNote.textContent = mark
-        ? `занято${owner ? `: ${owner}` : ''}${mark.createdAt ? `, ${when(mark.createdAt)}` : ''}`
-        : `клетка ${chosen.x}, ${chosen.y} свободна`;
-      placeDo.hidden = Boolean(mark) || !state.name || !state.wallet;
+      placeNote.textContent = describe(shown);
+      placeDo.hidden = !chosen || Boolean(markAt(chosen)) || !state.name || !state.wallet;
     } else {
       place.hidden = true;
     }
@@ -218,6 +240,11 @@ export function mountYa(workspace) {
     if (same) return;
     hover = cell;
     canvas.style.cursor = cell ? 'pointer' : 'default';
+    if (!chosen) {
+      place.hidden = !cell;
+      placeNote.textContent = describe(cell);
+      placeDo.hidden = true;
+    }
     draw();
   };
 
@@ -267,6 +294,19 @@ export function mountYa(workspace) {
     nameForm.requestSubmit();
   };
 
+  const onLeaders = (event) => {
+    const back = event.target.closest('[data-back]');
+    if (back) {
+      opened = null;
+      render();
+      return;
+    }
+    const row = event.target.closest('[data-letter-top]');
+    if (!row) return;
+    opened = row.dataset.letterTop;
+    render();
+  };
+
   const onResize = () => draw();
 
   canvas.addEventListener('pointermove', onMove);
@@ -275,6 +315,7 @@ export function mountYa(workspace) {
   nameForm.addEventListener('submit', onName);
   nameInput.addEventListener('keydown', onKey);
   me.addEventListener('click', onRename);
+  leaders.addEventListener('click', onLeaders);
   window.addEventListener('resize', onResize);
 
   refresh().catch(() => {
@@ -288,6 +329,7 @@ export function mountYa(workspace) {
     nameForm.removeEventListener('submit', onName);
     nameInput.removeEventListener('keydown', onKey);
     me.removeEventListener('click', onRename);
+    leaders.removeEventListener('click', onLeaders);
     window.removeEventListener('resize', onResize);
     panel.remove();
     count.remove();

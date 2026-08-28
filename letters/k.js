@@ -19,7 +19,7 @@
    Результат партии уходит в копилку холста Я: сервер сам решит, улучшен ли
    рекорд и сдвинулось ли место в топе. Не отправилось — партия не заметит. */
 
-import { reportScore } from '../progress.js?v=2';
+import { reportScore } from '../progress.js?v=3';
 
 const STEP = 1 / 60;
 const INK = '#f1ede5';

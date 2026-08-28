@@ -1,4 +1,4 @@
-import { reportScore } from '../progress.js?v=2';
+import { reportScore } from '../progress.js?v=3';
 
 const INK = '#161616';
 const PAPER = '#f1ede5';

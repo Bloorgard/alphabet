@@ -124,7 +124,15 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .ya-title { margin: 0 0 6px; color: rgba(22, 22, 22, .38); }
 .ya-panel p { margin: 0; }
 .ya-leaders { margin: 0 0 22px; padding: 0; list-style: none; }
-.ya-leaders li { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; padding: 3px 0; color: var(--ink); }
+.ya-leaders li { display: grid; padding: 3px 0; color: var(--ink); }
+/* Строка таблицы — кнопка: за попадание в десятку дают клетки, значит
+   десятку можно раскрыть. Выглядит строкой, ведёт себя кнопкой. */
+.ya-leaders li > button, .ya-leaders li:not(.ya-back) { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; }
+.ya-leaders li > button { width: 100%; border: 0; padding: 0; background: none; color: inherit; font: inherit; text-align: left; text-transform: uppercase; letter-spacing: .08em; }
+.ya-leaders li > button:hover b { color: var(--red); }
+.ya-back { margin-bottom: 6px; }
+.ya-back button { border: 0; padding: 0; background: none; color: rgba(22, 22, 22, .38); font: inherit; text-transform: uppercase; letter-spacing: .08em; }
+.ya-back button:hover { color: var(--ink); }
 .ya-leaders b { font-weight: 400; color: rgba(22, 22, 22, .38); }
 .ya-leaders i { font-style: normal; }
 .ya-empty { color: rgba(22, 22, 22, .38); }
@@ -143,10 +151,19 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 
 /* Награда за рекорд показывается в самой букве: связь игры с холстом должна
    читаться там, где её заработали. */
-/* Видимость держится на базовом стиле, а не на анимации: при
-   prefers-reduced-motion она схлопывается, и подпись бы не появилась вовсе. */
-.wall-award { position: absolute; left: 50%; bottom: 12%; margin: 0; padding: 8px 14px; background: rgba(22, 22, 22, .82); color: var(--paper); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; transform: translateX(-50%); transition: opacity .3s ease; animation: wall-award-in .3s ease; pointer-events: none; }
-.wall-award.is-gone { opacity: 0; }
+/* Карточка награды: событие, ради которого игра и затевалась. Не перекрывает
+   сцену целиком — под ней всё продолжается, — но требует ответа кнопкой. */
+.wall-prize { position: absolute; left: 50%; top: 50%; display: grid; gap: 6px; padding: 18px 20px; background: rgba(22, 22, 22, .88); color: var(--paper); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; text-align: center; transform: translate(-50%, -50%); animation: wall-prize-in .3s ease; }
+.letter-workspace[data-ground="paper"] .wall-prize { background: rgba(22, 22, 22, .9); }
+.wall-prize-title { margin: 0; color: var(--red); }
+.wall-prize-note { margin: 0; color: rgba(241, 237, 229, .7); }
+.wall-prize-actions { display: flex; justify-content: center; gap: 14px; margin-top: 6px; }
+.wall-prize button { border: 0; padding: 0; background: none; color: var(--paper); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
+.wall-prize button[data-later] { color: rgba(241, 237, 229, .45); }
+
+@keyframes wall-prize-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 6px)); }
+}
 
 /* Запас клеток: в шапке сайта и в углу любой открытой буквы. В игровой
    буква даёт клетки, и строка идёт чернилами; в остальных она приглушена,
@@ -158,10 +175,7 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .wall-credit[data-game="true"] { color: rgba(241, 237, 229, .62); }
 .letter-workspace[data-ground="paper"] .wall-credit { color: rgba(22, 22, 22, .3); }
 .letter-workspace[data-ground="paper"] .wall-credit[data-game="true"] { color: rgba(22, 22, 22, .62); }
-.letter-workspace[data-ground="paper"] .wall-award { background: rgba(22, 22, 22, .86); }
-
-@keyframes wall-award-in {
-  from { opacity: 0; transform: translate(-50%, 6px); }
+.letter-workspace[data-ground="paper"] 
 }
 
 .ya-count { position: absolute; top: 73%; left: 6%; margin: 0; color: rgba(22, 22, 22, .55); }
