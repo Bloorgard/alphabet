@@ -124,14 +124,16 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .ya-title { margin: 0 0 6px; color: rgba(22, 22, 22, .38); }
 .ya-panel p { margin: 0; }
 .ya-leaders { margin: 0 0 22px; padding: 0; list-style: none; }
-.ya-leaders li { display: grid; padding: 3px 0; color: var(--ink); }
-/* Строка таблицы — кнопка: за попадание в десятку дают клетки, значит
-   десятку можно раскрыть. Выглядит строкой, ведёт себя кнопкой. */
-.ya-leaders li > button, .ya-leaders li:not(.ya-back) { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; }
-.ya-leaders li > button { width: 100%; border: 0; padding: 0; background: none; color: inherit; font: inherit; text-align: left; text-transform: uppercase; letter-spacing: .08em; }
-.ya-leaders li > button:hover b { color: var(--red); }
+/* Строка таблицы — единая строка, а не три подчёркнутых куска. Наведение
+   берёт её целиком подложкой: так видно, что кликается строка. */
+.ya-leaders li { display: grid; color: var(--ink); }
+.ya-leaders li > button { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; width: 100%; margin: 0 -6px; border: 0; padding: 3px 6px; background: none; color: inherit; font: inherit; text-align: left; text-transform: uppercase; letter-spacing: .08em; text-decoration: none; }
+.ya-leaders li > button:hover, .ya-leaders li > button:focus-visible { background: rgba(22, 22, 22, .06); outline: none; }
+.ya-leaders b { font-weight: 400; color: rgba(22, 22, 22, .38); }
+.ya-row.is-picked > button { background: rgba(224, 33, 15, .1); }
+.ya-row.is-picked b { color: var(--red); }
 .ya-back { margin-bottom: 6px; }
-.ya-back button { border: 0; padding: 0; background: none; color: rgba(22, 22, 22, .38); font: inherit; text-transform: uppercase; letter-spacing: .08em; }
+.ya-back button { border: 0; padding: 0; background: none; color: rgba(22, 22, 22, .38); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: none; }
 .ya-back button:hover { color: var(--ink); }
 .ya-leaders b { font-weight: 400; color: rgba(22, 22, 22, .38); }
 .ya-leaders i { font-style: normal; }
@@ -146,7 +148,10 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .ya-name input { width: 72px; border: 0; border-bottom: 1px solid rgba(22, 22, 22, .3); padding: 2px 0; background: none; color: var(--ink); font: inherit; text-transform: uppercase; letter-spacing: .08em; }
 .ya-name input:focus-visible { outline: none; border-color: var(--ink); }
 .ya-name input[aria-invalid="true"] { border-color: var(--red); }
-.ya-me { border: 0; padding: 0; background: none; color: rgba(22, 22, 22, .55); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
+/* Подчёркнуто только действие: имя — сведение, «(сменить)» — кнопка. */
+.ya-me { color: rgba(22, 22, 22, .55); }
+.ya-me button { border: 0; padding: 0; background: none; color: rgba(22, 22, 22, .38); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
+.ya-me button:hover { color: var(--ink); }
 .ya-me[hidden] { display: none; }
 
 /* Награда за рекорд показывается в самой букве: связь игры с холстом должна

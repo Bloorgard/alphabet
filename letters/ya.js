@@ -59,7 +59,7 @@ export function mountYa(workspace) {
       <input id="ya-name-input" maxlength="5" placeholder="имя" aria-label="Твоё имя">
       <button type="submit">вписать</button>
     </form>
-    <button class="ya-me" id="ya-me" type="button" hidden></button>
+    <p class="ya-me" id="ya-me" hidden><span id="ya-me-name"></span> <button type="button" id="ya-me-change">(сменить)</button></p>
   `;
 
   const count = document.createElement('p');
@@ -88,6 +88,8 @@ export function mountYa(workspace) {
   const nameForm = panel.querySelector('#ya-name');
   const nameInput = panel.querySelector('#ya-name-input');
   const me = panel.querySelector('#ya-me');
+  const meName = panel.querySelector('#ya-me-name');
+  const meChange = panel.querySelector('#ya-me-change');
 
   let state = null;
   let size = 0;
@@ -95,7 +97,8 @@ export function mountYa(workspace) {
   let hover = null;
   let chosen = null;
   let renaming = false;
-  let opened = null;   // буква, чью десятку сейчас смотрят
+  let opened = null;    // буква, чью десятку сейчас смотрят
+  let spotlight = null; // имя, чьи клетки подсвечены
 
   function grid() {
     return GRID * (2 ** (state?.level || 0));
@@ -112,6 +115,12 @@ export function mountYa(workspace) {
 
   function markAt(cell) {
     return state?.marks.find((mark) => mark.x === cell.x && mark.y === cell.y && mark.level === state.level);
+  }
+
+  /* Имя и клетки — две стороны одного: наведение на строку таблицы зажигает
+     клетки этого человека, выбор клетки подсвечивает его строку. */
+  function ownerName(mark) {
+    return mark ? state.names[mark.owner] || null : null;
   }
 
   function draw() {
@@ -150,10 +159,11 @@ export function mountYa(workspace) {
     let mine = 0;
     for (const mark of state.marks) {
       const own = state.me && mark.owner === state.me;
+      const lit = spotlight && ownerName(mark) === spotlight;
       if (own) mine += 1;
       const span = 2 ** (state.level - mark.level);
-      ctx.globalAlpha = own ? 1 : Math.max(0.25, 0.72 / span);
-      ctx.fillStyle = own ? red : ink;
+      ctx.globalAlpha = lit ? 1 : spotlight ? 0.16 : own ? 1 : Math.max(0.25, 0.72 / span);
+      ctx.fillStyle = lit || own ? red : ink;
       ctx.fillRect(left + mark.x * span * step, top + mark.y * span * step, step * span - gap, step * span - gap);
     }
     ctx.globalAlpha = 1;
@@ -181,9 +191,16 @@ export function mountYa(workspace) {
     return `занято${owner ? `: ${owner}` : ''}${day}`;
   }
 
+  /* Строка таблицы: слева место или буква, дальше имя и результат. */
+  function row(head, name, value, picked, letter) {
+    const tag = letter ? `data-letter-top="${letter}"` : '';
+    return `<li class="ya-row${picked ? ' is-picked' : ''}"><button type="button" data-name="${name}" ${tag}><b>${head}</b><span>${name}</span><i>${value}</i></button></li>`;
+  }
+
   function render() {
     if (!state) return;
 
+    const picked = ownerName(chosen && markAt(chosen));
     leadersTitle.textContent = opened ? `Лучшие в ${opened}` : 'Лидеры';
     if (opened) {
       /* Десятка раскрывается на месте лидеров: в неё попадают за игру,
@@ -191,11 +208,11 @@ export function mountYa(workspace) {
       const rows = state.top?.[opened] || [];
       leaders.innerHTML = `<li class="ya-back"><button type="button" data-back>← лидеры</button></li>`
         + (rows.length
-          ? rows.map(([name, value], i) => `<li><b>${i + 1}</b><span>${name}</span><i>${value}</i></li>`).join('')
+          ? rows.map(([name, value], i) => row(`${i + 1}`, name, value, name === picked)).join('')
           : '<li class="ya-empty">в этой букве ещё не играли</li>');
     } else {
       leaders.innerHTML = state.leaders.length
-        ? state.leaders.map(([letter, name, value]) => `<li><button type="button" data-letter-top="${letter}"><b>${letter}</b><span>${name}</span><i>${value}</i></button></li>`).join('')
+        ? state.leaders.map(([letter, name, value]) => row(letter, name, value, name === picked, letter)).join('')
         : '<li class="ya-empty">пока никто не играл</li>';
     }
 
@@ -205,7 +222,7 @@ export function mountYa(workspace) {
 
     nameForm.hidden = Boolean(state.name) && !renaming;
     me.hidden = !state.name || renaming;
-    me.textContent = state.name ? `ты — ${state.name}, сменить` : '';
+    meName.textContent = state.name ? `ты — ${state.name}` : '';
 
     /* Постановка в два шага: клетка выбирается, потом подтверждается.
        На телефоне навести нечем, а промахнуться легко. */
@@ -294,6 +311,14 @@ export function mountYa(workspace) {
     nameForm.requestSubmit();
   };
 
+  const onLeaderHover = (event) => {
+    const row = event.target.closest('[data-name]');
+    const name = row?.dataset.name || null;
+    if (name === spotlight) return;
+    spotlight = name;
+    draw();
+  };
+
   const onLeaders = (event) => {
     const back = event.target.closest('[data-back]');
     if (back) {
@@ -314,8 +339,10 @@ export function mountYa(workspace) {
   placeDo.addEventListener('click', onPlace);
   nameForm.addEventListener('submit', onName);
   nameInput.addEventListener('keydown', onKey);
-  me.addEventListener('click', onRename);
+  meChange.addEventListener('click', onRename);
   leaders.addEventListener('click', onLeaders);
+  leaders.addEventListener('pointerover', onLeaderHover);
+  leaders.addEventListener('pointerleave', onLeaderHover);
   window.addEventListener('resize', onResize);
 
   refresh().catch(() => {
@@ -328,8 +355,10 @@ export function mountYa(workspace) {
     placeDo.removeEventListener('click', onPlace);
     nameForm.removeEventListener('submit', onName);
     nameInput.removeEventListener('keydown', onKey);
-    me.removeEventListener('click', onRename);
+    meChange.removeEventListener('click', onRename);
     leaders.removeEventListener('click', onLeaders);
+    leaders.removeEventListener('pointerover', onLeaderHover);
+    leaders.removeEventListener('pointerleave', onLeaderHover);
     window.removeEventListener('resize', onResize);
     panel.remove();
     count.remove();
