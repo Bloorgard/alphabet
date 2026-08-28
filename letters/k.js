@@ -43,6 +43,16 @@ const BALL_LAYOUTS = [
   { x: 0.81, y: 0.87 },
 ];
 
+/* Кольцо ужимается с каждым попаданием: сложность растёт из результата, а не
+   из уровней. К двенадцатому попаданию оно почти вдвое меньше стартового и
+   крутится заметно быстрее; дальше не ужимается — предел взят по нижней
+   границе ручки, на которой в полигоне играть ещё можно. */
+const RING_START = 0.0625;
+const RING_TIGHT = 0.034;
+const SPIN_START = 0.8;
+const SPIN_FAST = 1.25;
+const RAMP = 12;
+
 const PULL = 0.11;          // сколько скорости даёт доля тяги
 const REACH = 0.34;         // дальше тянуть некуда
 const KICK = 0.95;          // что остаётся от скорости после стойки
@@ -58,8 +68,8 @@ const LIVES = 3;
 const PARAMS = {
   weight: 0.00045,
   stemWeight: 1,
-  radius: 0.0625,
-  spin: 0.8,
+  radius: RING_START,
+  spin: SPIN_START,
   trace: true,
 };
 
@@ -101,7 +111,7 @@ export function mountK(workspace) {
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const params = { ...PARAMS };
-  const state = {};
+  const state = { play: true };
   let W = 1;
   let H = 1;
   let S = 1;
@@ -224,7 +234,7 @@ export function mountK(workspace) {
      собственный ритм, добавленный к качанию стойки. */
   function ringAt() {
     const offset = state.ringOffset;
-    const radius = params.radius;
+    const radius = ringRadius();
     const attachY = Math.sqrt(Math.max(0, STEM_TOP * STEM_TOP - offset * offset));
     const squeeze = Math.max(0.045, Math.abs(Math.cos(state.ringAngle)));
     return {
@@ -284,6 +294,19 @@ export function mountK(workspace) {
 
   /* ---------- партия ---------- */
 
+  /* В игре снаряжение задаёт счёт, в песочнице — ползунки. */
+  function tension() {
+    return clamp(state.hits / RAMP, 0, 1);
+  }
+
+  function ringRadius() {
+    return state.play ? lerp(RING_START, RING_TIGHT, tension()) : params.radius;
+  }
+
+  function ringSpin() {
+    return state.play ? lerp(SPIN_START, SPIN_FAST, tension()) : params.spin;
+  }
+
   function placeBall() {
     const shots = state.shots;
     state.ball = shots < 10 ? { ...BALL_HOME } : { ...BALL_LAYOUTS[(shots - 10) % BALL_LAYOUTS.length] };
@@ -314,9 +337,11 @@ export function mountK(workspace) {
 
   /* Партия кончилась — результат уходит в копилку холста. Один раз: сервер
      начисляет за улучшение рекорда, но повторами его дёргать незачем. */
+  /* Партия кончилась — результат уходит в копилку холста. Только из игры:
+     в песочнице ползунки открыты, и присылать оттуда счёт нечестно. */
   function finish() {
     state.over = true;
-    if (sent) return;
+    if (sent || !state.play) return;
     sent = true;
     reportScore('К', state.hits);
   }
@@ -379,7 +404,7 @@ export function mountK(workspace) {
     const angleBefore = state.stemAngle;
     const offsetBefore = state.stemOffset;
 
-    state.ringAngle += params.spin * 0.018;
+    state.ringAngle += ringSpin() * 0.018;
     state.ringOffset += state.ringVelocity;
     state.ringVelocity *= 0.993;
     state.ringVelocity -= state.ringOffset * 0.012;
@@ -524,16 +549,31 @@ export function mountK(workspace) {
     ctx.stroke();
   }
 
+  /* Счёт и жизни — одна строка: сколько набрал и сколько осталось, читается
+     разом. Внизу кадра им тесно, там подписи и кнопка подсказки. */
   function status() {
     const hits = state.hits;
-    const text = state.over
-      ? `${hits} ${plural(hits)} · клик — заново`
-      : `${hits} ${plural(hits)}`;
-    ctx.fillStyle = state.fresh ? RED : ink(0.45);
+    const tail = state.over ? ' · клик — заново' : '';
+    const text = `${state.play ? '' : 'песочница · '}${hits} ${plural(hits)}${tail}`.toUpperCase();
+
     ctx.font = "10px 'DM Mono', ui-monospace, monospace";
-    ctx.textAlign = 'center';
-    ctx.fillText(text.toUpperCase(), ox + S / 2, oy + 25);
+    const gap = 0.02 * S;
+    const stride = 0.022 * S;
+    const radius = 0.0065 * S;
+    const textWidth = ctx.measureText(text).width;
+    const startX = ox + S / 2 - (textWidth + gap + LIVES * stride) / 2;
+    const baseline = oy + 25;
+
     ctx.textAlign = 'left';
+    ctx.fillStyle = state.fresh ? RED : ink(0.45);
+    ctx.fillText(text, startX, baseline);
+
+    for (let i = 0; i < LIVES; i += 1) {
+      ctx.beginPath();
+      ctx.arc(startX + textWidth + gap + i * stride + radius, baseline - radius * 0.6, radius, 0, Math.PI * 2);
+      ctx.fillStyle = i < state.lives ? ink(0.5) : ink(0.13);
+      ctx.fill();
+    }
   }
 
   function draw() {
@@ -566,16 +606,12 @@ export function mountK(workspace) {
 
     if (state.aim) poly(preview(pointer.x - state.ball.x, pointer.y - state.ball.y), ink(0.34), 0.0025);
 
-    /* Служебный слой держится выше нижнего края кадра: у самого низа канву
-       перекрывают подпись «параметры» и кнопка подсказки, и на узком экране
-       жизни оказывались прямо в тексте. */
+    /* Полоса силы удара: служебная шкала, поэтому в чернилах, а не в краске.
+       Держится выше нижнего края — у самого низа канву перекрывают подпись
+       «параметры» и кнопка подсказки. */
     const shelf = 0.88;
     line(0.69, shelf, 0.83, shelf, ink(0.2), 0.009);
     line(0.69, shelf, 0.69 + 0.14 * clamp(state.force / REACH, 0, 1), shelf, ink(0.6), 0.009);
-
-    for (let i = 0; i < LIVES; i += 1) {
-      dot(0.17 + i * 0.028, shelf, i < state.lives ? ink(0.55) : ink(0.14), 0.0085);
-    }
 
     status();
   }
@@ -650,6 +686,10 @@ export function mountK(workspace) {
   panel.dataset.letterLayer = '';
   panel.hidden = true;
 
+  /* Ползунки — снаряжение партии, поэтому в игре они закрыты: иначе рекорд
+     ставится не рукой, а кольцом пошире. Открывает их песочница, и она же
+     отменяет зачёт. */
+  const knobs = [];
   for (const [key, labelText, min, max, stepValue] of CONTROLS) {
     const label = document.createElement('label');
     label.textContent = labelText;
@@ -662,16 +702,42 @@ export function mountK(workspace) {
     input.addEventListener('input', () => { params[key] = Number(input.value); });
     label.append(input);
     panel.append(label);
+    knobs.push({ key, input });
   }
 
-  const traceLabel = document.createElement('label');
-  traceLabel.textContent = 'след';
-  const traceInput = document.createElement('input');
-  traceInput.type = 'checkbox';
-  traceInput.checked = params.trace;
-  traceInput.addEventListener('change', () => { params.trace = traceInput.checked; });
-  traceLabel.append(traceInput);
-  panel.append(traceLabel);
+  const switches = [];
+
+  function syncPanel() {
+    for (const knob of knobs) {
+      knob.input.disabled = state.play;
+      knob.input.value = params[knob.key];
+    }
+    for (const item of switches) item.button.setAttribute('aria-pressed', String(item.pressed()));
+  }
+
+  function switchButton(labelText, pressed, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sketch-switch';
+    button.textContent = labelText;
+    button.addEventListener('click', () => {
+      onClick();
+      syncPanel();
+    });
+    panel.append(button);
+    switches.push({ button, pressed });
+    return button;
+  }
+
+  switchButton('след', () => params.trace, () => { params.trace = !params.trace; });
+
+  switchButton('песочница', () => !state.play, () => {
+    state.play = !state.play;
+    /* Возврат в игру восстанавливает снаряжение: накрученное в песочнице
+       не должно уезжать в зачётную партию. */
+    if (state.play) Object.assign(params, PARAMS);
+    reset();
+  });
 
   const resetButton = document.createElement('button');
   resetButton.type = 'button';
@@ -692,12 +758,18 @@ export function mountK(workspace) {
   });
 
   function onKeyDown(event) {
-    if (event.key !== 'Tab' || event.target.closest('input, textarea')) return;
+    if (event.key !== 'Tab') return;
+    /* Внутри открытой панели Tab по-прежнему переставляет фокус между
+       ползунками. Цель проверяется на элемент: событие может прийти и от
+       документа, у которого closest нет. */
+    const inField = event.target instanceof Element && event.target.closest('input, textarea');
+    if (inField) return;
     event.preventDefault();
     toggle.click();
   }
 
   reset();
+  syncPanel();
   workspace.append(hint, panel, toggle);
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(workspace);
