@@ -153,11 +153,11 @@ const LEVEL_TOOLS = [
 
 /* Выдуманные участники: пять строк топа и подписи под клетками. Имена нужны
    не для правдоподобия, а чтобы увидеть длину строки в моношкале. */
-const FAKE_TOP = [['ЗЕВ', 61], ['МУХА', 54], ['ОСЬ', 48], ['ПЕТЯ', 40], ['ЁЖ', 33]];
+const FAKE_TOP = [['З', 'ЗЕВ', 61], ['Ё', 'ПЕТЯ', 54], ['К', 'ОСЬ', 48]];
 
 const RULES = [
   'Клетка достаётся за игру: за личный рекорд в букве',
-  'и за подъём в десятке. Не больше пяти клеток в день.',
+  'и за подъём в десятке. В день ставится не больше пяти.',
   'Ставить можно куда угодно — контур только подсказывает.',
   '18 сентября Я выйдет такой, какой вы её нарисуете.',
 ];
@@ -507,41 +507,44 @@ MODES.scene = {
     yaText(`${marks} ИЗ ${m.list.length} КЛЕТОК`, pad, box.y + size + 0.05, 0.019, MUTED, 400, true);
     yaText(`ТВОИХ ${Math.round(num('mine'))}`, pad, box.y + size + 0.08, 0.019, INK, 500, true);
 
-    /* Топ живёт справа от холста: имена короткие, колонка узкая. */
+    /* Лидер каждой игровой буквы, а не топ одной: единицы у букв разные,
+       и складывать их незачем — сравнивается только первое место. */
     const right = pad + size + 0.06;
-    yaText('ЛУЧШИЕ В З', right, 0.155, 0.019, MUTED, 400, true);
-    FAKE_TOP.forEach(([name, value], i) => {
-      const y = 0.2 + i * 0.042;
-      const own = i === 2 && on('named');
-      yaText(name, right, y, 0.026, own ? INK : ink(0.7), own ? 600 : 400, true);
+    yaText('ЛИДЕРЫ', right, 0.155, 0.019, MUTED, 400, true);
+    FAKE_TOP.forEach(([letter, name, value], i) => {
+      const y = 0.2 + i * 0.045;
+      const own = name === 'ПЕТЯ' && on('named');
+      yaText(letter, right, y, 0.026, MUTED, 400, true);
+      yaText(name, right + 0.045, y, 0.026, own ? INK : ink(0.7), own ? 600 : 400, true);
       ctx.textAlign = 'right';
       yaText(String(value), 1 - pad, y, 0.026, own ? INK : ink(0.7), own ? 600 : 400, true);
       ctx.textAlign = 'left';
     });
 
     const wallet = Math.round(num('wallet'));
-    yaText('У ТЕБЯ', right, 0.46, 0.019, MUTED, 400, true);
-    yaText(`${wallet} ${plural(wallet, ['КЛЕТКА', 'КЛЕТКИ', 'КЛЕТОК'])}`, right, 0.505, 0.032, wallet ? INK : MUTED, 600, true);
-    yaText('СЕГОДНЯ ОСТАЛОСЬ 2', right, 0.54, 0.019, MUTED, 400, true);
-    yaText('ДО 18 СЕНТЯБРЯ', right, 0.575, 0.019, ink(0.35), 400, true);
+    yaText('У ТЕБЯ', right, 0.42, 0.019, MUTED, 400, true);
+    yaText(`${wallet} ${plural(wallet, ['КЛЕТКА', 'КЛЕТКИ', 'КЛЕТОК'])}`, right, 0.465, 0.032, wallet ? INK : MUTED, 600, true);
 
     if (on('named')) {
-      yaText('ТЫ — ПЕТЯ', right, 0.65, 0.019, MUTED, 400, true);
+      /* Имя — единственное, что человек о себе сообщил, и менять его он
+         приходит сюда же: подчёркнутое имя открывает поле ввода. */
+      yaText('ПЕТЯ', right, 0.56, 0.024, INK, 500, true);
+      line(right, 0.568, right + 0.05, 0.568, FAINT, 0.0015);
+      yaText('ЭТО ТЫ · МОЖНО СМЕНИТЬ', right, 0.595, 0.014, ink(0.4), 400, true);
     } else {
-      /* Пока имя не вписано, клетку ставить некому: это единственное место,
-         где человека о чём-то просят. */
       ctx.strokeStyle = RED;
       ctx.lineWidth = 1;
-      ctx.strokeRect(right * S, 0.62 * S, (1 - pad - right) * S, 0.055 * S);
-      yaText('ВПИШИ ИМЯ', right + 0.015, 0.655, 0.021, RED, 500, true);
+      ctx.strokeRect(right * S, 0.53 * S, (1 - pad - right) * S, 0.055 * S);
+      yaText('ВПИШИ ИМЯ', right + 0.015, 0.565, 0.021, RED, 500, true);
     }
 
-    const bottom = box.y + size + 0.14;
+    const bottom = box.y + size + 0.13;
     if (on('rules')) {
       RULES.forEach((row, i) => yaText(row, pad, bottom + i * 0.038, 0.024, MUTED));
     } else {
       yaText('ПРАВИЛА', pad, bottom, 0.019, MUTED, 400, true);
       line(pad, bottom + 0.008, pad + 0.075, bottom + 0.008, FAINT, 0.0015);
+      yaText('ХОЛСТ ЗАКРОЕТСЯ 18 СЕНТЯБРЯ', pad, bottom + 0.05, 0.014, ink(0.4), 400, true);
     }
 
     drawStatus(on('named') ? 'клик по клетке ставит отметку' : 'сначала имя, потом клетка', !on('named'));

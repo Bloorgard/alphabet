@@ -2,7 +2,6 @@ import {
   DAILY_MARK_LIMIT,
   LETTERS,
   MAX_LEVEL,
-  WALLET_CAP,
   areaAt,
   dailyStart,
   gridSize,
@@ -144,9 +143,9 @@ async function score(request, env, player) {
     `).bind(claimId, player.id, letter, value, points, now),
     env.DB.prepare(`
       UPDATE wallet
-      SET earned = MIN(spent + ?, earned + COALESCE((SELECT points FROM score_claims WHERE id = ?), 0))
+      SET earned = earned + COALESCE((SELECT points FROM score_claims WHERE id = ?), 0)
       WHERE player_id = ?
-    `).bind(WALLET_CAP, claimId, player.id),
+    `).bind(claimId, player.id),
   ]);
 
   const wallet = await env.DB.prepare('SELECT earned - spent AS balance FROM wallet WHERE player_id = ?').bind(player.id).first();
@@ -162,9 +161,9 @@ async function event(request, env, player) {
     env.DB.prepare('INSERT OR IGNORE INTO events (player_id, letter, created_at) VALUES (?, ?, ?)').bind(player.id, data.letter, now),
     env.DB.prepare(`
       UPDATE wallet
-      SET earned = MIN(spent + ?, earned + 1)
+      SET earned = earned + 1
       WHERE player_id = ? AND changes() = 1
-    `).bind(WALLET_CAP, player.id),
+    `).bind(player.id),
   ]);
 
   const claimed = await env.DB.prepare('SELECT COUNT(*) AS count FROM events WHERE player_id = ? AND letter = ? AND created_at = ?').bind(player.id, data.letter, now).first();

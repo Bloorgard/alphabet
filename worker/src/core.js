@@ -10,7 +10,9 @@ export const YA_BASE_GRID = 32;
    холст на клиенте (см. lab/ya-lab.js). Меняется вместе с ним. */
 export const YA_BASE_AREA = 357;
 export const MAX_LEVEL = 2;
-export const WALLET_CAP = 10;
+/* Ограничитель один: пять клеток в сутки. Потолок кошелька был вторым и
+   почти никогда не срабатывал — при лимите в день он давал лишь запас на
+   два дня и путал человека двумя цифрами вместо одной. */
 export const DAILY_MARK_LIMIT = 5;
 export const MAX_SCORE = 1_000_000;
 
