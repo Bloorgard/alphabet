@@ -145,6 +145,11 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .ya-leaders i { font-style: normal; }
 .ya-empty { color: rgba(22, 22, 22, .38); }
 .ya-wallet { margin-bottom: 22px !important; color: var(--ink); font-size: 15px; letter-spacing: .04em; }
+/* Суточный лимит стоит под кошельком: две цифры об одном — сколько есть и
+   сколько сегодня отдадут. Исчерпанный день приглушается, а не краснеет:
+   это не ошибка, а завтрашняя клетка. */
+.ya-daily { margin-top: -16px !important; margin-bottom: 22px !important; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: rgba(22, 22, 22, .45); }
+.ya-daily[data-spent="true"] { color: rgba(22, 22, 22, .3); }
 .ya-place { margin-bottom: 22px; }
 .ya-place p { margin-bottom: 6px !important; }
 .ya-panel button { border: 0; padding: 0; background: none; color: var(--ink); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
@@ -179,10 +184,12 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 /* Запас клеток: в шапке сайта и в углу любой открытой буквы. В игровой
    буква даёт клетки, и строка идёт чернилами; в остальных она приглушена,
    чтобы не обещать заработка там, где его пока нет. */
-.wallet-badge { color: var(--ink); }
+.wallet-badge { border: 0; padding: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(22, 22, 22, .25); }
+.wallet-badge:hover { text-decoration-color: currentColor; }
 /* Верхняя строка, левее крестика: низ кадра во всех буквах занят подсказками
    и панелью, а сверху пусто во всех. */
-.wall-credit { position: absolute; right: 52px; top: 14px; text-align: right; margin: 0; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: rgba(241, 237, 229, .3); pointer-events: none; }
+.wall-credit { position: absolute; right: 52px; top: 14px; border: 0; padding: 0; background: none; text-align: right; margin: 0; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: rgba(241, 237, 229, .3); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: transparent; }
+.wall-credit:hover { text-decoration-color: currentColor; }
 .wall-credit[data-game="true"] { color: rgba(241, 237, 229, .62); }
 .letter-workspace[data-ground="paper"] .wall-credit { color: rgba(22, 22, 22, .3); }
 .letter-workspace[data-ground="paper"] .wall-credit[data-game="true"] { color: rgba(22, 22, 22, .62); }

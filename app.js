@@ -10,8 +10,8 @@ import { mountZ } from './letters/z.js?v=8';
 import { mountI } from './letters/i.js?v=9';
 import { mountJ } from './letters/j.js?v=1';
 import { mountK } from './letters/k.js?v=15';
-import { mountYa } from './letters/ya.js?v=14';
-import { mountCredit } from './wall.js?v=10';
+import { mountYa } from './letters/ya.js?v=15';
+import { mountCredit } from './wall.js?v=11';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',

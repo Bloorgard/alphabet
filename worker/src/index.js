@@ -1,4 +1,5 @@
 import {
+  DAILY_IP_LIMIT,
   DAILY_MARK_LIMIT,
   LETTERS,
   MAX_LEVEL,
@@ -215,6 +216,24 @@ async function rename(request, env, player) {
   return json(request, env, { name });
 }
 
+/* Причины отказа в порядке, в котором их стоит показывать: занятая клетка
+   видна глазами, а лимиты — нет. */
+async function refusal(env, player, data, level, day, balance) {
+  const [taken, mine, sameIp, count] = await Promise.all([
+    env.DB.prepare('SELECT COUNT(*) AS count FROM marks WHERE x = ? AND y = ? AND level = ?').bind(data.x, data.y, level).first(),
+    env.DB.prepare('SELECT COUNT(*) AS count FROM marks WHERE player_id = ? AND created_at >= ?').bind(player.id, day).first(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM marks AS own
+      JOIN players AS ip_player ON ip_player.id = own.player_id
+      WHERE ip_player.ip_hash = ? AND own.created_at >= ?`).bind(player.ip_hash, day).first(),
+    env.DB.prepare('SELECT COUNT(*) AS count FROM marks WHERE level = ?').bind(level).first(),
+  ]);
+  if (taken?.count) return 'taken';
+  if ((mine?.count || 0) >= DAILY_MARK_LIMIT) return 'daily';
+  if ((sameIp?.count || 0) >= DAILY_IP_LIMIT) return 'address';
+  if (balance < priceForCount(count?.count || 0, level)) return 'wallet';
+  return 'unknown';
+}
+
 async function mark(request, env, player) {
   const data = await body(request);
   if (!Number.isInteger(data?.x) || !Number.isInteger(data?.y)) return error(request, env, 'Координаты должны быть целыми');
@@ -245,7 +264,7 @@ async function mark(request, env, player) {
     `).bind(
       player.id, data.x, data.y, level, now,
       player.id, level, area, level, area, level, area,
-      player.id, day, DAILY_MARK_LIMIT, player.ip_hash, day, DAILY_MARK_LIMIT,
+      player.id, day, DAILY_MARK_LIMIT, player.ip_hash, day, DAILY_IP_LIMIT,
       data.x, grid, data.y, grid,
     ),
     env.DB.prepare(`
@@ -269,8 +288,14 @@ async function mark(request, env, player) {
   const inserted = await env.DB.prepare('SELECT COUNT(*) AS count FROM marks WHERE player_id = ? AND x = ? AND y = ? AND level = ? AND created_at = ?').bind(player.id, data.x, data.y, level, now).first();
   const wallet = await env.DB.prepare('SELECT earned - spent AS balance FROM wallet WHERE player_id = ?').bind(player.id).first();
   const currentCanvas = await env.DB.prepare('SELECT level FROM canvas WHERE id = 1').first();
+  const ok = Boolean(inserted?.count);
+  /* Отказ обязан назвать себя. Условия сидят внутри одного INSERT, поэтому
+     причину выясняем после — иначе человек видит, как клетка просто не
+     ставится, и не знает, кончились ли клетки, сутки или клетка занята. */
+  const why = ok ? null : await refusal(env, player, data, level, day, wallet?.balance || 0);
   return json(request, env, {
-    ok: Boolean(inserted?.count),
+    ok,
+    reason: why,
     wallet: wallet?.balance || 0,
     level: currentCanvas?.level || level,
     price: priceForCount(Math.max(0, (await env.DB.prepare('SELECT COUNT(*) AS count FROM marks WHERE level = ?').bind(level).first())?.count || 0) - (inserted?.count ? 1 : 0), level),

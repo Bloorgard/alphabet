@@ -7,7 +7,7 @@
    подсказывает форму, но не запирает в ней, ставить можно и мимо. */
 
 import { YA_AREA, YA_MASK, maskCells } from '../ya-mask.js?v=1';
-import { joinPlayer, loadState, plural, putMark, renamePlayer } from '../wall.js?v=10';
+import { joinPlayer, loadState, plural, putMark, renamePlayer } from '../wall.js?v=11';
 
 const BOX = { x: 0.06, y: 0.14, size: 0.56 };
 /* На телефоне сцена — тот же квадрат, но панель уезжает под холст, поэтому
@@ -51,6 +51,7 @@ export function mountYa(workspace) {
     <ul class="ya-leaders" id="ya-leaders"></ul>
     <p class="ya-title">У тебя</p>
     <p class="ya-wallet" id="ya-wallet">—</p>
+    <p class="ya-daily" id="ya-daily" hidden></p>
     <div class="ya-place" id="ya-place" hidden>
       <p id="ya-place-note"></p>
       <button type="button" id="ya-place-do">поставить клетку</button>
@@ -82,6 +83,7 @@ export function mountYa(workspace) {
   const leaders = panel.querySelector('#ya-leaders');
   const leadersTitle = panel.querySelector('#ya-leaders-title');
   const wallet = panel.querySelector('#ya-wallet');
+  const daily = panel.querySelector('#ya-daily');
   const place = panel.querySelector('#ya-place');
   const placeNote = panel.querySelector('#ya-place-note');
   const placeDo = panel.querySelector('#ya-place-do');
@@ -182,6 +184,14 @@ export function mountYa(workspace) {
 
   /* Одна фраза про клетку: кто занял и когда, или что она свободна.
      Нужна и наведению, и выбору — текст обязан быть один и тот же. */
+  const REFUSALS = {
+    taken: 'эту клетку успели занять',
+    daily: 'на сегодня клетки кончились',
+    address: 'с этого адреса сегодня поставили всё, что можно',
+    wallet: 'клеток не хватает',
+    unknown: 'клетка не встала — попробуй ещё раз',
+  };
+
   function describe(cell) {
     if (!cell) return '';
     const mark = markAt(cell);
@@ -220,6 +230,15 @@ export function mountYa(workspace) {
       ? `${state.wallet} ${plural(state.wallet, ['клетка', 'клетки', 'клеток'])}`
       : 'сначала имя';
 
+    /* Пять клеток в сутки — единственный ограничитель, и он обязан быть на
+       виду. Пока его не видно, кошелёк обещает то, чего сегодня не отдаст. */
+    const left = Math.max(0, state.limit - state.today);
+    daily.hidden = !state.name;
+    daily.textContent = left
+      ? `сегодня ещё ${left} ${plural(left, ['клетка', 'клетки', 'клеток'])} из ${state.limit}`
+      : `на сегодня всё · завтра снова ${state.limit}`;
+    daily.dataset.spent = String(!left);
+
     nameForm.hidden = Boolean(state.name) && !renaming;
     me.hidden = !state.name || renaming;
     meName.textContent = state.name ? `ты — ${state.name}` : '';
@@ -229,8 +248,9 @@ export function mountYa(workspace) {
     const shown = chosen || hover;
     if (shown) {
       place.hidden = false;
-      placeNote.textContent = describe(shown);
-      placeDo.hidden = !chosen || Boolean(markAt(chosen)) || !state.name || !state.wallet;
+      if (placeNote.dataset.refused !== 'true') placeNote.textContent = describe(shown);
+      placeDo.hidden = !chosen || Boolean(markAt(chosen)) || !state.name
+        || !state.wallet || state.today >= state.limit;
     } else {
       place.hidden = true;
     }
@@ -251,6 +271,7 @@ export function mountYa(workspace) {
     canvas.style.cursor = cell ? 'pointer' : 'default';
     if (!chosen) {
       place.hidden = !cell;
+      delete placeNote.dataset.refused;
       placeNote.textContent = describe(cell);
       placeDo.hidden = true;
     }
@@ -267,7 +288,14 @@ export function mountYa(workspace) {
   const onPlace = async () => {
     if (!chosen) return;
     const result = await putMark(chosen.x, chosen.y);
-    if (!result.ok) return;
+    if (!result.ok) {
+      /* Молчащий отказ читается как поломка: человек жмёт, и ничего не
+         происходит. Причина известна серверу — значит, её и показываем. */
+      placeNote.textContent = REFUSALS[result.reason] || REFUSALS.unknown;
+      placeNote.dataset.refused = 'true';
+      await refresh();
+      return;
+    }
     chosen = null;
     await refresh();
   };

@@ -210,6 +210,12 @@ function creditText() {
   return `${known.name} · ${n} ${plural(n, ['клетка', 'клетки', 'клеток'])}`;
 }
 
+/* Запас клеток — вход в холст, а не сообщение. Куда бы строка ни попала,
+   она ведёт в Я: туда же тянется рука, когда читаешь «впиши имя в Я». */
+function openYa() {
+  document.dispatchEvent(new CustomEvent('open-letter', { detail: 'Я' }));
+}
+
 function paintBadge() {
   const badge = document.querySelector('#wallet-badge');
   if (!badge) return;
@@ -222,12 +228,14 @@ function paintBadge() {
 export function mountCredit(workspace, letter) {
   /* В самой Я запас и так на виду — второй раз не повторяем. */
   if (letter === 'Я') return () => {};
-  const line = document.createElement('p');
+  const line = document.createElement('button');
+  line.type = 'button';
   line.className = 'wall-credit';
   line.dataset.letterLayer = '';
   line.dataset.game = String(GAMES.has(letter));
   const paint = () => { line.textContent = creditText(); };
   paint();
+  line.addEventListener('click', openYa);
   workspace.append(line);
   document.addEventListener('wall-changed', paint);
   return () => {
@@ -278,6 +286,7 @@ function draw(state) {
 }
 
 async function start() {
+  document.querySelector('#wallet-badge')?.addEventListener('click', openYa);
   try {
     known = await loadState();
     paintBadge();
