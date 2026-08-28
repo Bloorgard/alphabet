@@ -860,36 +860,55 @@ const SUSP_STEM_TOP = 0.2;
 const SUSP_STEM_BOTTOM = 0.8;
 const SUSP_RING = { x: 0.72, y: SUSP_STEM_TOP + 0.062, r: 0.062 };
 const SUSP_RING_SWAY = 0.06;
-const SUSP_BALL = { x: 0.72, y: 0.84 };
+const SUSP_STEM_SWAY = 0.055;
+const SUSP_BALL = { x: 0.72, y: SUSP_STEM_BOTTOM };
+const SUSP_BALL_LAYOUTS = [
+  { x: 0.66, y: 0.76 },
+  { x: 0.79, y: 0.82 },
+  { x: 0.84, y: 0.74 },
+  { x: 0.63, y: 0.85 },
+  { x: 0.75, y: 0.88 },
+  { x: 0.86, y: 0.8 },
+  { x: 0.69, y: 0.72 },
+  { x: 0.81, y: 0.87 },
+];
 const SUSP_PULL = 0.11;
 const SUSP_REACH = 0.34;
 const SUSP_KICK = 0.95;
+const SUSP_STEM_MASS = 12;
 const SUSP_STEM_INERTIA = 2.4;
+const SUSP_INK_RATE = 0.055;
 const SUSP_FLIGHT = 700;
 const SUSP_REST = 35;
 const SUSP_TRAIL = 42;
 
-function suspendStem(angle = modeState.stemAngle) {
+function suspendStem(angle = modeState.stemAngle, offset = modeState.stemOffset) {
   const length = SUSP_STEM_BOTTOM - SUSP_STEM_TOP;
+  const top = {
+    x: SUSP_STEM_X + offset,
+    y: Math.sqrt(Math.max(0, SUSP_STEM_TOP * SUSP_STEM_TOP - offset * offset)),
+  };
   return {
-    top: { x: SUSP_STEM_X, y: SUSP_STEM_TOP },
+    top,
     bottom: {
-      x: SUSP_STEM_X + Math.sin(angle) * length,
-      y: SUSP_STEM_TOP + Math.cos(angle) * length,
+      x: top.x + Math.sin(angle) * length,
+      y: top.y + Math.cos(angle) * length,
     },
   };
 }
 
-function suspendStemX(y, angle = modeState.stemAngle) {
-  return SUSP_STEM_X + Math.tan(angle) * (y - SUSP_STEM_TOP);
+function suspendStemX(y, angle = modeState.stemAngle, offset = modeState.stemOffset) {
+  const top = suspendStem(angle, offset).top;
+  return top.x + Math.tan(angle) * (y - top.y);
 }
 
-function suspendStemCrossing(ax, ay, bx, by, angleBefore, angleAfter) {
+function suspendStemCrossing(ax, ay, bx, by, angleBefore, angleAfter, offsetBefore, offsetAfter) {
   function sample(t) {
     const angle = lerp(angleBefore, angleAfter, t);
+    const offset = lerp(offsetBefore, offsetAfter, t);
     const y = lerp(ay, by, t);
     const x = lerp(ax, bx, t);
-    return { angle, y, x, gap: x - suspendStemX(y, angle) };
+    return { angle, offset, y, x, gap: x - suspendStemX(y, angle, offset) };
   }
 
   const start = sample(0);
@@ -910,28 +929,31 @@ function suspendStemCrossing(ax, ay, bx, by, angleBefore, angleAfter) {
   }
 
   const hit = sample(highT);
-  const stem = suspendStem(hit.angle);
+  const stem = suspendStem(hit.angle, hit.offset);
   if (hit.y < stem.top.y || hit.y > stem.bottom.y) return null;
   return {
     t: highT,
-    x: suspendStemX(hit.y, hit.angle),
+    x: suspendStemX(hit.y, hit.angle, hit.offset),
     y: hit.y,
     angle: hit.angle,
+    offset: hit.offset,
     side: Math.sign(start.gap) || 1,
   };
 }
 
 function suspendRing() {
   const offset = modeState.ringOffset;
+  const radius = num('radius');
   const string = SUSP_STEM_TOP;
   const attachY = Math.sqrt(Math.max(0, string * string - offset * offset));
   const squeeze = Math.max(0.045, Math.abs(Math.cos(modeState.ringAngle)));
   return {
     ...SUSP_RING,
     x: SUSP_RING.x + offset,
-    y: attachY + SUSP_RING.r,
-    rx: SUSP_RING.r * squeeze,
-    ry: SUSP_RING.r,
+    y: attachY + radius,
+    r: radius,
+    rx: radius * squeeze,
+    ry: radius,
   };
 }
 
@@ -989,6 +1011,15 @@ function suspendPass(ax, ay, bx, by, ring) {
   return inner !== null;
 }
 
+function suspendBallPosition(shots) {
+  if (shots < 10) return { ...SUSP_BALL };
+  return { ...SUSP_BALL_LAYOUTS[(shots - 10) % SUSP_BALL_LAYOUTS.length] };
+}
+
+function suspendPlaceBall() {
+  modeState.ball = suspendBallPosition(modeState.shots);
+}
+
 function suspendLaunch(dx, dy) {
   const len = Math.hypot(dx, dy) || 1;
   const pull = Math.min(len, SUSP_REACH);
@@ -1005,6 +1036,7 @@ function suspendLaunch(dx, dy) {
     threadHit: false,
     age: 0,
   };
+  modeState.shots += 1;
 }
 
 function suspendMiss() {
@@ -1029,7 +1061,16 @@ function suspendPreview(ball, dx, dy) {
     vy += num('weight');
     x += vx;
     y += vy;
-    const hit = bounced ? null : suspendStemCrossing(px, py, x, y, modeState.stemAngle, modeState.stemAngle);
+    const hit = bounced ? null : suspendStemCrossing(
+      px,
+      py,
+      x,
+      y,
+      modeState.stemAngle,
+      modeState.stemAngle,
+      modeState.stemOffset,
+      modeState.stemOffset,
+    );
     if (hit) {
       x = hit.x;
       y = hit.y;
@@ -1047,6 +1088,31 @@ function suspendTrail(path, color) {
     const fade = (i - from) / Math.max(path.length - from, 1);
     poly(path.slice(Math.max(from, i - 2), i + 1), color(fade), 0.002 + fade * 0.003);
   }
+}
+
+function suspendPathPrefix(path, length) {
+  if (!path.length) return [];
+  const prefix = [path[0]];
+  let left = length;
+  for (let i = 1; i < path.length && left > 0; i += 1) {
+    const from = path[i - 1];
+    const to = path[i];
+    const segment = Math.hypot(to.x - from.x, to.y - from.y);
+    if (segment <= left) {
+      prefix.push(to);
+      left -= segment;
+    } else {
+      const t = segment ? left / segment : 0;
+      prefix.push({ x: lerp(from.x, to.x, t), y: lerp(from.y, to.y, t) });
+      break;
+    }
+  }
+  return prefix;
+}
+
+function drawSuspendInk(path) {
+  const prefix = suspendPathPrefix(path, modeState.inkLength);
+  if (prefix.length > 1) poly(prefix, INK, 0.018);
 }
 
 function drawSuspendRing(ring, color = INK, width = 0.012) {
@@ -1071,14 +1137,17 @@ MODES.suspension = {
   note: 'Тяни мяч и отпускай: сила удара отмечается красной полосой. Мяч бьёт в стойку, стойка раскачивается и меняет следующую попытку. Кольцо вращается вокруг нити и колышется от касаний. Видна только короткая часть полёта — остальное приходится почувствовать. Три промаха — конец, R — заново.',
   cursor: 'crosshair',
   tools: [
-    { type: 'range', key: 'weight', label: 'вес', min: 0.0001, max: 0.0012, step: 0.00005, value: 0.00045 },
+    { type: 'range', key: 'weight', label: 'вес мяча', min: 0.0001, max: 0.0012, step: 0.00005, value: 0.00045 },
+    { type: 'range', key: 'stemWeight', label: 'вес планки', min: 0.5, max: 2.5, step: 0.1, value: 1 },
+    { type: 'range', key: 'radius', label: 'радиус кольца', min: 0.035, max: 0.085, step: 0.0025, value: 0.0625 },
     { type: 'range', key: 'spin', label: 'вращение', min: 0.2, max: 1.4, step: 0.05, value: 0.8 },
     { type: 'toggle', key: 'trace', label: 'история', value: false },
     { type: 'button', label: 'заново', action() { MODES.suspension.setup(); } },
   ],
 
   setup() {
-    modeState.ball = { ...SUSP_BALL };
+    modeState.shots = 0;
+    suspendPlaceBall();
     modeState.force = 0;
     modeState.lives = RING_LIVES;
     modeState.hits = 0;
@@ -1087,11 +1156,14 @@ MODES.suspension = {
     modeState.aim = false;
     modeState.stemAngle = 0;
     modeState.stemAngularVelocity = 0;
+    modeState.stemOffset = 0;
+    modeState.stemVelocity = 0;
     modeState.ringAngle = 0;
     modeState.ringOffset = 0;
     modeState.ringVelocity = 0;
     modeState.rest = 0;
     modeState.fresh = null;
+    modeState.inkLength = 0;
     modeState.done = [];
   },
 
@@ -1116,20 +1188,31 @@ MODES.suspension = {
 
   step() {
     const angleBefore = modeState.stemAngle;
+    const stemOffsetBefore = modeState.stemOffset;
     modeState.ringAngle += num('spin') * 0.018;
     modeState.ringOffset += modeState.ringVelocity;
     modeState.ringVelocity *= 0.993;
     modeState.ringVelocity -= modeState.ringOffset * 0.012;
     modeState.ringOffset = clamp(modeState.ringOffset, -SUSP_RING_SWAY, SUSP_RING_SWAY);
+    modeState.stemOffset += modeState.stemVelocity;
+    modeState.stemVelocity *= 0.993;
+    modeState.stemVelocity -= modeState.stemOffset * 0.012;
+    modeState.stemOffset = clamp(modeState.stemOffset, -SUSP_STEM_SWAY, SUSP_STEM_SWAY);
     modeState.stemAngle += modeState.stemAngularVelocity;
     modeState.stemAngularVelocity *= 0.992;
     modeState.stemAngularVelocity -= Math.sin(modeState.stemAngle) * 0.006;
     modeState.stemAngle = clamp(modeState.stemAngle, -0.22, 0.22);
     const angleAfter = modeState.stemAngle;
+    const stemOffsetAfter = modeState.stemOffset;
+
+    if (modeState.fresh) modeState.inkLength += SUSP_INK_RATE;
 
     if (modeState.rest > 0) {
       modeState.rest -= 1;
-      if (modeState.rest === 0 && !modeState.over) modeState.fresh = null;
+      if (modeState.rest === 0 && !modeState.over) {
+        modeState.fresh = null;
+        suspendPlaceBall();
+      }
       return;
     }
 
@@ -1144,25 +1227,46 @@ MODES.suspension = {
     fly.y += fly.vy;
 
     if (!fly.bounced) {
-      const hit = suspendStemCrossing(px, py, fly.x, fly.y, angleBefore, angleAfter);
+      const hit = suspendStemCrossing(
+        px,
+        py,
+        fly.x,
+        fly.y,
+        angleBefore,
+        angleAfter,
+        stemOffsetBefore,
+        stemOffsetAfter,
+      );
       if (hit) {
         const length = SUSP_STEM_BOTTOM - SUSP_STEM_TOP;
-        const lever = clamp((hit.y - SUSP_STEM_TOP) / length, 0, 1);
-        const distance = length * lever;
+        const contactStem = suspendStem(hit.angle, hit.offset);
+        const distance = clamp(
+          (hit.y - contactStem.top.y) / Math.max(0.001, Math.cos(hit.angle)),
+          0,
+          length,
+        );
         const normalX = Math.cos(hit.angle) * hit.side;
         const normalY = -Math.sin(hit.angle) * hit.side;
         const ballNormal = fly.vx * normalX + fly.vy * normalY;
-        const stemNormal = modeState.stemAngularVelocity * distance * hit.side;
+        const stemBefore = suspendStem(angleBefore, stemOffsetBefore);
+        const stemAfter = suspendStem(angleAfter, stemOffsetAfter);
+        const anchorNormal = (stemAfter.top.x - stemBefore.top.x) * normalX
+          + (stemAfter.top.y - stemBefore.top.y) * normalY;
+        const stemNormal = anchorNormal + modeState.stemAngularVelocity * distance * hit.side;
         const relativeNormal = ballNormal - stemNormal;
         if (relativeNormal < 0) {
+          const weight = num('stemWeight');
+          const mass = SUSP_STEM_MASS * weight;
+          const inertia = SUSP_STEM_INERTIA * weight;
           const impulse = -(1 + SUSP_KICK) * relativeNormal
-            / (1 + distance * distance / SUSP_STEM_INERTIA);
+            / (1 + 1 / mass + distance * distance / inertia);
           fly.x = hit.x;
           fly.y = hit.y;
           fly.vx += impulse * normalX;
           fly.vy += impulse * normalY;
           fly.bounced = true;
-          modeState.stemAngularVelocity -= impulse * hit.side * distance / SUSP_STEM_INERTIA;
+          modeState.stemVelocity -= impulse * normalX / mass;
+          modeState.stemAngularVelocity -= impulse * hit.side * distance / inertia;
         }
       }
     }
@@ -1181,6 +1285,7 @@ MODES.suspension = {
       modeState.ringVelocity += clamp(fly.vx * 0.22, -0.007, 0.007);
       fly.scored = true;
       modeState.fresh = fly.path;
+      modeState.inkLength = 0;
       modeState.done.push(modeState.fresh);
       if (modeState.done.length > RING_KEEP) modeState.done.shift();
     }
@@ -1198,9 +1303,7 @@ MODES.suspension = {
     const ring = suspendRing();
     const stem = suspendStem();
     const hits = modeState.hits;
-    const misses = RING_LIVES - modeState.lives;
     const hitText = `${hits} ${plural(hits, 'попадание', 'попадания', 'попаданий')}`;
-    const missText = `${misses} ${plural(misses, 'промах', 'промаха', 'промахов')}`;
 
     if (on('trace')) {
       for (const path of modeState.done) {
@@ -1214,11 +1317,11 @@ MODES.suspension = {
     line(SUSP_RING.x, 0, ring.x, ring.y - ring.ry, ink(0.2), 0.002);
     drawSuspendRing(ring, INK, 0.012);
 
-    if (modeState.fresh && modeState.rest > 0) poly(modeState.fresh, INK, 0.018);
+    if (modeState.fresh && modeState.rest > 0) drawSuspendInk(modeState.fresh);
 
     if (modeState.fly) {
-      if (modeState.fly.scored) poly(modeState.fly.path, INK, 0.018);
-      else suspendTrail(modeState.fly.path, (fade) => ink(0.2 + fade * 0.65));
+      suspendTrail(modeState.fly.path, (fade) => ink(0.2 + fade * 0.65));
+      if (modeState.fly.scored) drawSuspendInk(modeState.fly.path);
       dot(modeState.fly.x, modeState.fly.y, INK, 0.016);
     } else {
       dot(modeState.ball.x, modeState.ball.y, modeState.over ? ink(0.25) : INK, 0.022);
@@ -1236,7 +1339,7 @@ MODES.suspension = {
     }
 
     if (modeState.over) drawStatus(`${hitText} · партия окончена, R — заново`, true);
-    else drawStatus(`${hitText} · ${missText}`);
+    else drawStatus(hitText);
   },
 };
 
