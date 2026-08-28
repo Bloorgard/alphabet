@@ -31,17 +31,13 @@ const STEM_BOTTOM = 0.8;
 const RING_HOME = { x: 0.72, y: STEM_TOP + 0.062 };
 const RING_SWAY = 0.06;
 const STEM_SWAY = 0.055;
-const BALL_HOME = { x: 0.72, y: STEM_BOTTOM };
-const BALL_LAYOUTS = [
-  { x: 0.66, y: 0.76 },
-  { x: 0.79, y: 0.82 },
-  { x: 0.84, y: 0.74 },
-  { x: 0.63, y: 0.85 },
-  { x: 0.75, y: 0.88 },
-  { x: 0.86, y: 0.8 },
-  { x: 0.69, y: 0.72 },
-  { x: 0.81, y: 0.87 },
-];
+/* Мяч отъезжает от стойки по мере счёта — и только по горизонтали: высота
+   постоянна, поэтому кадр не пляшет, а растёт одна величина, дистанция.
+   Дальше мяч — длиннее обе ветви буквы и уже угол, под которым кольцо
+   вообще достижимо. */
+const BALL_Y = STEM_BOTTOM;
+const BALL_NEAR = 0.72;
+const BALL_FAR = 0.88;
 
 /* Кольцо ужимается с каждым попаданием: сложность растёт из результата, а не
    из уровней. К двенадцатому попаданию оно почти вдвое меньше стартового и
@@ -308,8 +304,7 @@ export function mountK(workspace) {
   }
 
   function placeBall() {
-    const shots = state.shots;
-    state.ball = shots < 10 ? { ...BALL_HOME } : { ...BALL_LAYOUTS[(shots - 10) % BALL_LAYOUTS.length] };
+    state.ball = { x: lerp(BALL_NEAR, BALL_FAR, tension()), y: BALL_Y };
   }
 
   function reset() {
@@ -606,12 +601,14 @@ export function mountK(workspace) {
 
     if (state.aim) poly(preview(pointer.x - state.ball.x, pointer.y - state.ball.y), ink(0.34), 0.0025);
 
-    /* Полоса силы удара: служебная шкала, поэтому в чернилах, а не в краске.
-       Держится выше нижнего края — у самого низа канву перекрывают подпись
-       «параметры» и кнопка подсказки. */
-    const shelf = 0.88;
-    line(0.69, shelf, 0.83, shelf, ink(0.2), 0.009);
-    line(0.69, shelf, 0.69 + 0.14 * clamp(state.force / REACH, 0, 1), shelf, ink(0.6), 0.009);
+    /* Полоса силы удара стоит под мячом и едет вместе с ним: она про этот
+       бросок, а не про кадр вообще. В чернилах, а не в краске — служебная
+       шкала события не обозначает. */
+    const gauge = 0.12;
+    const gaugeX = clamp(state.ball.x, gauge / 2 + 0.02, 0.98 - gauge / 2) - gauge / 2;
+    const gaugeY = BALL_Y + 0.055;
+    line(gaugeX, gaugeY, gaugeX + gauge, gaugeY, ink(0.2), 0.009);
+    line(gaugeX, gaugeY, gaugeX + gauge * clamp(state.force / REACH, 0, 1), gaugeY, ink(0.6), 0.009);
 
     status();
   }
