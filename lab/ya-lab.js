@@ -524,8 +524,12 @@ MODES.scene = {
     const m = board(box, Math.round(num('marks')), Math.round(num('mine')), 32);
 
     const marks = Math.round(num('marks'));
-    yaText(`${marks}/${m.list.length}`, pad, box.y + size + 0.05, 0.019, MUTED, 400, true);
-    yaText(`ТВОИХ ${Math.round(num('mine'))}`, pad + 0.075, box.y + size + 0.05, 0.019, INK, 500, true);
+    const y = box.y + size + 0.05;
+    const head = `${marks}/${m.list.length} · `;
+    yaText(head, pad, y, 0.019, MUTED, 400, true);
+    /* Вторая половина строки встаёт по измеренной ширине первой: на глаз
+       отступ разъезжается вместе с числом отметок. */
+    yaText(`ТВОИХ ${Math.round(num('mine'))}`, pad + ctx.measureText(head).width / S, y, 0.019, INK, 500, true);
 
     /* Лидер каждой игровой буквы, а не топ одной: единицы у букв разные,
        и складывать их незачем — сравнивается только первое место. */
