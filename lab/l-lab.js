@@ -1374,26 +1374,46 @@ function letterBody() {
      сравнение честное. */
   const apexX = on('even') ? 0.5 : 0.5 + spread * 0.5;
   const foot = 0.5 - height * 0.5;
-  /* Стрелками тело ездит поперёк реки; сдвиг живёт в состоянии режима,
-     поэтому в режимах без него читается нулём. */
+  /* Стрелками тело ездит поперёк реки и немного вверх-вниз; ход, крен и
+     высота живут в состоянии режима, поэтому в режимах без них читаются
+     нулём. */
   const slide = modeState.slide || 0;
-  const apex = { x: apexX + slide, y: 0.5 + height * 0.5 };
-  const right = { x: 0.5 + spread * 0.5 + slide, y: foot };
-  const left = { x: 0.5 - spread * 0.5 + slide, y: foot };
+  const lift = modeState.lift || 0;
+  const apex = { x: apexX + slide, y: 0.5 + height * 0.5 + lift };
+  const right = { x: 0.5 + spread * 0.5 + slide, y: foot + lift };
+  const left = { x: 0.5 - spread * 0.5 + slide, y: foot + lift };
 
   /* Вырез между ног. Без него это просто треугольник, с ним — Л: две ноги
      стоят на воде порознь. Мелкий нарочно: он должен читаться прорезью, а не
      развилкой. */
   const nook = spread * 0.11;
-  const heel = { x: (right.x + left.x) * 0.5, y: foot + height * 0.24 };
+  const heel = { x: (right.x + left.x) * 0.5, y: foot + height * 0.24 + lift };
   const rim = [
     apex,
     right,
-    { x: heel.x + nook, y: foot },
+    { x: heel.x + nook, y: foot + lift },
     heel,
-    { x: heel.x - nook, y: foot },
+    { x: heel.x - nook, y: foot + lift },
     left,
   ];
+
+  const mid = { x: (apex.x + right.x + left.x) / 3, y: (apex.y + right.y + left.y) / 3 };
+
+  /* Крен. На ходу вбок тело валится в сторону хода — как в игре. Поворачиваем
+     сам контур, а не картинку: наклонённая грань иначе встречает воду, иначе
+     её расталкивает и иначе срывает вихрь. Вершины apex, right и left лежат
+     в том же списке, поэтому каждая поворачивается ровно один раз. */
+  const tilt = modeState.tilt || 0;
+  if (tilt) {
+    const cos = Math.cos(tilt);
+    const sin = Math.sin(tilt);
+    for (const point of rim) {
+      const dx = point.x - mid.x;
+      const dy = point.y - mid.y;
+      point.x = mid.x + dx * cos - dy * sin;
+      point.y = mid.y + dx * sin + dy * cos;
+    }
+  }
 
   return {
     height,
@@ -1402,7 +1422,7 @@ function letterBody() {
     right,
     left,
     rim,
-    mid: { x: (apex.x + right.x + left.x) / 3, y: (apex.y + right.y + left.y) / 3 },
+    mid,
   };
 }
 
@@ -1897,8 +1917,13 @@ function setupSwirl() {
   modeState.age = 0;
   modeState.slide = 0;
   modeState.sway = 0;
+  modeState.lift = 0;
+  modeState.climb = 0;
+  modeState.tilt = 0;
   modeState.goLeft = false;
   modeState.goRight = false;
+  modeState.goUp = false;
+  modeState.goDown = false;
   modeState.blobs = [];
   modeState.crowd = 0;
   modeState.shed = 0;
@@ -2093,22 +2118,28 @@ function swirlVelocity(x, y, blobs, flow, out, panels, sway) {
    никто не расставляет по расписанию — сила схода берётся из скорости у
    грани, а грань у Л разная: косая разгоняет сильнее прямой. Дальше вихри
    двигают друг друга сами, и дорожка складывается из их взаимного вращения. */
-function swirlShed(body, panels, blobs, flow, sway) {
+function swirlShed(body, panels, blobs, flow, sway, beat) {
+  /* Углы срывают по очереди, а не разом. Одновременный сход давал пару
+     встречных вихрей, поля которых друг друга гасят: вода за кормой не
+     закручивалась, а тормозила, и «завихрение» на вид не делало ничего при
+     любом значении. Дорожка Кармана и начинается с того, что срыв с одной
+     стороны подавляет срыв с другой, — поэтому чередуем, а каждый вихрь
+     несёт всю завихренность, накопленную за такт. */
+  modeState.side = -(modeState.side || 1);
+  const side = modeState.side;
   const probe = { x: 0, y: 0 };
-  for (const side of [-1, 1]) {
-    const corner = side < 0 ? body.left : body.right;
-    const x = corner.x + side * 0.02;
-    const y = corner.y + 0.004;
-    swirlVelocity(x, y, blobs, flow, probe, panels, sway);
-    const edge = Math.hypot(probe.x, probe.y) * letterHeel(body, side);
-    blobs.push({
-      x,
-      y,
-      turn: -side * edge * edge * 0.005 * num('curl'),
-      age: 0,
-    });
-  }
-  while (blobs.length > 160) blobs.shift();
+  const corner = side < 0 ? body.left : body.right;
+  const x = corner.x + side * 0.02;
+  const y = corner.y + 0.004;
+  swirlVelocity(x, y, blobs, flow, probe, panels, sway);
+  const edge = Math.hypot(probe.x, probe.y) * letterHeel(body, side);
+  blobs.push({
+    x,
+    y,
+    turn: -side * 0.5 * edge * edge * beat * num('curl') * 0.08,
+    age: 0,
+  });
+  while (blobs.length > 40) blobs.shift();
 }
 
 /* Щепки. Точка сама по себе вращения не показывает: она безразмерна, и
@@ -2171,10 +2202,16 @@ function stepSwirlChips(blobs, flow, panels, body, standing, sway) {
    со сносом: тело, идущее вбок, расталкивает воду боком — поэтому она и
    попадает в правую часть системы, а не просто двигает картинку. */
 function stepSwirlSlide() {
-  const want = (modeState.goRight ? 1 : 0) - (modeState.goLeft ? 1 : 0);
-  modeState.sway += (want * 0.3 - modeState.sway) * Math.min(1, 6 * STEP);
+  const wantSide = (modeState.goRight ? 1 : 0) - (modeState.goLeft ? 1 : 0);
+  const wantUp = (modeState.goUp ? 1 : 0) - (modeState.goDown ? 1 : 0);
+  modeState.sway += (wantSide * 0.3 - modeState.sway) * Math.min(1, 6 * STEP);
+  modeState.climb += (wantUp * 0.1 - modeState.climb) * Math.min(1, 5 * STEP);
   modeState.slide = clamp(modeState.slide + modeState.sway * STEP, -0.3, 0.3);
+  modeState.lift = clamp(modeState.lift + modeState.climb * STEP, -0.14, 0.14);
   if (Math.abs(modeState.slide) === 0.3) modeState.sway = 0;
+  if (Math.abs(modeState.lift) === 0.14) modeState.climb = 0;
+  /* Крен догоняет ход с запозданием — иначе поворот выходит дёрганым. */
+  modeState.tilt += (-modeState.sway * 0.9 - modeState.tilt) * Math.min(1, 4 * STEP);
 }
 
 function stepSwirl() {
@@ -2182,7 +2219,9 @@ function stepSwirl() {
   stepSwirlSlide();
   const parts = modeState.parts;
   const blobs = modeState.blobs;
-  const flow = swirlFlow();
+  /* Идя вверх, буква идёт против воды быстрее — набегающий поток на её
+     скорость и прибавляется. Поэтому вверх бурун крепчает, вниз слабеет. */
+  const flow = Math.max(swirlFlow() + modeState.climb, 0.02);
   const sway = modeState.sway;
   const body = letterBody();
   const standing = on('body');
@@ -2197,10 +2236,10 @@ function stepSwirl() {
     /* Число Струхаля почти постоянно: такт схода растёт с телом и падает со
        скоростью. Здесь стояло одно лишь течение, и «раствор» на ритм
        дорожки не влиял вовсе — хотя у широкой Л вихри обязаны сходить реже. */
-    const beat = (0.05 * body.spread) / Math.max(flow, 0.02);
+    const beat = (0.8 * body.spread) / Math.max(flow, 0.02);
     if (modeState.shed >= beat) {
       modeState.shed = 0;
-      swirlShed(body, panels, blobs, flow, sway);
+      swirlShed(body, panels, blobs, flow, sway, beat);
     }
   }
 
@@ -2212,13 +2251,13 @@ function stepSwirl() {
     blob.x += probe.x * STEP;
     blob.y += probe.y * STEP;
     blob.age += STEP;
-    blob.turn *= 1 - 0.5 * STEP;
+    blob.turn *= 1 - 0.12 * STEP;
   }
   for (let i = blobs.length - 1; i >= 0; i -= 1) {
     /* Убираем по возрасту и по уходу за кадр. По величине нельзя: сила вихря
        растёт как квадрат скорости, и на тихом течении все они разом
        оказывались ниже порога — дорожка исчезала целиком. */
-    if (blobs[i].y < -0.25 || blobs[i].age > 3.5) blobs.splice(i, 1);
+    if (blobs[i].y < -0.25 || blobs[i].age > 7) blobs.splice(i, 1);
   }
 
   if (on('chips')) stepSwirlChips(blobs, flow, panels, body, standing, sway);
@@ -2364,18 +2403,18 @@ function drawSwirl() {
   ctx.restore();
 
   /* Число вихрей меняется каждый кадр — в углу это дёргалось и мешало
-     смотреть. Держим показание полсекунды и округляем до десятка: важен
-     порядок, а не точное значение. */
+     смотреть. Держим показание полсекунды. Округлять его не стоит: с тех пор
+     как углы срывают по очереди, вихрей единицы, и десяток съедал бы всё. */
   if (modeState.age - (modeState.told || 0) > 0.5) {
     modeState.told = modeState.age;
-    modeState.tally = Math.round(modeState.blobs.length / 10) * 10;
+    modeState.tally = modeState.blobs.length;
   }
   drawStatus(count(modeState.tally || 0, 'вихрь', 'вихря', 'вихрей'), false);
 }
 
 MODES.swirl = {
   label: 'трассеры',
-  note: 'Вода здесь не поле, а рой: точки идут по течению и тянут за собой хвост из прошлых положений — получаются линии тока. Контур Л они встречают по-настоящему: сквозь грань не проходят, гасят нормальную составляющую и скользят вдоль. Обтекание держат источники, разложенные по самому контуру и подобранные так, чтобы сквозь каждую грань не шло ни капли, — иначе точки расходятся перед буквой и больше не сходятся, за кормой навсегда остаётся пустая труба. Поэтому и возмущение имеет форму буквы, а не окружности. Вихри никто не расставляет по расписанию: завихренность рождается на стенке, сходит с острых углов, и сила схода берётся из скорости у самой грани — у Л косая нога разгоняет сильнее прямой. Дальше вихри двигают друг друга сами: дорожка складывается из их взаимного вращения, а не из формулы. «Завихрение» задаёт, насколько охотно грань отдаёт вихрь; «симметрия» ставит вершину посередине, и обе ноги начинают срывать одинаково. Стрелки водят букву поперёк реки, и ход входит в задачу наравне со сносом: идущее вбок тело расталкивает воду боком, а не просто едет по картинке. Три опции добавляют к рисунку по одной вещи и по умолчанию выключены: «угасание» гасит дальний конец хвоста, и линия читается направленной; «блик» изредка зажигает одиночную искру на гребне — у каждой точки своя фаза, поэтому вода не мигает целиком; «щепки» подмешивают в рой сорок с лишним отрезков, которые поворачиваются вместе с водой — угловая скорость плавающего тела равна половине завихренности, так что вихрь становится виден без единой стрелки.',
+  note: 'Вода здесь не поле, а рой: точки идут по течению и тянут за собой хвост из прошлых положений — получаются линии тока. Контур Л они встречают по-настоящему: сквозь грань не проходят, гасят нормальную составляющую и скользят вдоль. Обтекание держат источники, разложенные по самому контуру и подобранные так, чтобы сквозь каждую грань не шло ни капли, — иначе точки расходятся перед буквой и больше не сходятся, за кормой навсегда остаётся пустая труба. Поэтому и возмущение имеет форму буквы, а не окружности. Вихри никто не расставляет по расписанию: завихренность рождается на стенке, сходит с острых углов, и сила схода берётся из скорости у самой грани — у Л косая нога разгоняет сильнее прямой. Дальше вихри двигают друг друга сами: дорожка складывается из их взаимного вращения, а не из формулы. «Завихрение» задаёт, насколько охотно грань отдаёт вихрь; «симметрия» ставит вершину посередине, и обе ноги начинают срывать одинаково. Стрелки водят букву: влево-вправо поперёк реки, вверх-вниз — прибавить и убавить ход. Всё это входит в задачу наравне со сносом. Идущее вбок тело расталкивает воду боком, а не просто едет по картинке; на ходу оно кренится в сторону поворота, и накренённая грань иначе встречает воду; вверх буква идёт против воды быстрее — бурун крепчает, вниз слабеет. Три опции добавляют к рисунку по одной вещи и по умолчанию выключены: «угасание» гасит дальний конец хвоста, и линия читается направленной; «блик» изредка зажигает одиночную искру на гребне — у каждой точки своя фаза, поэтому вода не мигает целиком; «щепки» подмешивают в рой сорок с лишним отрезков, которые поворачиваются вместе с водой — угловая скорость плавающего тела равна половине завихренности, так что вихрь становится виден без единой стрелки.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
@@ -2396,6 +2435,10 @@ MODES.swirl = {
   onKey(event, down) {
     if (event.key === 'ArrowLeft') modeState.goLeft = down;
     else if (event.key === 'ArrowRight') modeState.goRight = down;
+    else if (event.key === 'ArrowUp') modeState.goUp = down;
+    else if (event.key === 'ArrowDown') modeState.goDown = down;
+    else return;
+    event.preventDefault();
   },
 };
 
