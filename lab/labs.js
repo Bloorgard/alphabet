@@ -69,6 +69,11 @@ const LABS = [
     chosen: 'игра',
   },
   {
+    slug: 'm', letter: 'М', title: 'три способа держать впадину', tile: true,
+    mechanics: ['метроном', 'плёнка', 'мост'],
+    chosen: 'метроном',
+  },
+  {
     slug: 'ya', letter: 'Я', title: 'холст из чужих я', tile: true,
     mechanics: ['холст', 'рост', 'касса'],
   },
