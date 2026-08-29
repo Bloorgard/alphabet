@@ -1388,6 +1388,11 @@ function stepAscii() {
    до его контура, поэтому форма буквы попадает и в отражение, и в тень, и в
    точки срыва вихрей — картина воды рассказывает, что именно в ней стоит. */
 
+/* Шкала плотности. Букв в ней нет нарочно: с ними вода читается текстом, а не
+   рельефом. Но плотных символов в моноширинном шрифте всего горстка, поэтому
+   градаций в светлом конце знаками не набрать — там их доберёт прозрачность. */
+const ASCII_RAMP = ' .,:;~-+=*#%&@';
+
 function letterBody() {
   const height = num('rise') * 2.4;
   const spread = num('spread');
@@ -1519,7 +1524,8 @@ function drawAsciiWater() {
   const drift = modeState.scroll;
   const body = letterBody();
   const standing = on('body');
-  const palette = on('foam') ? '      .,:;~+*#%@' : ' .,-~:;=+*#%@';
+  const gain = num('gain');
+  const floor = num('floor');
 
   ctx.save();
   ctx.fillStyle = ink(1);
@@ -1636,10 +1642,14 @@ function drawAsciiWater() {
       const force = Math.min(Math.hypot(modeState.velocity.x, modeState.velocity.y) * 26, 1) * num('amount');
       field += Math.sin(mouseDistance * 48 - time * 3) * Math.exp(-mouseDistance * mouseDistance * 32) * force;
 
-      const level = clamp(0.5 + field * 0.62 - wakeEnvelope * 0.2, 0, 1);
-      const index = Math.min(palette.length - 1, Math.floor(level * palette.length));
-      let glyph = palette[index];
-      if (!on('foam') && level > 0.22 && level < 0.72 && (near > 0.055 || wakeEnvelope > 0.03)) {
+      /* Сначала наклон — им задают размах воды, потом срез снизу: он убирает
+         спокойную гладь, оставляя одни гребни, и остаток растягивается на всю
+         шкалу, чтобы срез не съедал заодно и градации. */
+      const raw = 0.5 + field * gain - wakeEnvelope * 0.2;
+      const level = clamp((raw - floor) / Math.max(1 - floor, 0.08), 0, 1);
+      const index = Math.min(ASCII_RAMP.length - 1, Math.floor(level * ASCII_RAMP.length));
+      let glyph = ASCII_RAMP[index];
+      if (on('strokes') && level > 0.12 && (near > 0.055 || wakeEnvelope > 0.03)) {
         const screenVelocityX = flowVelocityX;
         const screenVelocityY = -flowVelocityY;
         const horizontal = Math.abs(screenVelocityX);
@@ -1649,7 +1659,9 @@ function drawAsciiWater() {
         else glyph = screenVelocityX * screenVelocityY > 0 ? '\\' : '/';
       }
       if (glyph === ' ') continue;
-      ctx.globalAlpha = 0.18 + level * 0.82;
+      /* Гамма растягивает верх: знаков там мало и они близки по весу,
+         так что тона у гребней даёт прозрачность, а не набор. */
+      ctx.globalAlpha = 0.22 + Math.pow(level, 0.62) * 0.78;
       ctx.fillText(glyph, x, y);
     }
   }
@@ -1669,7 +1681,7 @@ function drawAsciiWater() {
 
 MODES.ascii = {
   label: 'ascii',
-  note: 'Л идёт вверх, камера держит её в центре — поэтому река едет сверху вниз. Перед буквой вода встаёт бугром, вдоль бортов проседает, позади остаётся волновая тень, а с углов по очереди срываются вихри: косой борт срывает сильнее прямого. С носа непрерывно сходят волновые фронты — они живут в воде сами и складываются в клин. «Симметрия» ставит вершину посередине, и обе грани начинают срывать поровну: видно, что несимметричный след — заслуга именно Л. «Буква» убирает тело целиком.',
+  note: 'Л идёт вверх, камера держит её в центре — поэтому река едет сверху вниз. Перед буквой вода встаёт бугром, вдоль бортов проседает, позади остаётся волновая тень, а с углов по очереди срываются вихри: косой борт срывает сильнее прямого. С носа непрерывно сходят волновые фронты — они живут в воде сами и складываются в клин. «Симметрия» ставит вершину посередине, и обе грани начинают срывать поровну: видно, что несимметричный след — заслуга именно Л. «Буква» убирает тело целиком. «Размах» задаёт силу воды, «срез» съедает спокойную гладь снизу и оставляет одни гребни, а «штрихи» показывают направление течения — теперь их можно включить вместе со срезом.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
@@ -1677,9 +1689,11 @@ MODES.ascii = {
     { type: 'range', key: 'detail', label: 'кегль', min: 0.55, max: 2.2, step: 0.05, value: 1.15 },
     { type: 'range', key: 'rise', label: 'рост', min: 0.06, max: 0.2, step: 0.005, value: 0.12 },
     { type: 'range', key: 'spread', label: 'раствор', min: 0.08, max: 0.34, step: 0.01, value: 0.2 },
+    { type: 'range', key: 'gain', label: 'размах', min: 0.25, max: 1.8, step: 0.05, value: 0.7 },
+    { type: 'range', key: 'floor', label: 'срез', min: 0, max: 0.7, step: 0.02, value: 0 },
     { type: 'toggle', key: 'body', label: 'буква', value: true },
     { type: 'toggle', key: 'even', label: 'симметрия', value: false },
-    { type: 'toggle', key: 'foam', label: 'только пена', value: false },
+    { type: 'toggle', key: 'strokes', label: 'штрихи', value: true },
   ],
   setup: setupAscii,
   onMove: moveWaterStudy,
