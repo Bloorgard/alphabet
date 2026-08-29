@@ -10,7 +10,7 @@ import { mountZ } from './letters/z.js?v=8';
 import { mountI } from './letters/i.js?v=9';
 import { mountJ } from './letters/j.js?v=1';
 import { mountK } from './letters/k.js?v=15';
-import { mountYa } from './letters/ya.js?v=16';
+import { mountYa } from './letters/ya.js?v=17';
 import { mountCredit } from './wall.js?v=11';
 
 const LETTERS = [

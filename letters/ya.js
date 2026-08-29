@@ -10,9 +10,9 @@ import { YA_AREA, YA_MASK, maskCells } from '../ya-mask.js?v=1';
 import { joinPlayer, loadState, plural, putMark, renamePlayer } from '../wall.js?v=11';
 
 const BOX = { x: 0.06, y: 0.14, size: 0.56 };
-/* На телефоне сцена — тот же квадрат, но панель уезжает под холст, поэтому
-   холст поднимается и ужимается. Порог тот же, что у стилей. */
-const NARROW = { x: 0.06, y: 0.06, size: 0.88 };
+/* На телефоне холст занимает всю ширину окна: отступ оставлен ровно под
+   рамку, которая обводит поле снаружи. */
+const NARROW = { x: 0.028, y: 0.028, size: 0.944 };
 const GRID = YA_MASK.length;
 
 /* Клетки контура: те, у кого хотя бы один сосед снаружи буквы. */
@@ -49,7 +49,7 @@ export function mountYa(workspace) {
   panel.innerHTML = `
     <p class="ya-title" id="ya-leaders-title">Лидеры</p>
     <ul class="ya-leaders" id="ya-leaders"></ul>
-    <p class="ya-title">У тебя</p>
+    <p class="ya-me" id="ya-me" hidden><span id="ya-me-name"></span> <button type="button" id="ya-me-change">(сменить)</button></p>
     <p class="ya-wallet" id="ya-wallet">—</p>
     <p class="ya-daily" id="ya-daily" hidden></p>
     <div class="ya-place" id="ya-place" hidden>
@@ -60,7 +60,6 @@ export function mountYa(workspace) {
       <input id="ya-name-input" maxlength="5" placeholder="имя" aria-label="Твоё имя">
       <button type="submit">вписать</button>
     </form>
-    <p class="ya-me" id="ya-me" hidden><span id="ya-me-name"></span> <button type="button" id="ya-me-change">(сменить)</button></p>
   `;
 
   const count = document.createElement('p');
@@ -235,18 +234,21 @@ export function mountYa(workspace) {
         : '<li class="ya-empty">пока никто не играл</li>';
     }
 
+    /* Величина одна: сколько клеток человек может поставить прямо сейчас.
+       Запас и суточный лимит — два ограничителя, но держать в голове две
+       цифры не нужно, важно меньшее из них. */
+    const left = Math.max(0, state.limit - state.today);
+    const ready = Math.min(state.wallet, left);
     wallet.textContent = state.name
-      ? `${state.wallet} ${plural(state.wallet, ['клетка', 'клетки', 'клеток'])}`
+      ? `у тебя ${ready} ${plural(ready, ['клетка', 'клетки', 'клеток'])}`
       : 'сначала имя';
 
-    /* Пять клеток в сутки — единственный ограничитель, и он обязан быть на
-       виду. Пока его не видно, кошелёк обещает то, чего сегодня не отдаст. */
-    const left = Math.max(0, state.limit - state.today);
-    daily.hidden = !state.name;
-    daily.textContent = left
-      ? `сегодня ещё ${left} ${plural(left, ['клетка', 'клетки', 'клеток'])} из ${state.limit}`
-      : `на сегодня всё · завтра снова ${state.limit}`;
-    daily.dataset.spent = String(!left);
+    /* Вторая строка появляется только тогда, когда сутки придержали часть
+       запаса: иначе она повторяла бы первую другими словами. */
+    const held = state.wallet - ready;
+    daily.hidden = !state.name || !held;
+    daily.textContent = held ? `ещё ${held} ${plural(held, ['клетка', 'клетки', 'клеток'])} завтра` : '';
+    daily.dataset.spent = String(!ready);
 
     nameForm.hidden = Boolean(state.name) && !renaming;
     me.hidden = !state.name || renaming;
@@ -259,7 +261,7 @@ export function mountYa(workspace) {
       place.hidden = false;
       if (placeNote.dataset.refused !== 'true') placeNote.textContent = describe(shown);
       placeDo.hidden = !chosen || Boolean(markAt(chosen)) || !state.name
-        || !state.wallet || state.today >= state.limit;
+        || !Math.min(state.wallet, Math.max(0, state.limit - state.today));
     } else {
       place.hidden = true;
     }
