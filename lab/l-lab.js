@@ -720,6 +720,233 @@ MODES.wake = {
   },
 };
 
+/* ---------- плавание ---------- */
+
+/* Кильватер выше стоит на месте не по недосмотру: при равномерном ходе след
+   стационарен в системе лодки, и время из фазы выпадает. Чтобы вода ожила,
+   след надо считать не от лодки, а от её следа во времени.
+
+   Каждая точка, где лодка побывала τ назад, излучает волновой пакет. На
+   глубокой воде его фаза сводится к φ = g·τ²/(4r) — решение Коши–Пуассона:
+   длинные волны убегают вперёд, короткие остаются у места входа. Клин
+   Кельвина складывается из этих пакетов сам, но теперь лодка вольна
+   поворачивать и останавливаться: волны остаются на воде и доживают своё.
+
+   Один косинус на точку пути вместо суммы по углу — динамика вышла дешевле
+   статики. */
+
+const VOYAGE_FRAGMENT = `
+precision highp float;
+
+varying vec2 v_uv;
+uniform vec4 u_path[160];
+uniform int u_count;
+uniform float u_gravity;
+uniform float u_sharp;
+uniform float u_glint;
+uniform float u_exposure;
+uniform vec3 u_ink;
+uniform vec3 u_paper;
+
+void main() {
+  vec2 p = v_uv;
+  float h = 0.0;
+  vec2 grad = vec2(0.0);
+
+  for (int i = 0; i < 160; i += 1) {
+    if (i >= u_count) break;
+    vec4 mark = u_path[i];
+    vec2 rel = p - mark.xy;
+    float r = max(length(rel), 0.004);
+    float age = mark.z;
+    float amp = mark.w;
+
+    /* Волновое число пакета растёт к месту входа как τ²/r²: у самой лодки
+       волна мельче пикселя, и её гасит окно, иначе бы там жил муар. */
+    /* Спектр вытеснения: длинные волны корпус почти не гонит (множитель k),
+       короче осадки — не гонит вовсе (экспонента). Без нижнего конца длинные
+       волны убегали бы вперёд лодки и клин не собирался. */
+    float phase = u_gravity * age * age / r;
+    float k = phase / r;
+    float wave = amp * k * exp(-k / u_sharp) * exp(-age * 0.35) / (0.18 + r);
+
+    h += cos(phase) * wave;
+    grad += sin(phase) * wave * k * rel / r;
+  }
+
+  vec3 normal = normalize(vec3(-grad * 0.02, 1.0));
+  vec3 light = normalize(vec3(-0.42, 0.44, 0.79));
+  vec3 view = vec3(0.0, 0.0, 1.0);
+  vec3 halfway = normalize(light + view);
+  float diffuse = max(dot(normal, light), 0.0);
+  float specular = pow(max(dot(normal, halfway), 0.0), 96.0);
+  float fresnel = pow(1.0 - max(dot(normal, view), 0.0), 4.0);
+  float crest = pow(clamp(h * 5.0 + 0.5, 0.0, 1.0), 12.0) * 0.09;
+
+  float vignette = 1.0 - dot(v_uv - 0.5, v_uv - 0.5) * 0.3;
+  float lit = (0.018 + diffuse * 0.03 + specular * 0.7 * u_glint
+    + fresnel * 0.05 + crest) * vignette;
+  gl_FragColor = vec4(mix(u_paper, u_ink, min(1.0 - exp(-lit * u_exposure), 0.92)), 1.0);
+}
+`;
+
+function voyageWater() {
+  const surface = document.createElement('canvas');
+  const gl = surface.getContext('webgl', { alpha: false, antialias: false });
+  const program = gl.createProgram();
+  gl.attachShader(program, riverShader(gl, gl.VERTEX_SHADER, WAKE_VERTEX));
+  gl.attachShader(program, riverShader(gl, gl.FRAGMENT_SHADER, VOYAGE_FRAGMENT));
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1, 1, -1, -1, 1,
+    -1, 1, 1, -1, 1, 1,
+  ]), gl.STATIC_DRAW);
+  gl.useProgram(program);
+  const position = gl.getAttribLocation(program, 'a_position');
+  gl.enableVertexAttribArray(position);
+  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+
+  return {
+    surface,
+    gl,
+    program,
+    path: gl.getUniformLocation(program, 'u_path'),
+    countSlot: gl.getUniformLocation(program, 'u_count'),
+    gravity: gl.getUniformLocation(program, 'u_gravity'),
+    sharp: gl.getUniformLocation(program, 'u_sharp'),
+    glint: gl.getUniformLocation(program, 'u_glint'),
+    exposure: gl.getUniformLocation(program, 'u_exposure'),
+    inkColor: gl.getUniformLocation(program, 'u_ink'),
+    paperColor: gl.getUniformLocation(program, 'u_paper'),
+  };
+}
+
+/* Метки кладутся густо не для красоты: на редком пути кольца от каждой точки
+   видны по отдельности, а гасить их впереди лодки должна интерференция. */
+const VOYAGE_SEAT = 0.62;
+const VOYAGE_SCALE = 0.15;
+const VOYAGE_MARKS = 160;
+const VOYAGE_STEP = 0.0035;
+const VOYAGE_LIFE = 2.8;
+
+/* Лодка — та же Л: вершина по курсу, прямой борт вдоль хода, наклонный
+   расходится влево. Крен небольшой, чтобы буква оставалась буквой. */
+function drawVoyageBoat(x, y, heel, spread, scale) {
+  const cos = Math.cos(heel);
+  const sin = Math.sin(heel);
+  const at = (ax, ay) => [
+    (x + (ax * cos - ay * sin) * scale) * S,
+    (y + (ax * sin + ay * cos) * scale) * S,
+  ];
+  ctx.beginPath();
+  ctx.moveTo(...at(0, 0));
+  ctx.lineTo(...at(0, 1));
+  ctx.lineTo(...at(-spread, 1));
+  ctx.closePath();
+  ctx.fillStyle = ink(0.97);
+  ctx.fill();
+}
+
+MODES.voyage = {
+  label: 'плавание',
+  note: 'Река едет вниз, лодка держит курс вверх, курсор её сносит. След остаётся на воде и доживает своё: волны от каждой пройденной точки складываются в клин сами, а на повороте клин изгибается вслед за рулём. Воду вытесняет наклонный борт Л, прямой идёт вдоль хода и молчит.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'ход', label: 'ход', min: 0.1, max: 0.42, step: 0.01, value: 0.24 },
+    { type: 'range', key: 'gravity', label: 'волна', min: 0.3, max: 4, step: 0.1, value: 1.1 },
+    { type: 'range', key: 'spread', label: 'раствор', min: 0.25, max: 1, step: 0.05, value: 0.55 },
+    { type: 'range', key: 'sharp', label: 'осадка', min: 60, max: 600, step: 10, value: 260 },
+    { type: 'range', key: 'glint', label: 'свет', min: 0.2, max: 1.6, step: 0.05, value: 0.85 },
+    { type: 'range', key: 'exposure', label: 'яркость', min: 0.5, max: 4, step: 0.1, value: 2.2 },
+  ],
+
+  setup() {
+    modeState.water = voyageWater();
+    modeState.boat = { x: 0.5, drift: 0 };
+    modeState.marks = [];
+    modeState.buffer = new Float32Array(VOYAGE_MARKS * 4);
+    modeState.since = 0;
+  },
+
+  step() {
+    const boat = modeState.boat;
+    const speed = num('ход');
+    const want = pointer.seen ? clamp(pointer.x, 0.08, 0.92) : 0.5;
+
+    /* Руль запаздывает: лодка доворачивает к курсору, а не прыгает за ним,
+       и от этого запаздывания след и получает свою кривизну. */
+    const pull = clamp((want - boat.x) * 3.4, -1, 1);
+    boat.drift += (pull * speed - boat.drift) * 3.2 * STEP;
+    boat.x = clamp(boat.x + boat.drift * STEP, 0.06, 0.94);
+
+    /* Лодка держится на месте кадра, а река едет вниз: курс всегда вверх,
+       поэтому Л читается буквой, а не поворачивается стрелкой. */
+    const go = speed * STEP;
+    for (const mark of modeState.marks) {
+      mark.age += STEP;
+      mark.y += go;
+    }
+    while (modeState.marks.length
+      && (modeState.marks[0].age > VOYAGE_LIFE || modeState.marks[0].y > 1.15)) {
+      modeState.marks.shift();
+    }
+
+    modeState.since += go;
+    if (modeState.since >= VOYAGE_STEP || !modeState.marks.length) {
+      modeState.since = 0;
+      /* Воду вытесняет наклонный борт, а не осевая линия: метка сносится
+         влево, и половины следа перестают быть зеркальными. */
+      modeState.marks.push({
+        x: boat.x - num('spread') * VOYAGE_SCALE * 0.34,
+        y: VOYAGE_SEAT,
+        age: 0,
+      });
+      if (modeState.marks.length > VOYAGE_MARKS) modeState.marks.shift();
+    }
+  },
+
+  draw() {
+    const water = modeState.water;
+    const size = Math.max(1, Math.round(S));
+    if (water.surface.width !== size) {
+      water.surface.width = size;
+      water.surface.height = size;
+    }
+
+    const buffer = modeState.buffer;
+    const marks = modeState.marks;
+    for (let i = 0; i < marks.length; i += 1) {
+      const mark = marks[i];
+      buffer[i * 4] = mark.x;
+      buffer[i * 4 + 1] = 1 - mark.y;
+      buffer[i * 4 + 2] = mark.age;
+      buffer[i * 4 + 3] = Math.max(0, 1 - mark.age / VOYAGE_LIFE);
+    }
+
+    water.gl.viewport(0, 0, size, size);
+    water.gl.useProgram(water.program);
+    water.gl.uniform4fv(water.path, buffer);
+    water.gl.uniform1i(water.countSlot, marks.length);
+    water.gl.uniform1f(water.gravity, num('gravity'));
+    water.gl.uniform1f(water.sharp, num('sharp'));
+    water.gl.uniform1f(water.glint, num('glint'));
+    water.gl.uniform1f(water.exposure, num('exposure'));
+    water.gl.uniform3fv(water.inkColor, wakeTone(INK));
+    water.gl.uniform3fv(water.paperColor, wakeTone(PAPER));
+    water.gl.drawArrays(water.gl.TRIANGLES, 0, 6);
+
+    ctx.drawImage(water.surface, 0, 0, S, S);
+    const boat = modeState.boat;
+    /* Крен по сносу: на повороте букву ведёт, и видно, чем она гребёт. */
+    const heel = clamp(boat.drift * 1.6, -0.5, 0.5);
+    drawVoyageBoat(boat.x, VOYAGE_SEAT, heel, num('spread'), VOYAGE_SCALE);
+  },
+};
+
 /* ---------- три воды ---------- */
 
 const WATER_STUDY_COMMON = `
