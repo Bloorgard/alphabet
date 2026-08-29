@@ -1381,6 +1381,103 @@ function stepAscii() {
   }
 }
 
+/* Тело сцены — не круг, а силуэт Л: вершина по курсу, прямой борт вдоль хода,
+   наклонный расходится. Всё, что вода делает с телом, считается от расстояния
+   до его контура, поэтому форма буквы попадает и в отражение, и в тень, и в
+   точки срыва вихрей — картина воды рассказывает, что именно в ней стоит. */
+
+function letterBody() {
+  const height = num('rise') * 2.4;
+  const spread = num('spread');
+  return {
+    height,
+    spread,
+    apex: { x: 0.5 + spread * 0.5, y: 0.5 + height * 0.5 },
+    right: { x: 0.5 + spread * 0.5, y: 0.5 - height * 0.5 },
+    left: { x: 0.5 - spread * 0.5, y: 0.5 - height * 0.5 },
+  };
+}
+
+/* Знаковое расстояние до треугольника: минимум по трём рёбрам, знак — по
+   обходу. Внутри отрицательно. */
+function letterDistance(px, py, body) {
+  const points = [body.apex, body.right, body.left];
+  let best = Infinity;
+  let inside = 1;
+  for (let i = 0; i < 3; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % 3];
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const vx = px - a.x;
+    const vy = py - a.y;
+    const t = clamp((vx * ex + vy * ey) / (ex * ex + ey * ey), 0, 1);
+    const qx = vx - ex * t;
+    const qy = vy - ey * t;
+    best = Math.min(best, qx * qx + qy * qy);
+    if (vx * ey - vy * ex > 0) inside = 0;
+  }
+  return Math.sqrt(best) * (inside ? -1 : 1);
+}
+
+function letterNormal(px, py, body) {
+  const step = 0.004;
+  const dx = letterDistance(px + step, py, body) - letterDistance(px - step, py, body);
+  const dy = letterDistance(px, py + step, body) - letterDistance(px, py - step, body);
+  const length = Math.hypot(dx, dy) || 1;
+  return { x: dx / length, y: dy / length };
+}
+
+function asciiFlowSpeed() {
+  return num('speed') * 0.26;
+}
+
+function setupAscii() {
+  setupWaterMotion();
+  modeState.scroll = 0;
+  modeState.eddies = [];
+  modeState.shed = 0;
+  modeState.side = 1;
+}
+
+function stepAscii() {
+  stepWaterStudy();
+  const flow = asciiFlowSpeed();
+  const body = letterBody();
+  modeState.scroll += flow * STEP;
+
+  for (const eddy of modeState.eddies) {
+    eddy.age += STEP;
+    eddy.y -= flow * STEP;
+    eddy.x += eddy.spin * 0.018 * STEP;
+  }
+  while (modeState.eddies.length && (modeState.eddies[0].y < -0.2 || modeState.eddies[0].age > 7)) {
+    modeState.eddies.shift();
+  }
+
+  if (!on('body')) return;
+
+  /* Частота схода растёт со скоростью и падает с размером тела — число
+     Струхаля почти постоянно, поэтому шаг дорожки держится сам. */
+  modeState.shed += STEP;
+  const period = (0.75 * body.spread) / Math.max(flow, 0.02);
+  if (modeState.shed >= period) {
+    modeState.shed = 0;
+    modeState.side = -modeState.side;
+    const corner = modeState.side < 0 ? body.left : body.right;
+    modeState.eddies.push({
+      x: corner.x + modeState.side * 0.012,
+      y: corner.y,
+      spin: modeState.side,
+      /* Косой борт разгоняет поток и срывает его сильнее прямого — от этого
+         дорожка выходит несимметричной, чего у круга быть не могло. */
+      force: modeState.side < 0 ? 1 : 0.55,
+      age: 0,
+    });
+    if (modeState.eddies.length > 14) modeState.eddies.shift();
+  }
+}
+
 function drawAsciiWater() {
   const detailMix = clamp((num('detail') - 0.55) / 1.65, 0, 1);
   const cell = Math.round(lerp(22, 8, detailMix));
@@ -1388,7 +1485,8 @@ function drawAsciiWater() {
   const rows = Math.ceil(S / cell);
   const time = modeState.time * num('speed');
   const drift = modeState.scroll;
-  const circle = { x: 0.5, y: 0.5, radius: num('radius') };
+  const body = letterBody();
+  const standing = on('body');
   const palette = on('foam') ? '      .,:;~+*#%@' : ' .,-~:;=+*#%@';
 
   ctx.save();
@@ -1403,96 +1501,99 @@ function drawAsciiWater() {
     for (let col = 0; col < cols; col += 1) {
       const x = (col + 0.5) * cell;
       const u = x / S;
-      const circleDx = u - circle.x;
-      const circleDy = v - circle.y;
-      const circleDistance2 = circleDx * circleDx + circleDy * circleDy;
-      if (circleDistance2 < circle.radius * circle.radius) continue;
 
-      /* Потенциальное течение вокруг цилиндра: поток идёт вниз экрана,
-         перед кругом сжимается, по бокам ускоряется и смыкается позади. */
-      /* У самой поверхности отношение r²/d² уходит в единицу и схлопывает
-         выборку на ось — потолок держит искажение в пределах разумного. */
-      const influence = Math.min(circle.radius * circle.radius / Math.max(circleDistance2, 0.0001), 0.7);
-      const flowU = circle.x + circleDx * (1 - influence);
-      const flowV = circle.y + circleDy * (1 + influence);
-      const circleDistance4 = circleDistance2 * circleDistance2;
-      let flowVelocityX = 2 * circle.radius * circle.radius * circleDx * circleDy / circleDistance4;
-      let flowVelocityY = -(1 + circle.radius * circle.radius
-        * (circleDx * circleDx - circleDy * circleDy) / circleDistance4);
-      let wakeShadow = 0;
-      let wakeEnvelope = 0;
-      /* Рябь считается от координаты воды, а не экрана: снос уносит рисунок
-         вниз, и течение видно даже там, где круг ни при чём. */
+      const rim = standing ? letterDistance(u, v, body) : 1;
+      if (rim < 0) continue;
+
+      let flowVelocityX = 0;
+      let flowVelocityY = -1;
+      let near = 0;
+      let bernoulli = 0;
+      let shade = 0;
+      let scatter = 0;
+      let flowU = u;
+      let flowV = v;
+
+      if (standing) {
+        near = Math.exp(-rim * 9);
+        const normal = letterNormal(u, v, body);
+
+        /* У борта вода не может идти сквозь тело: нормальную составляющую
+           гасим, и поток сам поворачивает вдоль контура. */
+        const along = flowVelocityX * normal.x + flowVelocityY * normal.y;
+        flowVelocityX -= along * normal.x * near;
+        flowVelocityY -= along * normal.y * near;
+
+        /* Там, где борт стоит поперёк хода, поток разгоняется — и по Бернулли
+           проседает. Спереди наоборот: застой поднимает воду бугром.
+           Раньше и спереди, и с боков шёл плюс, отчего вокруг тела вставало
+           сплошное свечение, ничего не сообщавшее. */
+        const facing = -normal.y;
+        const speed = 1 + near * 0.9 * (1 - Math.abs(facing));
+        bernoulli = (1 - speed * speed) * 0.5 * near;
+        if (facing > 0) bernoulli += facing * near * 0.5;
+
+        /* Линии тока раздвигаются перед телом и смыкаются за ним. */
+        const push = near * 0.5;
+        flowU = u + normal.x * push * 0.12;
+        flowV = v + normal.y * push * 0.12;
+
+        const behind = Math.max(0, body.left.y - v);
+        const halfWidth = body.spread * 0.5 + behind * 0.35;
+        const across = (u - 0.5) / Math.max(halfWidth, 0.0001);
+        shade = Math.exp(-across * across) * Math.exp(-behind * 1.8);
+
+        /* Отражение идёт от контура, а не от окружности: у прямого борта
+           фронты прямые, у косого — косые. */
+        const frontPhase = (body.apex.y + drift) * 22 + body.apex.x * 2.2 + time * 0.22;
+        const lobe = 0.5 + 0.5 * clamp((v - 0.5) / Math.max(body.height, 0.0001) * 2, -1, 1);
+        scatter = Math.sin(22 * rim - frontPhase) * 0.42 * lobe / Math.sqrt(1 + 22 * rim);
+      }
+
       const waterV = flowV + drift;
       let ripple = Math.sin(waterV * 22 + flowU * 2.2 + time * 0.22) * 0.22;
       ripple += Math.sin(waterV * 38 - flowU * 6.5 + time * 0.16) * 0.11;
       ripple += Math.sin(waterV * 15 + flowU * 8.0 + time * 0.09) * 0.06;
 
-      /* Тело не прозрачно для волн: позади него рябь гасится и восстанавливается
-         не сразу — это волновая тень, а не след. */
-      const distance = Math.sqrt(circleDistance2);
-      const behind = Math.max(0, -circleDy - circle.radius);
-      const across = circleDx / (circle.radius * 1.1 + behind * 0.4);
-      const shade = Math.exp(-across * across) * Math.exp(-behind * 1.8);
-      let field = ripple * (1 - 0.62 * shade);
+      let field = ripple * (1 - 0.62 * shade) + scatter + bernoulli * 0.62;
+      let wakeEnvelope = 0;
 
-      /* А спереди набегающая волна отражается: круговая волна от тела,
-         синфазная с падающей на его переднем крае. Складываясь с ней, она
-         и даёт дуги перед кругом — то, чего волнам не хватало, чтобы
-         заметить, что круг вообще есть. */
-      const rim = Math.max(distance - circle.radius, 0.0001);
-      const frontPhase = (circle.y + circle.radius + drift) * 22 + circle.x * 2.2 + time * 0.22;
-      const lobe = 0.5 + 0.5 * (circleDy / Math.max(distance, 0.0001));
-      const scatter = 0.42 * lobe / Math.sqrt(1 + 22 * rim);
-      field += Math.sin(22 * rim - frontPhase) * scatter;
-
-      const flowSpeed = Math.hypot(flowVelocityX, flowVelocityY);
-      const surfaceDistance = distance - circle.radius;
-      /* Носовой бугор жил в слое толщиной в пару знаков и в глаза не бросался. */
-      const nearCircle = Math.exp(-surfaceDistance * 8);
-      const pressure = circleDy > 0 ? Math.max(0, 1 - flowSpeed) * nearCircle : 0;
-      field += pressure * 0.72 + (flowSpeed - 1) * nearCircle * 0.2;
-
-      /* Сорванные вихри: каждый крутит воду вокруг себя и продавливает её
-         в ядре. Знаки чередуются, поэтому дорожка сама выходит виляющей —
-         вилять руками не нужно. */
       for (const eddy of modeState.eddies) {
         const ex = u - eddy.x;
         const ey = v - eddy.y;
         const distance2 = ex * ex + ey * ey;
-        const core = circle.radius * (0.42 + eddy.age * 0.26);
+        const core = body.spread * (0.3 + eddy.age * 0.2);
         const q = distance2 / (core * core);
         if (q > 9) continue;
-        const decay = Math.exp(-eddy.age * 0.42) * Math.exp(-q);
-        const spin = Math.max(Math.sqrt(distance2), 0.004);
-        /* Ядро проваливается, а по кромке вода вздымается: у вихря видно
+        const decay = Math.exp(-eddy.age * 0.42) * Math.exp(-q) * eddy.force;
+        const reach = Math.max(Math.sqrt(distance2), 0.004);
+        /* Ядро проваливается, по кромке вода вздымается: у вихря видно
            и воронку, и вал вокруг неё. */
         field += decay * (Math.min(q, 2.4) - 0.9) * 0.62;
         wakeEnvelope = Math.max(wakeEnvelope, decay);
         const swirl = eddy.spin * decay * 2.4;
-        flowVelocityX += (-ey / spin) * swirl;
-        flowVelocityY += (ex / spin) * swirl;
+        flowVelocityX += (-ey / reach) * swirl;
+        flowVelocityY += (ex / reach) * swirl;
       }
-      wakeShadow = wakeEnvelope * 0.2;
 
       for (const trail of modeState.trails) {
         const dx = u - trail.x;
         const dy = v - trail.y;
-        const distance = Math.hypot(dx, dy);
+        const reach = Math.hypot(dx, dy);
         const life = Math.exp(-trail.age * 0.58) * trail.strength * num('amount');
         const radius = trail.age * (0.11 + trail.strength * 0.055);
-        const front = Math.exp(-Math.abs(distance - radius) * 17);
-        field += Math.sin((distance - radius) * 54) * front * life * 0.9;
+        const front = Math.exp(-Math.abs(reach - radius) * 17);
+        field += Math.sin((reach - radius) * 54) * front * life * 0.9;
       }
 
       const mouseDistance = Math.hypot(u - modeState.mouse.x, v - modeState.mouse.y);
       const force = Math.min(Math.hypot(modeState.velocity.x, modeState.velocity.y) * 26, 1) * num('amount');
       field += Math.sin(mouseDistance * 48 - time * 3) * Math.exp(-mouseDistance * mouseDistance * 32) * force;
-      const level = clamp(0.5 + field * 0.62 - wakeShadow, 0, 1);
+
+      const level = clamp(0.5 + field * 0.62 - wakeEnvelope * 0.2, 0, 1);
       const index = Math.min(palette.length - 1, Math.floor(level * palette.length));
       let glyph = palette[index];
-      if (!on('foam') && level > 0.22 && level < 0.72
-        && (nearCircle > 0.055 || wakeEnvelope > 0.03)) {
+      if (!on('foam') && level > 0.22 && level < 0.72 && (near > 0.055 || wakeEnvelope > 0.03)) {
         const screenVelocityX = flowVelocityX;
         const screenVelocityY = -flowVelocityY;
         const horizontal = Math.abs(screenVelocityX);
@@ -1508,22 +1609,29 @@ function drawAsciiWater() {
   }
 
   ctx.globalAlpha = 1;
-  ctx.fillStyle = ink(0.97);
-  ctx.beginPath();
-  ctx.arc(circle.x * S, (1 - circle.y) * S, circle.radius * S, 0, TAU);
-  ctx.fill();
+  if (standing) {
+    ctx.fillStyle = ink(0.97);
+    ctx.beginPath();
+    ctx.moveTo(body.apex.x * S, (1 - body.apex.y) * S);
+    ctx.lineTo(body.right.x * S, (1 - body.right.y) * S);
+    ctx.lineTo(body.left.x * S, (1 - body.left.y) * S);
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.restore();
 }
 
 MODES.ascii = {
   label: 'ascii',
-  note: 'Круг идёт вверх, камера держит его в центре — поэтому река едет сверху вниз. Он расталкивает набегающую воду, а с боков по очереди срываются вихри: их уносит вниз вместе с течением, и они разбухают и гаснут. След остаётся на воде, а не под кругом. Мышь добавляет свои возмущения.',
+  note: 'Л идёт вверх, камера держит её в центре — поэтому река едет сверху вниз. Перед буквой вода встаёт бугром, вдоль бортов проседает, позади остаётся волновая тень, а с углов по очереди срываются вихри: косой борт срывает сильнее прямого. Выключи «букву», чтобы увидеть, сколько в картине от неё.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
     { type: 'range', key: 'amount', label: 'эхо', min: 0, max: 2, step: 0.05, value: 1.1 },
     { type: 'range', key: 'detail', label: 'кегль', min: 0.55, max: 2.2, step: 0.05, value: 1.15 },
-    { type: 'range', key: 'radius', label: 'круг', min: 0.05, max: 0.2, step: 0.005, value: 0.11 },
+    { type: 'range', key: 'rise', label: 'рост', min: 0.06, max: 0.2, step: 0.005, value: 0.12 },
+    { type: 'range', key: 'spread', label: 'раствор', min: 0.08, max: 0.34, step: 0.01, value: 0.2 },
+    { type: 'toggle', key: 'body', label: 'буква', value: true },
     { type: 'toggle', key: 'foam', label: 'только пена', value: false },
   ],
   setup: setupAscii,
