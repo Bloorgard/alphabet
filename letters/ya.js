@@ -166,7 +166,9 @@ export function mountYa(workspace) {
       if (own) mine += 1;
       const span = 2 ** (state.level - mark.level);
       ctx.globalAlpha = lit ? 1 : spotlight ? 0.16 : own ? 1 : Math.max(0.25, 0.72 / span);
-      ctx.fillStyle = lit || own ? red : ink;
+      /* Выделенный игрок проступает тем, что гаснут все прочие, а не краской:
+         красный на сайте означает ровно одно — эту клетку поставил ты. */
+      ctx.fillStyle = own ? red : ink;
       ctx.fillRect(left + mark.x * span * step, top + mark.y * span * step, step * span - gap, step * span - gap);
     }
     ctx.globalAlpha = 1;
