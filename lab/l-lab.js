@@ -1405,13 +1405,19 @@ function letterBody() {
      в том же списке, поэтому каждая поворачивается ровно один раз. */
   const tilt = modeState.tilt || 0;
   if (tilt) {
+    /* Ось поворота — не середина. Тело в потоке разворачивается вокруг точки
+       ближе к носу: нос ведёт, корма выносится наружу. Вокруг центра тяжести
+       нос и корма ходят поровну, и поворот читается вращением фигуры, а не
+       ходом лодки. */
+    const pivotX = mid.x + (apex.x - mid.x) * 0.55;
+    const pivotY = mid.y + (apex.y - mid.y) * 0.55;
     const cos = Math.cos(tilt);
     const sin = Math.sin(tilt);
     for (const point of rim) {
-      const dx = point.x - mid.x;
-      const dy = point.y - mid.y;
-      point.x = mid.x + dx * cos - dy * sin;
-      point.y = mid.y + dx * sin + dy * cos;
+      const dx = point.x - pivotX;
+      const dy = point.y - pivotY;
+      point.x = pivotX + dx * cos - dy * sin;
+      point.y = pivotY + dx * sin + dy * cos;
     }
   }
 
@@ -2129,14 +2135,20 @@ function swirlShed(body, panels, blobs, flow, sway, beat) {
   const side = modeState.side;
   const probe = { x: 0, y: 0 };
   const corner = side < 0 ? body.left : body.right;
-  const x = corner.x + side * 0.02;
-  const y = corner.y + 0.004;
+  /* Рождается чуть ниже угла: у самой обшивки сгусток светит в борт. */
+  const x = corner.x + side * 0.022;
+  const y = corner.y - 0.02;
   swirlVelocity(x, y, blobs, flow, probe, panels, sway);
   const edge = Math.hypot(probe.x, probe.y) * letterHeel(body, side);
+  /* Сила не даётся сразу. Завихренность на стенке копится непрерывно, а мы
+     заменяем её одним сгустком за такт — если выдать ему полную силу в момент
+     рождения, у борта вспыхивает светлый завиток, и вспышки чередуются
+     слева-справа на каждом такте. Поэтому сгусток разгорается за полтакта. */
   blobs.push({
     x,
     y,
-    turn: -side * 0.5 * edge * edge * beat * num('curl') * 0.08,
+    seed: -side * 0.5 * edge * edge * beat * num('curl') * 0.08,
+    turn: 0,
     age: 0,
   });
   while (blobs.length > 40) blobs.shift();
@@ -2205,11 +2217,11 @@ function stepSwirlSlide() {
   const wantSide = (modeState.goRight ? 1 : 0) - (modeState.goLeft ? 1 : 0);
   const wantUp = (modeState.goUp ? 1 : 0) - (modeState.goDown ? 1 : 0);
   modeState.sway += (wantSide * 0.3 - modeState.sway) * Math.min(1, 6 * STEP);
-  modeState.climb += (wantUp * 0.1 - modeState.climb) * Math.min(1, 5 * STEP);
+  modeState.climb += (wantUp * 0.26 - modeState.climb) * Math.min(1, 9 * STEP);
   modeState.slide = clamp(modeState.slide + modeState.sway * STEP, -0.3, 0.3);
-  modeState.lift = clamp(modeState.lift + modeState.climb * STEP, -0.14, 0.14);
+  modeState.lift = clamp(modeState.lift + modeState.climb * STEP, -0.2, 0.2);
   if (Math.abs(modeState.slide) === 0.3) modeState.sway = 0;
-  if (Math.abs(modeState.lift) === 0.14) modeState.climb = 0;
+  if (Math.abs(modeState.lift) === 0.2) modeState.climb = 0;
   /* Крен догоняет ход с запозданием — иначе поворот выходит дёрганым. */
   modeState.tilt += (-modeState.sway * 0.9 - modeState.tilt) * Math.min(1, 4 * STEP);
 }
@@ -2221,7 +2233,7 @@ function stepSwirl() {
   const blobs = modeState.blobs;
   /* Идя вверх, буква идёт против воды быстрее — набегающий поток на её
      скорость и прибавляется. Поэтому вверх бурун крепчает, вниз слабеет. */
-  const flow = Math.max(swirlFlow() + modeState.climb, 0.02);
+  const flow = Math.max(swirlFlow() + modeState.climb * 0.6, 0.02);
   const sway = modeState.sway;
   const body = letterBody();
   const standing = on('body');
@@ -2251,7 +2263,7 @@ function stepSwirl() {
     blob.x += probe.x * STEP;
     blob.y += probe.y * STEP;
     blob.age += STEP;
-    blob.turn *= 1 - 0.12 * STEP;
+    blob.turn = blob.seed * Math.min(1, blob.age / 0.5) * Math.exp(-0.12 * blob.age);
   }
   for (let i = blobs.length - 1; i >= 0; i -= 1) {
     /* Убираем по возрасту и по уходу за кадр. По величине нельзя: сила вихря
