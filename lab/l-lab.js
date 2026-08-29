@@ -1410,7 +1410,9 @@ function drawAsciiWater() {
 
       /* Потенциальное течение вокруг цилиндра: поток идёт вниз экрана,
          перед кругом сжимается, по бокам ускоряется и смыкается позади. */
-      const influence = circle.radius * circle.radius / Math.max(circleDistance2, 0.0001);
+      /* У самой поверхности отношение r²/d² уходит в единицу и схлопывает
+         выборку на ось — потолок держит искажение в пределах разумного. */
+      const influence = Math.min(circle.radius * circle.radius / Math.max(circleDistance2, 0.0001), 0.7);
       const flowU = circle.x + circleDx * (1 - influence);
       const flowV = circle.y + circleDy * (1 + influence);
       const circleDistance4 = circleDistance2 * circleDistance2;
@@ -1422,15 +1424,34 @@ function drawAsciiWater() {
       /* Рябь считается от координаты воды, а не экрана: снос уносит рисунок
          вниз, и течение видно даже там, где круг ни при чём. */
       const waterV = flowV + drift;
-      let field = Math.sin(waterV * 22 + flowU * 2.2 + time * 0.22) * 0.22;
-      field += Math.sin(waterV * 38 - flowU * 6.5 + time * 0.16) * 0.11;
-      field += Math.sin(waterV * 15 + flowU * 8.0 + time * 0.09) * 0.06;
+      let ripple = Math.sin(waterV * 22 + flowU * 2.2 + time * 0.22) * 0.22;
+      ripple += Math.sin(waterV * 38 - flowU * 6.5 + time * 0.16) * 0.11;
+      ripple += Math.sin(waterV * 15 + flowU * 8.0 + time * 0.09) * 0.06;
+
+      /* Тело не прозрачно для волн: позади него рябь гасится и восстанавливается
+         не сразу — это волновая тень, а не след. */
+      const distance = Math.sqrt(circleDistance2);
+      const behind = Math.max(0, -circleDy - circle.radius);
+      const across = circleDx / (circle.radius * 1.1 + behind * 0.4);
+      const shade = Math.exp(-across * across) * Math.exp(-behind * 1.8);
+      let field = ripple * (1 - 0.62 * shade);
+
+      /* А спереди набегающая волна отражается: круговая волна от тела,
+         синфазная с падающей на его переднем крае. Складываясь с ней, она
+         и даёт дуги перед кругом — то, чего волнам не хватало, чтобы
+         заметить, что круг вообще есть. */
+      const rim = Math.max(distance - circle.radius, 0.0001);
+      const frontPhase = (circle.y + circle.radius + drift) * 22 + circle.x * 2.2 + time * 0.22;
+      const lobe = 0.5 + 0.5 * (circleDy / Math.max(distance, 0.0001));
+      const scatter = 0.42 * lobe / Math.sqrt(1 + 22 * rim);
+      field += Math.sin(22 * rim - frontPhase) * scatter;
 
       const flowSpeed = Math.hypot(flowVelocityX, flowVelocityY);
-      const surfaceDistance = Math.sqrt(circleDistance2) - circle.radius;
-      const nearCircle = Math.exp(-surfaceDistance * 18);
+      const surfaceDistance = distance - circle.radius;
+      /* Носовой бугор жил в слое толщиной в пару знаков и в глаза не бросался. */
+      const nearCircle = Math.exp(-surfaceDistance * 8);
       const pressure = circleDy > 0 ? Math.max(0, 1 - flowSpeed) * nearCircle : 0;
-      field += pressure * 0.46 + (flowSpeed - 1) * nearCircle * 0.12;
+      field += pressure * 0.72 + (flowSpeed - 1) * nearCircle * 0.2;
 
       /* Сорванные вихри: каждый крутит воду вокруг себя и продавливает её
          в ядре. Знаки чередуются, поэтому дорожка сама выходит виляющей —
@@ -1443,14 +1464,14 @@ function drawAsciiWater() {
         const q = distance2 / (core * core);
         if (q > 9) continue;
         const decay = Math.exp(-eddy.age * 0.42) * Math.exp(-q);
-        const distance = Math.max(Math.sqrt(distance2), 0.004);
+        const spin = Math.max(Math.sqrt(distance2), 0.004);
         /* Ядро проваливается, а по кромке вода вздымается: у вихря видно
            и воронку, и вал вокруг неё. */
         field += decay * (Math.min(q, 2.4) - 0.9) * 0.62;
         wakeEnvelope = Math.max(wakeEnvelope, decay);
         const swirl = eddy.spin * decay * 2.4;
-        flowVelocityX += (-ey / distance) * swirl;
-        flowVelocityY += (ex / distance) * swirl;
+        flowVelocityX += (-ey / spin) * swirl;
+        flowVelocityY += (ex / spin) * swirl;
       }
       wakeShadow = wakeEnvelope * 0.2;
 
