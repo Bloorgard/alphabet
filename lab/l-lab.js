@@ -1391,13 +1391,27 @@ function stepAscii() {
 function letterBody() {
   const height = num('rise') * 2.4;
   const spread = num('spread');
+  /* У Л вершина стоит над прямым бортом, у симметричного тела — посередине.
+     Больше между ними ничего не меняется: раствор и рост общие, поэтому
+     сравнение честное. */
+  const apexX = on('even') ? 0.5 : 0.5 + spread * 0.5;
+  const foot = 0.5 - height * 0.5;
   return {
     height,
     spread,
-    apex: { x: 0.5 + spread * 0.5, y: 0.5 + height * 0.5 },
-    right: { x: 0.5 + spread * 0.5, y: 0.5 - height * 0.5 },
-    left: { x: 0.5 - spread * 0.5, y: 0.5 - height * 0.5 },
+    apex: { x: apexX, y: 0.5 + height * 0.5 },
+    right: { x: 0.5 + spread * 0.5, y: foot },
+    left: { x: 0.5 - spread * 0.5, y: foot },
   };
+}
+
+/* Вытесняет воду наклон борта: чем сильнее грань уходит поперёк хода, тем
+   круче она разгоняет поток и тем сильнее срывает вихрь. У Л прямой борт
+   почти молчит, у симметричного тела оба борта равны — считаем от геометрии,
+   а не назначаем руками. */
+function letterHeel(body, side) {
+  const foot = side < 0 ? body.left : body.right;
+  return 0.4 + Math.min(Math.abs(body.apex.x - foot.x) / Math.max(body.height, 0.0001), 1.4) * 0.9;
 }
 
 /* Знаковое расстояние до треугольника: минимум по трём рёбрам, знак — по
@@ -1489,9 +1503,7 @@ function stepAscii() {
       x: corner.x + modeState.side * 0.012,
       y: corner.y,
       spin: modeState.side,
-      /* Косой борт разгоняет поток и срывает его сильнее прямого — от этого
-         дорожка выходит несимметричной, чего у круга быть не могло. */
-      force: modeState.side < 0 ? 1 : 0.55,
+      force: letterHeel(body, modeState.side),
       age: 0,
     });
     if (modeState.eddies.length > 14) modeState.eddies.shift();
@@ -1657,7 +1669,7 @@ function drawAsciiWater() {
 
 MODES.ascii = {
   label: 'ascii',
-  note: 'Л идёт вверх, камера держит её в центре — поэтому река едет сверху вниз. Перед буквой вода встаёт бугром, вдоль бортов проседает, позади остаётся волновая тень, а с углов по очереди срываются вихри: косой борт срывает сильнее прямого. С носа непрерывно сходят волновые фронты — они живут в воде сами и складываются в клин. Выключи «букву», чтобы увидеть, сколько в картине от неё.',
+  note: 'Л идёт вверх, камера держит её в центре — поэтому река едет сверху вниз. Перед буквой вода встаёт бугром, вдоль бортов проседает, позади остаётся волновая тень, а с углов по очереди срываются вихри: косой борт срывает сильнее прямого. С носа непрерывно сходят волновые фронты — они живут в воде сами и складываются в клин. «Симметрия» ставит вершину посередине, и обе грани начинают срывать поровну: видно, что несимметричный след — заслуга именно Л. «Буква» убирает тело целиком.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
@@ -1666,6 +1678,7 @@ MODES.ascii = {
     { type: 'range', key: 'rise', label: 'рост', min: 0.06, max: 0.2, step: 0.005, value: 0.12 },
     { type: 'range', key: 'spread', label: 'раствор', min: 0.08, max: 0.34, step: 0.01, value: 0.2 },
     { type: 'toggle', key: 'body', label: 'буква', value: true },
+    { type: 'toggle', key: 'even', label: 'симметрия', value: false },
     { type: 'toggle', key: 'foam', label: 'только пена', value: false },
   ],
   setup: setupAscii,
