@@ -1867,6 +1867,8 @@ function swirlFlow() {
 
 function setupSwirl() {
   modeState.parts = [];
+  modeState.chips = [];
+  modeState.age = 0;
   modeState.blobs = [];
   modeState.crowd = 0;
   modeState.shed = 0;
@@ -1880,7 +1882,7 @@ function swirlFill() {
   const parts = modeState.parts;
   while (parts.length > crowd) parts.pop();
   while (parts.length < crowd) {
-    const part = { x: 0, y: 0, px: new Float64Array(SWIRL_TAIL), py: new Float64Array(SWIRL_TAIL), head: 0, swing: 0 };
+    const part = { x: 0, y: 0, px: new Float64Array(SWIRL_TAIL), py: new Float64Array(SWIRL_TAIL), head: 0, swing: 0, phase: Math.random() * 6.283 };
     swirlSeed(part, Math.random());
     parts.push(part);
   }
@@ -2065,6 +2067,62 @@ function swirlShed(body, panels, blobs, flow) {
   while (blobs.length > 160) blobs.shift();
 }
 
+/* Щепки. Точка сама по себе вращения не показывает: она безразмерна, и
+   крутится вокруг неё вода или нет — по ней не видно. У щепки есть длина,
+   поэтому она поворачивается вместе с водой. Угловая скорость плавающего
+   тела равна половине завихренности, а завихренность берём разностью
+   скоростей вокруг щепки — так вихрь становится виден без единой стрелки. */
+const SWIRL_CHIPS = 44;
+
+function stepSwirlChips(blobs, flow, panels, body, standing) {
+  const chips = modeState.chips;
+  while (chips.length < SWIRL_CHIPS) {
+    chips.push({ x: Math.random(), y: Math.random(), turn: Math.random() * 6.283 });
+  }
+
+  const probe = { x: 0, y: 0 };
+  const step = 0.012;
+  for (const chip of chips) {
+    swirlVelocity(chip.x, chip.y - step, blobs, flow, probe, panels);
+    const downX = probe.x;
+    swirlVelocity(chip.x, chip.y + step, blobs, flow, probe, panels);
+    const upX = probe.x;
+    swirlVelocity(chip.x - step, chip.y, blobs, flow, probe, panels);
+    const leftY = probe.y;
+    swirlVelocity(chip.x + step, chip.y, blobs, flow, probe, panels);
+    const rightY = probe.y;
+    chip.turn += ((rightY - leftY) - (upX - downX)) / (4 * step) * 0.5 * STEP;
+
+    swirlVelocity(chip.x, chip.y, blobs, flow, probe, panels);
+    let vx = probe.x;
+    let vy = probe.y;
+    if (standing) {
+      const rim = letterDistance(chip.x, chip.y, body);
+      if (rim < 0.02) {
+        const normal = letterNormal(chip.x, chip.y, body);
+        if (rim < 0.004) {
+          chip.x += normal.x * (0.004 - rim);
+          chip.y += normal.y * (0.004 - rim);
+        }
+        const into = vx * normal.x + vy * normal.y;
+        if (into < 0) {
+          const grip = 1 - Math.max(rim, 0) / 0.02;
+          vx -= into * normal.x * grip;
+          vy -= into * normal.y * grip;
+        }
+      }
+    }
+    chip.x += vx * STEP;
+    chip.y += vy * STEP;
+    if (chip.x < 0) chip.x += 1;
+    if (chip.x > 1) chip.x -= 1;
+    if (chip.y < -0.04) {
+      chip.x = Math.random();
+      chip.y = 1.04;
+    }
+  }
+}
+
 function stepSwirl() {
   swirlFill();
   const parts = modeState.parts;
@@ -2076,6 +2134,7 @@ function stepSwirl() {
   /* Раскладку по контуру берём один раз за кадр: внутри вызова скорости она
      сверялась бы заново на каждую из двух тысяч точек. */
   const panels = standing ? swirlPanels(body) : null;
+  modeState.age += STEP;
 
   if (standing) {
     modeState.shed += STEP;
@@ -2105,6 +2164,8 @@ function stepSwirl() {
        оказывались ниже порога — дорожка исчезала целиком. */
     if (blobs[i].y < -0.25 || blobs[i].age > 3.5) blobs.splice(i, 1);
   }
+
+  if (on('chips')) stepSwirlChips(blobs, flow, panels, body, standing);
 
   for (const part of parts) {
     swirlVelocity(part.x, part.y, blobs, flow, probe, panels);
@@ -2165,25 +2226,71 @@ function drawSwirl() {
     bands[band >= 0 && band < 3 ? band : 3].push(part);
   }
 
+  /* «Угасание» режет хвост на несколько кусков по возрасту и гасит дальний
+     конец. Куски, а не отдельные звенья: прозрачность в канве меняется
+     только между путями, и путь на каждое звено стоил бы кадра. */
+  const fading = on('fade');
+  const chunks = fading ? 5 : 1;
+  const twinkle = on('spark') ? modeState.age * 1.7 : 0;
+
   for (let band = 0; band < 4; band += 1) {
     if (!bands[band].length) continue;
-    ctx.strokeStyle = ink(0.18 + band * 0.27);
-    ctx.beginPath();
-    for (const part of bands[band]) {
-      let first = true;
-      for (let i = tail - 1; i >= 0; i -= 1) {
-        const at = (part.head - i + SWIRL_TAIL * 2) % SWIRL_TAIL;
-        const back = (at + SWIRL_TAIL - 1) % SWIRL_TAIL;
-        const x = part.px[at] * S;
-        const y = (1 - part.py[at]) * S;
-        /* Точка, ушедшая за край, возвращается с другой стороны — хвост через
-           весь кадр рисовать нельзя. */
-        if (first || Math.abs(part.px[at] - part.px[back]) > 0.5) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-        first = false;
+    const weight = 0.18 + band * 0.27;
+    for (let chunk = 0; chunk < chunks; chunk += 1) {
+      const from = Math.round((tail * chunk) / chunks);
+      const to = Math.round((tail * (chunk + 1)) / chunks);
+      if (to - from < 2) continue;
+      /* Ближний к точке кусок — полный, дальний почти прозрачный. */
+      const dim = fading ? 1 - chunk / chunks : 1;
+      ctx.strokeStyle = ink(weight * dim);
+      ctx.beginPath();
+      for (const part of bands[band]) {
+        let first = true;
+        for (let i = to - 1; i >= from; i -= 1) {
+          const at = (part.head - i + SWIRL_TAIL * 2) % SWIRL_TAIL;
+          const back = (at + SWIRL_TAIL - 1) % SWIRL_TAIL;
+          const x = part.px[at] * S;
+          const y = (1 - part.py[at]) * S;
+          /* Точка, ушедшая за край, возвращается с другой стороны — хвост
+             через весь кадр рисовать нельзя. */
+          if (first || Math.abs(part.px[at] - part.px[back]) > 0.5) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+          first = false;
+        }
       }
+      ctx.stroke();
+    }
+  }
+
+  /* «Блик» — редкая искра на гребне. Не общий пульс: у каждой точки своя
+     фаза, поэтому вода не мигает целиком, а изредка вспыхивает то тут, то
+     там, как настоящая рябь под низким солнцем. Вспышка короткая: берём
+     высокую степень синуса, чтобы почти всё время она была погашена. */
+  if (twinkle) {
+    ctx.fillStyle = ink(0.95);
+    for (const part of modeState.parts) {
+      const glint = Math.sin(twinkle + part.phase);
+      if (glint < 0.986) continue;
+      const at = part.head;
+      ctx.fillRect(part.px[at] * S - 1, (1 - part.py[at]) * S - 1, 2, 2);
+    }
+  }
+
+  if (on('chips')) {
+    ctx.strokeStyle = ink(0.92);
+    ctx.lineWidth = Math.max(1.4, S * 0.0026);
+    ctx.beginPath();
+    for (const chip of modeState.chips) {
+      const reach = S * 0.014;
+      const dx = Math.cos(chip.turn) * reach;
+      const dy = Math.sin(chip.turn) * reach;
+      const x = chip.x * S;
+      const y = (1 - chip.y) * S;
+      ctx.moveTo(x - dx, y - dy);
+      ctx.lineTo(x + dx, y + dy);
     }
     ctx.stroke();
+    ctx.lineWidth = Math.max(1, S * 0.0016);
   }
 
   if (on('body')) {
@@ -2202,7 +2309,7 @@ function drawSwirl() {
 
 MODES.swirl = {
   label: 'трассеры',
-  note: 'Вода здесь не поле, а рой: точки идут по течению и тянут за собой хвост из прошлых положений — получаются линии тока. Контур Л они встречают по-настоящему: сквозь грань не проходят, гасят нормальную составляющую и скользят вдоль. Обтекание держат источники, разложенные по самому контуру и подобранные так, чтобы сквозь каждую грань не шло ни капли, — иначе точки расходятся перед буквой и больше не сходятся, за кормой навсегда остаётся пустая труба. Поэтому и возмущение имеет форму буквы, а не окружности. Вихри никто не расставляет по расписанию: завихренность рождается на стенке, сходит с острых углов, и сила схода берётся из скорости у самой грани — у Л косая нога разгоняет сильнее прямой. Дальше вихри двигают друг друга сами: дорожка складывается из их взаимного вращения, а не из формулы. «Завихрение» задаёт, насколько охотно грань отдаёт вихрь; «симметрия» ставит вершину посередине, и обе ноги начинают срывать одинаково.',
+  note: 'Вода здесь не поле, а рой: точки идут по течению и тянут за собой хвост из прошлых положений — получаются линии тока. Контур Л они встречают по-настоящему: сквозь грань не проходят, гасят нормальную составляющую и скользят вдоль. Обтекание держат источники, разложенные по самому контуру и подобранные так, чтобы сквозь каждую грань не шло ни капли, — иначе точки расходятся перед буквой и больше не сходятся, за кормой навсегда остаётся пустая труба. Поэтому и возмущение имеет форму буквы, а не окружности. Вихри никто не расставляет по расписанию: завихренность рождается на стенке, сходит с острых углов, и сила схода берётся из скорости у самой грани — у Л косая нога разгоняет сильнее прямой. Дальше вихри двигают друг друга сами: дорожка складывается из их взаимного вращения, а не из формулы. «Завихрение» задаёт, насколько охотно грань отдаёт вихрь; «симметрия» ставит вершину посередине, и обе ноги начинают срывать одинаково. Три опции добавляют к рисунку по одной вещи и по умолчанию выключены: «угасание» гасит дальний конец хвоста, и линия читается направленной; «блик» изредка зажигает одиночную искру на гребне — у каждой точки своя фаза, поэтому вода не мигает целиком; «щепки» подмешивают в рой сорок с лишним отрезков, которые поворачиваются вместе с водой — угловая скорость плавающего тела равна половине завихренности, так что вихрь становится виден без единой стрелки.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
@@ -2213,6 +2320,9 @@ MODES.swirl = {
     { type: 'range', key: 'spread', label: 'раствор', min: 0.08, max: 0.34, step: 0.01, value: 0.2 },
     { type: 'toggle', key: 'body', label: 'буква', value: true },
     { type: 'toggle', key: 'even', label: 'симметрия', value: false },
+    { type: 'toggle', key: 'fade', label: 'угасание', value: false },
+    { type: 'toggle', key: 'spark', label: 'блик', value: false },
+    { type: 'toggle', key: 'chips', label: 'щепки', value: false },
   ],
   setup: setupSwirl,
   step: stepSwirl,
