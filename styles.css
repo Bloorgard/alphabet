@@ -204,13 +204,14 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
    постановки за нижний край: играть можно, а поставить клетку нечем.
    Холст остаётся квадратом сверху, панель ложится под ним в потоке. */
 @media (max-width: 560px) {
-  .letter-dialog:has(.ya-panel) { width: calc(100vw - 2 * var(--gap)); height: calc(100dvh - 2 * var(--gap)); aspect-ratio: auto; }
-  .letter-workspace:has(.ya-panel) { display: flex; flex-direction: column; gap: 12px; padding: 46px 6% 22px; overflow-y: auto; }
+  /* `bottom: 0` вместе с `height: auto` растянул бы окно на весь экран:
+     окно фиксированное, и заданы оба края. Отпускаем нижний — тогда высота
+     считается по содержимому, а окно держится по центру. */
+  .letter-dialog:has(.ya-panel) { top: 50%; bottom: auto; transform: translateY(-50%); width: calc(100vw - 2 * var(--gap)); height: auto; max-height: calc(100dvh - 2 * var(--gap)); aspect-ratio: auto; }
+  .letter-workspace:has(.ya-panel) { display: flex; flex-direction: column; gap: 12px; height: auto; padding: 46px 6% 22px; overflow-y: auto; }
   .letter-workspace:has(.ya-panel) #letter-canvas { flex: none; width: 100%; height: auto; aspect-ratio: 1 / 1; }
   .letter-workspace:has(.ya-panel) .ya-count { position: static; order: 2; }
-  /* Панель прижата к низу: холст сверху, воздух посередине, управление под
-     большим пальцем — телефон держат снизу. */
-  .letter-workspace:has(.ya-panel) .ya-panel { position: static; order: 3; width: auto; margin-top: auto; }
+  .letter-workspace:has(.ya-panel) .ya-panel { position: static; order: 3; width: auto; }
   .ya-panel { top: 72%; right: 6%; bottom: auto; left: 6%; width: auto; }
   /* Заголовки колонок съедают две строки из четырёх доступных: на телефоне
      и так понятно, что имена — это лидеры, а число — твой запас. */
