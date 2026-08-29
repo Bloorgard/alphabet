@@ -332,6 +332,15 @@ function labBuildGlobals() {
     labWriteHash();
   });
   labGroundButton.setAttribute('aria-pressed', 'false');
+  /* Примечание к механике бывает длинным и в узком окне отодвигает ползунки.
+     Сворачиваем его отсюда: кнопка живёт в общем ряду и переключается как
+     «фон». Состояние держим в памяти вкладки, а не в адресе — ключи в хеше
+     заняты инструментами режима, и «note» мог бы столкнуться с чьим-то. */
+  const noteButton = make('текст', () => {
+    document.body.toggleAttribute('data-quiet');
+    noteButton.setAttribute('aria-pressed', String(!document.body.hasAttribute('data-quiet')));
+  });
+  noteButton.setAttribute('aria-pressed', 'true');
   make('снимок', snapshot);
 }
 

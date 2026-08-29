@@ -180,6 +180,8 @@ body.lab footer {
 
 .tools output { min-width: 30px; }
 
+body.lab[data-quiet] #note { display: none; }
+
 #note {
   max-width: 650px;
   justify-self: end;
