@@ -12,7 +12,7 @@ import { joinPlayer, loadState, plural, putMark, renamePlayer } from '../wall.js
 const BOX = { x: 0.06, y: 0.14, size: 0.56 };
 /* На телефоне сцена — тот же квадрат, но панель уезжает под холст, поэтому
    холст поднимается и ужимается. Порог тот же, что у стилей. */
-const NARROW = { x: 0.2, y: 0.1, size: 0.6 };
+const NARROW = { x: 0.06, y: 0.06, size: 0.88 };
 const GRID = YA_MASK.length;
 
 /* Клетки контура: те, у кого хотя бы один сосед снаружи буквы. */
@@ -133,7 +133,9 @@ export function mountYa(workspace) {
     canvas.height = Math.round(bounds.height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, size, bounds.height);
-    box = size < 520 ? NARROW : BOX;
+    /* Порог тот же, что у стилей: там холст становится отдельным квадратом
+       во всю ширину, и буква обязана занять его целиком. */
+    box = window.innerWidth <= 560 ? NARROW : BOX;
     if (!state) return;
 
     const cells = grid();
@@ -201,10 +203,17 @@ export function mountYa(workspace) {
     return `занято${owner ? `: ${owner}` : ''}${day}`;
   }
 
+  /* Результат приходит от буквы как есть: у Ё это пройденная дистанция с
+     дробью в семнадцать знаков. В таблице она не значит ничего, кроме шума,
+     и вдобавок выталкивает строку за край телефона. */
+  function score(value) {
+    return Number.isInteger(value) ? String(value) : String(Math.round(value));
+  }
+
   /* Строка таблицы: слева место или буква, дальше имя и результат. */
   function row(head, name, value, picked, letter) {
     const tag = letter ? `data-letter-top="${letter}"` : '';
-    return `<li class="ya-row${picked ? ' is-picked' : ''}"><button type="button" data-name="${name}" ${tag}><b>${head}</b><span>${name}</span><i>${value}</i></button></li>`;
+    return `<li class="ya-row${picked ? ' is-picked' : ''}"><button type="button" data-name="${name}" ${tag}><b>${head}</b><span>${name}</span><i>${score(value)}</i></button></li>`;
   }
 
   function render() {

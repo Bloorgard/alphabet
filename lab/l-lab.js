@@ -5,7 +5,7 @@
    раствор между кончиками ног. Поэтому механики здесь крутят раствор, а не
    контур: буква не нарисована поверх сцены, а получена из её устройства.
 
-   Пять подходов:
+   Тринадцать подходов:
 
      корень     вершина как развилка: справа стержень идёт своим курсом,
                 слева отходит боковой, и каждая нога кончается новой Л
@@ -17,9 +17,20 @@
                 обе стоят на земле в читаемом растворе
      откос      песок ложится под своим углом и упирается в опалубку;
                 буква не нарисована, а насыпана
+     эхо        импульс входит в одну ногу, отражается в вершине и ловится на
+                другой в нужный момент
+     развилка   вершина переключает поток между двумя ногами, а цель меняется
+                после каждого выпуска
+     река       Л — неподвижный нос лодки; течение и отражённый свет живут в
+                процедурном поле воды
+     толща      чёрная вода с полем высот; курсор продавливает поверхность
+     нити       серебряные волокна течения расходятся и закручиваются за мышью
+     рябь       несколько волновых фронтов интерферируют в следе курсора
+     ascii      поле воды набрано знаками, которые переписывает движение
+     пиксели    низкое разрешение и ступенчатый свет превращают воду в спрайт
 
-   Красный обозначает событие, у каждой механики своё: вырождение, остаток
-   меньше раствора, поехавшая нога, шпагат, осыпание. */
+   Красный в механиках с ошибкой обозначает событие: вырождение, остаток меньше
+   раствора, поехавшая нога, шпагат, осыпание. */
 
 const TAU = Math.PI * 2;
 
@@ -251,6 +262,1023 @@ function arch(from, to, lift, alpha) {
   ctx.lineJoin = 'round';
   ctx.stroke();
 }
+
+/* ---------- река ---------- */
+
+/* Угол неподвижен. Вода отрисовывается настоящим полем высот в WebGL:
+   несколько масштабов волн дают нормаль, а нормаль — узкий отражённый свет. */
+
+const RIVER_VERTEX = `
+attribute vec2 a_position;
+varying vec2 v_uv;
+
+void main() {
+  v_uv = a_position * 0.5 + 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}
+`;
+
+const RIVER_FRAGMENT = `
+precision highp float;
+
+varying vec2 v_uv;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform float u_flow;
+uniform float u_glint;
+uniform float u_exposure;
+uniform float u_wake;
+uniform float u_dark;
+
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+    mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+
+float heightField(vec2 p) {
+  float t = u_time * u_flow;
+  vec2 drift = vec2(t * 0.018, t * 0.085);
+  vec2 q = p + drift;
+  vec2 nose = vec2(v_uv.x - 0.5, v_uv.y - 0.64);
+  float ahead = smoothstep(-0.015, 0.065, nose.y);
+  float bowRadius = length(vec2(nose.x * 1.35, nose.y * 0.72));
+  float bowInfluence = exp(-bowRadius * 5.8) * ahead;
+  float bowSplit = smoothstep(-0.11, 0.11, nose.x) * 2.0 - 1.0;
+  q.x += bowSplit * bowInfluence * 0.086;
+  q.y -= bowInfluence * 0.030;
+  float warp = noise(vec2(q.x * 1.7 + t * 0.025, q.y * 0.85 - t * 0.035)) - 0.5;
+
+  float h = 0.0;
+  h += sin(dot(q, vec2(2.6, 17.0)) + warp * 3.2 + t * 0.58) * 0.52;
+  h += sin(dot(q, vec2(-5.0, 33.0)) - warp * 2.1 - t * 0.76) * 0.22;
+  h += sin(dot(q, vec2(11.0, 57.0)) + t * 1.10 + noise(q * 3.2) * 1.3) * 0.08;
+
+  float bowMask = ahead * (1.0 - smoothstep(0.018, 0.38, bowRadius));
+  h += sin(bowRadius * 96.0 - t * 2.8) * bowMask * 0.22 * u_wake;
+
+  float hullDepth = clamp((0.64 - v_uv.y) / 0.70, 0.0, 1.0);
+  float hullHalf = hullDepth * 0.31;
+  float hullSide = abs(v_uv.x - 0.5) - hullHalf;
+  float edgeDistance = abs(hullSide);
+  float outside = smoothstep(-0.008, 0.026, hullSide);
+  float edgeMask = exp(-edgeDistance * 30.0) * smoothstep(0.02, 0.16, hullDepth) * outside;
+  h += sin(edgeDistance * 92.0 + hullDepth * 11.0 - t * 2.3
+    + noise(vec2(hullDepth * 8.0, edgeDistance * 21.0)) * 1.4
+  ) * edgeMask * 0.16 * u_wake;
+  return h;
+}
+
+void main() {
+  vec2 uv = v_uv;
+  vec2 p = (uv - 0.5) * vec2(u_resolution.x / u_resolution.y, 1.0);
+  float e = 1.35 / u_resolution.y;
+  float elevation = heightField(p);
+  float hx = heightField(p + vec2(e, 0.0)) - heightField(p - vec2(e, 0.0));
+  float hy = heightField(p + vec2(0.0, e)) - heightField(p - vec2(0.0, e));
+  vec3 normal = normalize(vec3(-hx * 2.5, -hy * 2.5, 0.22));
+
+  vec3 light = normalize(vec3(-0.45, 0.38, 0.81));
+  vec3 view = vec3(0.0, 0.0, 1.0);
+  float diffuse = max(dot(normal, light), 0.0);
+  vec3 halfway = normalize(light + view);
+  float specular = pow(max(dot(normal, halfway), 0.0), 118.0);
+  float fresnel = pow(1.0 - max(dot(normal, view), 0.0), 4.0);
+  float crest = pow(clamp(elevation * 0.34 + 0.5, 0.0, 1.0), 16.0) * 0.078;
+  float silver = specular * 0.62 * u_glint + fresnel * 0.046 + crest;
+  float grain = (hash(gl_FragCoord.xy + floor(u_time * 17.0)) - 0.5) * 0.005;
+  float vignette = 1.0 - dot(uv - 0.5, uv - 0.5) * 0.34;
+
+  vec2 boat = vec2(uv.x - 0.5, uv.y - 0.64);
+  float pressureAhead = smoothstep(-0.01, 0.055, boat.y);
+  float pressure = exp(-length(vec2(boat.x * 1.5, boat.y * 0.8)) * 10.0) * pressureAhead;
+  float depth = clamp((0.64 - uv.y) / 0.70, 0.0, 1.0);
+  float side = abs(uv.x - 0.5) - depth * 0.31;
+  float slip = exp(-abs(side) * 46.0) * smoothstep(0.02, 0.18, depth) * smoothstep(-0.006, 0.022, side);
+  float wakeTime = u_time * u_flow;
+  float nosePressure = exp(-length(vec2(boat.x * 1.75, boat.y * 0.82)) * 15.0)
+    * smoothstep(-0.018, 0.055, boat.y);
+  float sideGate = smoothstep(0.015, 0.14, depth);
+  float sideRidgeDistance = 0.010 + depth * 0.020;
+  float sideRidge = exp(-abs(side - sideRidgeDistance) * 108.0)
+    * sideGate * smoothstep(-0.004, 0.012, side);
+  float shearEnvelope = exp(-max(side, 0.0) * 13.0) * sideGate
+    * smoothstep(-0.004, 0.020, side);
+  float shearPhase = side * 70.0 - depth * 14.0 - wakeTime * 3.1
+    + noise(vec2(depth * 6.0, abs(boat.x) * 9.0)) * 1.7;
+  float shearCrest = pow(max(sin(shearPhase), 0.0), 6.0) * shearEnvelope;
+  float wakeLight = nosePressure * 0.055 + sideRidge * 0.080 + shearCrest * 0.060;
+
+  float darkWater = (0.016 + diffuse * 0.032 + silver + grain
+    + pressure * 0.046 * u_glint + slip * 0.032 * u_glint
+    + wakeLight * u_wake) * vignette;
+  darkWater = min(1.0 - exp(-darkWater * u_exposure), 0.78);
+  vec3 darkScene = vec3(darkWater);
+  vec3 paperScene = vec3(0.945 - darkWater * 1.65);
+  gl_FragColor = vec4(mix(paperScene, darkScene, u_dark), 1.0);
+}
+`;
+
+function riverShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
+  return shader;
+}
+
+function riverWater() {
+  const surface = document.createElement('canvas');
+  const gl = surface.getContext('webgl', {
+    alpha: false,
+    antialias: false,
+    premultipliedAlpha: false,
+    preserveDrawingBuffer: true,
+  });
+  const program = gl.createProgram();
+  gl.attachShader(program, riverShader(gl, gl.VERTEX_SHADER, RIVER_VERTEX));
+  gl.attachShader(program, riverShader(gl, gl.FRAGMENT_SHADER, RIVER_FRAGMENT));
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1, 1, -1, -1, 1,
+    -1, 1, 1, -1, 1, 1,
+  ]), gl.STATIC_DRAW);
+  gl.useProgram(program);
+  const position = gl.getAttribLocation(program, 'a_position');
+  gl.enableVertexAttribArray(position);
+  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+
+  return {
+    surface,
+    gl,
+    program,
+    resolution: gl.getUniformLocation(program, 'u_resolution'),
+    time: gl.getUniformLocation(program, 'u_time'),
+    flow: gl.getUniformLocation(program, 'u_flow'),
+    glint: gl.getUniformLocation(program, 'u_glint'),
+    exposure: gl.getUniformLocation(program, 'u_exposure'),
+    wake: gl.getUniformLocation(program, 'u_wake'),
+    dark: gl.getUniformLocation(program, 'u_dark'),
+  };
+}
+
+function drawRiverWater(state) {
+  const water = state.water;
+  const size = Math.max(1, Math.round(S * dpr));
+  if (water.surface.width !== size || water.surface.height !== size) {
+    water.surface.width = size;
+    water.surface.height = size;
+  }
+
+  water.gl.viewport(0, 0, size, size);
+  water.gl.useProgram(water.program);
+  water.gl.uniform2f(water.resolution, size, size);
+  water.gl.uniform1f(water.time, state.time);
+  water.gl.uniform1f(water.flow, num('flow'));
+  water.gl.uniform1f(water.glint, num('glint'));
+  water.gl.uniform1f(water.exposure, num('exposure'));
+  water.gl.uniform1f(water.wake, num('wake'));
+  water.gl.uniform1f(water.dark, ground === 'ink' ? 1 : 0);
+  water.gl.drawArrays(water.gl.TRIANGLES, 0, 6);
+  ctx.drawImage(water.surface, 0, 0, S, S);
+}
+
+function drawRiverBoat() {
+  ctx.fillStyle = ink(0.97);
+  ctx.beginPath();
+  ctx.moveTo(0.19 * S, 1.06 * S);
+  ctx.lineTo(0.5 * S, 0.36 * S);
+  ctx.lineTo(0.81 * S, 1.06 * S);
+  ctx.closePath();
+  ctx.fill();
+}
+
+MODES.river = {
+  label: 'река',
+  note: 'Белый нос неподвижен. Течение идёт ему навстречу, сжимается перед вершиной и расходится вдоль двух граней. Вид сверху.',
+  cursor: 'default',
+  tools: [
+    { type: 'range', key: 'flow', label: 'течение', min: 0.2, max: 1.5, step: 0.05, value: 0.65 },
+    { type: 'range', key: 'glint', label: 'свет', min: 0.25, max: 1.5, step: 0.05, value: 0.8 },
+    { type: 'range', key: 'exposure', label: 'яркость', min: 0.5, max: 4, step: 0.1, value: 2.2 },
+    { type: 'range', key: 'wake', label: 'след', min: 0, max: 2, step: 0.05, value: 1.1 },
+  ],
+
+  setup() {
+    modeState.time = 0;
+    modeState.water = riverWater();
+  },
+
+  step() {
+    modeState.time += STEP;
+  },
+
+  draw() {
+    drawRiverWater(modeState);
+    drawRiverBoat();
+  },
+};
+
+/* ---------- три воды ---------- */
+
+const WATER_STUDY_COMMON = `
+precision highp float;
+
+varying vec2 v_uv;
+uniform vec2 u_resolution;
+uniform vec2 u_mouse;
+uniform vec2 u_velocity;
+uniform float u_time;
+uniform float u_dark;
+uniform float u_speed;
+uniform float u_amount;
+uniform float u_detail;
+uniform vec4 u_trails[8];
+
+float studyHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float studyNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(studyHash(i), studyHash(i + vec2(1.0, 0.0)), u.x),
+    mix(studyHash(i + vec2(0.0, 1.0)), studyHash(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+
+float studyFbm(vec2 p) {
+  float f = 0.0;
+  f += studyNoise(p) * 0.56;
+  p = mat2(1.62, 1.18, -1.18, 1.62) * p;
+  f += studyNoise(p) * 0.28;
+  p = mat2(1.71, -1.04, 1.04, 1.71) * p;
+  f += studyNoise(p) * 0.14;
+  return f;
+}
+
+vec2 studyPoint(vec2 uv) {
+  return (uv - 0.5) * vec2(u_resolution.x / u_resolution.y, 1.0);
+}
+
+vec2 studyTrailPoint(vec2 uv) {
+  return (uv - 0.5) * vec2(u_resolution.x / u_resolution.y, 1.0);
+}
+
+vec3 studyScene(float light) {
+  float vignette = 1.0 - dot(v_uv - 0.5, v_uv - 0.5) * 0.34;
+  float darkLight = clamp(light * vignette, 0.0, 0.92);
+  vec3 darkScene = vec3(darkLight);
+  vec3 paperScene = vec3(0.95 - darkLight * 1.18);
+  return mix(paperScene, darkScene, u_dark);
+}
+`;
+
+const WATER_DEPTH_FRAGMENT = `${WATER_STUDY_COMMON}
+float depthSurface(vec2 p) {
+  float t = u_time * u_speed;
+  vec2 q = p + vec2(t * 0.025, t * 0.072);
+  float warp = studyFbm(q * 1.75 + vec2(t * 0.035, -t * 0.02)) - 0.5;
+  float h = sin(dot(q, vec2(3.1, 17.0)) + warp * 3.7 + t * 0.52) * 0.48;
+  h += sin(dot(q, vec2(-6.4, 31.0)) - warp * 2.3 - t * 0.73) * 0.22;
+  h += sin(dot(q, vec2(12.0, 54.0)) + t * 1.06) * 0.07 * u_detail;
+
+  for (int i = 0; i < 8; i++) {
+    vec4 trail = u_trails[i];
+    vec2 d = p - studyTrailPoint(trail.xy);
+    float life = exp(-trail.z * 0.72) * trail.w;
+    float radius = trail.z * (0.10 + trail.w * 0.055);
+    float front = exp(-abs(length(d) - radius) * 27.0);
+    h += sin((length(d) - radius) * 72.0) * front * life * 0.23 * u_amount;
+  }
+
+  vec2 mouseDelta = p - studyPoint(u_mouse);
+  float force = min(length(u_velocity) * 28.0, 1.0) * u_amount;
+  h -= exp(-dot(mouseDelta, mouseDelta) * 58.0) * force * 0.52;
+  return h;
+}
+
+void main() {
+  vec2 p = studyPoint(v_uv);
+  float e = 1.4 / u_resolution.y;
+  float h = depthSurface(p);
+  float hx = depthSurface(p + vec2(e, 0.0)) - depthSurface(p - vec2(e, 0.0));
+  float hy = depthSurface(p + vec2(0.0, e)) - depthSurface(p - vec2(0.0, e));
+  vec3 normal = normalize(vec3(-hx * 2.8, -hy * 2.8, 0.18));
+  vec3 lightDir = normalize(vec3(-0.48, 0.36, 0.80));
+  vec3 halfDir = normalize(lightDir + vec3(0.0, 0.0, 1.0));
+  float diffuse = max(dot(normal, lightDir), 0.0);
+  float specular = pow(max(dot(normal, halfDir), 0.0), 132.0);
+  float fresnel = pow(1.0 - max(normal.z, 0.0), 4.0);
+  float crest = pow(clamp(h * 0.34 + 0.48, 0.0, 1.0), 14.0);
+  float grain = (studyHash(gl_FragCoord.xy + floor(u_time * 13.0)) - 0.5) * 0.006;
+  float shade = 0.018 + diffuse * 0.030 + specular * 0.72
+    + fresnel * 0.052 + crest * 0.065 + grain;
+  gl_FragColor = vec4(studyScene(1.0 - exp(-shade * u_detail)), 1.0);
+}
+`;
+
+const WATER_THREADS_FRAGMENT = `${WATER_STUDY_COMMON}
+void main() {
+  vec2 p = studyPoint(v_uv);
+  float t = u_time * u_speed;
+  vec2 q = p;
+  float trailLight = 0.0;
+  float trailCore = 0.0;
+
+  for (int i = 0; i < 8; i++) {
+    vec4 trail = u_trails[i];
+    vec2 d = q - studyTrailPoint(trail.xy);
+    float d2 = dot(d, d) + 0.003;
+    float life = exp(-trail.z * 0.58) * trail.w * u_amount;
+    vec2 tangent = vec2(-d.y, d.x) / sqrt(d2);
+    q += tangent * exp(-d2 * 20.0) * life * 0.064;
+    q += normalize(d + vec2(0.0001)) * exp(-d2 * 42.0) * life * 0.028;
+    float ring = trail.z * (0.075 + trail.w * 0.035);
+    trailLight += exp(-abs(sqrt(d2) - ring) * 34.0) * life;
+    trailCore += exp(-d2 * 54.0) * life;
+  }
+
+  vec2 mouseDelta = q - studyPoint(u_mouse);
+  float mouseForce = min(length(u_velocity) * 24.0, 1.0) * u_amount;
+  q += vec2(-u_velocity.y, u_velocity.x) * exp(-dot(mouseDelta, mouseDelta) * 48.0) * 1.6;
+
+  float broad = studyFbm(vec2(q.x * 1.35 + t * 0.06, q.y * 2.1 - t * 0.08));
+  q.x += (broad - 0.5) * 0.18;
+  float flowA = q.y * (19.0 + u_detail * 9.0) + q.x * 4.0
+    + studyFbm(q * 3.2 + vec2(t * 0.08, -t * 0.15)) * 7.2;
+  float flowB = q.y * (37.0 + u_detail * 12.0) - q.x * 8.0
+    + studyNoise(q * 8.0 - vec2(t * 0.11, t * 0.24)) * 4.8;
+  float threadA = pow(1.0 - abs(sin(flowA)), 13.0);
+  float threadB = pow(1.0 - abs(sin(flowB)), 21.0);
+  float veil = smoothstep(0.34, 0.78, broad) * 0.055;
+  float wake = trailLight * 0.048 + mouseForce * exp(-dot(mouseDelta, mouseDelta) * 55.0) * 0.08;
+  float grain = (studyHash(gl_FragCoord.xy + floor(t * 19.0)) - 0.5) * 0.008;
+  float shade = 0.014 + veil + threadA * 0.27 + threadB * 0.13 + wake + grain;
+  shade *= 1.0 - min(trailCore * 0.52, 0.68);
+  shade += wake;
+  gl_FragColor = vec4(studyScene(1.0 - exp(-shade * 1.55)), 1.0);
+}
+`;
+
+const WATER_RIPPLE_FRAGMENT = `${WATER_STUDY_COMMON}
+void main() {
+  vec2 p = studyPoint(v_uv);
+  float t = u_time * u_speed;
+  vec2 q = p;
+  float distanceA = length(q - vec2(-0.72, 0.24));
+  float distanceB = length(q - vec2(0.66, -0.34));
+  float distanceC = length(q - vec2(0.38, 0.78));
+  float field = sin(distanceA * (21.0 + u_detail * 9.0) - t * 0.78) * 0.30;
+  field += sin(distanceB * (18.0 + u_detail * 11.0) + t * 0.56) * 0.25;
+  field += sin(distanceC * (26.0 + u_detail * 7.0) - t * 0.41) * 0.14;
+  field += (studyFbm(q * 3.0 + vec2(t * 0.04, -t * 0.06)) - 0.5) * 0.55;
+  float memory = 0.0;
+
+  for (int i = 0; i < 8; i++) {
+    vec4 trail = u_trails[i];
+    vec2 d = q - studyTrailPoint(trail.xy);
+    float distanceToTrail = length(d);
+    float life = exp(-trail.z * 0.46) * trail.w * u_amount;
+    float radius = trail.z * (0.12 + trail.w * 0.07);
+    float envelope = exp(-abs(distanceToTrail - radius) * 8.5);
+    float wave = sin((distanceToTrail - radius) * (48.0 + u_detail * 25.0));
+    field += wave * envelope * life * 0.68;
+    memory += pow(max(wave, 0.0), 8.0) * envelope * life;
+  }
+
+  vec2 mouseDelta = q - studyPoint(u_mouse);
+  float force = min(length(u_velocity) * 25.0, 1.0) * u_amount;
+  float lens = exp(-dot(mouseDelta, mouseDelta) * 35.0) * force;
+  field += sin(length(mouseDelta) * 64.0 - t * 3.2) * lens * 0.75;
+
+  float soft = smoothstep(0.02, 1.35, abs(field));
+  float crest = pow(smoothstep(0.34, 1.28, abs(field)), 3.0);
+  float crossings = pow(max(0.0, 1.0 - abs(field) * 2.6), 10.0);
+  float grain = (studyHash(gl_FragCoord.xy + floor(t * 15.0)) - 0.5) * 0.006;
+  float shade = 0.012 + soft * 0.065 + crest * 0.25 + crossings * 0.045
+    + min(memory, 1.0) * 0.052 + grain;
+  gl_FragColor = vec4(studyScene(1.0 - exp(-shade * 1.45)), 1.0);
+}
+`;
+
+const WATER_PIXEL_FRAGMENT = `${WATER_STUDY_COMMON}
+void main() {
+  float detailMix = clamp((u_detail - 0.55) / 1.65, 0.0, 1.0);
+  float grid = floor(mix(38.0, 132.0, detailMix));
+  vec2 cell = floor(v_uv * grid);
+  vec2 uv = (cell + 0.5) / grid;
+  vec2 p = studyPoint(uv);
+  float t = u_time * u_speed;
+  float warp = studyFbm(p * 2.4 + vec2(t * 0.05, -t * 0.08)) - 0.5;
+  float field = sin(dot(p, vec2(3.0, 18.0)) + warp * 4.2 + t * 0.72) * 0.42;
+  field += sin(dot(p, vec2(-9.0, 31.0)) - warp * 2.1 - t * 0.54) * 0.22;
+  float impulse = 0.0;
+
+  for (int i = 0; i < 8; i++) {
+    vec4 trail = u_trails[i];
+    vec2 d = p - studyTrailPoint(trail.xy);
+    float life = exp(-trail.z * 0.62) * trail.w * u_amount;
+    float radius = trail.z * (0.11 + trail.w * 0.06);
+    float front = exp(-abs(length(d) - radius) * 18.0);
+    float wave = sin((length(d) - radius) * 58.0);
+    field += wave * front * life * 0.72;
+    impulse += pow(max(wave, 0.0), 5.0) * front * life;
+  }
+
+  vec2 mouseDelta = p - studyPoint(u_mouse);
+  float force = min(length(u_velocity) * 27.0, 1.0) * u_amount;
+  field += sin(length(mouseDelta) * 48.0 - t * 3.0)
+    * exp(-dot(mouseDelta, mouseDelta) * 28.0) * force;
+
+  float ridge = 1.0 - smoothstep(0.035, 0.19, abs(field - 0.16));
+  float trough = 1.0 - smoothstep(0.025, 0.14, abs(field + 0.24));
+  float foam = pow(smoothstep(0.30, 0.96, abs(field)), 2.0);
+  float dither = (mod(cell.x, 2.0) * 2.0 + mod(cell.y, 2.0)) * 0.025 - 0.038;
+  float value = clamp(0.055 + ridge * 0.52 + trough * 0.20 + foam * 0.34
+    + min(impulse, 1.0) * 0.20 + dither, 0.0, 0.999);
+  float levels = 0.035 + floor(value * 4.0) / 4.0 * 0.72;
+  gl_FragColor = vec4(studyScene(levels), 1.0);
+}
+`;
+
+function waterStudySurface(fragment) {
+  const surface = document.createElement('canvas');
+  const gl = surface.getContext('webgl', {
+    alpha: false,
+    antialias: false,
+    premultipliedAlpha: false,
+    preserveDrawingBuffer: true,
+  });
+  const program = gl.createProgram();
+  gl.attachShader(program, riverShader(gl, gl.VERTEX_SHADER, RIVER_VERTEX));
+  gl.attachShader(program, riverShader(gl, gl.FRAGMENT_SHADER, fragment));
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1, 1, -1, -1, 1,
+    -1, 1, 1, -1, 1, 1,
+  ]), gl.STATIC_DRAW);
+  gl.useProgram(program);
+  const position = gl.getAttribLocation(program, 'a_position');
+  gl.enableVertexAttribArray(position);
+  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+
+  return {
+    surface,
+    gl,
+    program,
+    resolution: gl.getUniformLocation(program, 'u_resolution'),
+    mouse: gl.getUniformLocation(program, 'u_mouse'),
+    velocity: gl.getUniformLocation(program, 'u_velocity'),
+    time: gl.getUniformLocation(program, 'u_time'),
+    dark: gl.getUniformLocation(program, 'u_dark'),
+    speed: gl.getUniformLocation(program, 'u_speed'),
+    amount: gl.getUniformLocation(program, 'u_amount'),
+    detail: gl.getUniformLocation(program, 'u_detail'),
+    trails: gl.getUniformLocation(program, 'u_trails[0]'),
+  };
+}
+
+function setupWaterMotion() {
+  modeState.time = 0;
+  modeState.mouse = {
+    x: pointer.seen ? pointer.x : 0.5,
+    y: pointer.seen ? 1 - pointer.y : 0.5,
+  };
+  modeState.velocity = { x: 0, y: 0 };
+  modeState.trailCursor = 0;
+  modeState.trails = Array.from({ length: 8 }, () => ({ x: 0.5, y: 0.5, age: 20, strength: 0 }));
+  modeState.lastTrail = { ...modeState.mouse };
+}
+
+function setupWaterStudy(fragment) {
+  setupWaterMotion();
+  modeState.surface = waterStudySurface(fragment);
+}
+
+function moveWaterStudy() {
+  const x = clamp(pointer.x, 0, 1);
+  const y = clamp(1 - pointer.y, 0, 1);
+  const dx = x - modeState.mouse.x;
+  const dy = y - modeState.mouse.y;
+  const distance = Math.hypot(dx, dy);
+  modeState.velocity.x = lerp(modeState.velocity.x, dx, 0.72);
+  modeState.velocity.y = lerp(modeState.velocity.y, dy, 0.72);
+  modeState.mouse.x = x;
+  modeState.mouse.y = y;
+
+  const trailDistance = Math.hypot(x - modeState.lastTrail.x, y - modeState.lastTrail.y);
+  if (trailDistance < 0.016 || distance < 0.0015) return;
+  modeState.trails[modeState.trailCursor] = {
+    x,
+    y,
+    age: 0,
+    strength: clamp(distance * 32, 0.22, 1),
+  };
+  modeState.trailCursor = (modeState.trailCursor + 1) % modeState.trails.length;
+  modeState.lastTrail.x = x;
+  modeState.lastTrail.y = y;
+}
+
+function stepWaterStudy() {
+  modeState.time += STEP;
+  const drag = Math.exp(-STEP * 7.5);
+  modeState.velocity.x *= drag;
+  modeState.velocity.y *= drag;
+  for (const trail of modeState.trails) trail.age += STEP;
+}
+
+function drawWaterStudy() {
+  const water = modeState.surface;
+  const size = Math.max(1, Math.round(S * dpr));
+  if (water.surface.width !== size || water.surface.height !== size) {
+    water.surface.width = size;
+    water.surface.height = size;
+  }
+
+  const packedTrails = new Float32Array(modeState.trails.flatMap((trail) => [
+    trail.x, trail.y, trail.age, trail.strength,
+  ]));
+  water.gl.viewport(0, 0, size, size);
+  water.gl.useProgram(water.program);
+  water.gl.uniform2f(water.resolution, size, size);
+  water.gl.uniform2f(water.mouse, modeState.mouse.x, modeState.mouse.y);
+  water.gl.uniform2f(water.velocity, modeState.velocity.x, modeState.velocity.y);
+  water.gl.uniform1f(water.time, modeState.time);
+  water.gl.uniform1f(water.dark, ground === 'ink' ? 1 : 0);
+  water.gl.uniform1f(water.speed, num('speed'));
+  water.gl.uniform1f(water.amount, num('amount'));
+  water.gl.uniform1f(water.detail, num('detail'));
+  water.gl.uniform4fv(water.trails, packedTrails);
+  water.gl.drawArrays(water.gl.TRIANGLES, 0, 6);
+  ctx.drawImage(water.surface, 0, 0, S, S);
+}
+
+function waterStudyMode(fragment, note, labels, values) {
+  return {
+    label: labels.mode,
+    note,
+    cursor: 'crosshair',
+    tools: [
+      { type: 'range', key: 'speed', label: labels.speed, min: 0.15, max: 1.8, step: 0.05, value: values.speed },
+      { type: 'range', key: 'amount', label: labels.amount, min: 0, max: 2, step: 0.05, value: values.amount },
+      { type: 'range', key: 'detail', label: labels.detail, min: 0.55, max: 2.2, step: 0.05, value: values.detail },
+    ],
+    setup() { setupWaterStudy(fragment); },
+    onMove: moveWaterStudy,
+    onDown: moveWaterStudy,
+    step: stepWaterStudy,
+    draw: drawWaterStudy,
+  };
+}
+
+MODES.depth = waterStudyMode(
+  WATER_DEPTH_FRAGMENT,
+  'Вода как тёмная толща. Двигай мышью: поверхность продавливается, затем от движения расходятся затухающие фронты.',
+  { mode: 'толща', speed: 'дрейф', amount: 'отклик', detail: 'свет' },
+  { speed: 0.62, amount: 1.15, detail: 1.3 },
+);
+
+MODES.threads = waterStudyMode(
+  WATER_THREADS_FRAGMENT,
+  'Серебряные нити показывают направление течения. Курсор раздвигает их, закручивает и оставляет короткую память движения.',
+  { mode: 'нити', speed: 'течение', amount: 'воронка', detail: 'плотность' },
+  { speed: 0.72, amount: 1.05, detail: 1.2 },
+);
+
+MODES.ripple = waterStudyMode(
+  WATER_RIPPLE_FRAGMENT,
+  'Рябь складывается из встречных волн. Каждое движение мыши запускает новый фронт, который сталкивается с предыдущими.',
+  { mode: 'рябь', speed: 'ход', amount: 'память', detail: 'частота' },
+  { speed: 0.68, amount: 1.1, detail: 1.05 },
+);
+
+function drawAsciiWater() {
+  const detailMix = clamp((num('detail') - 0.55) / 1.65, 0, 1);
+  const cell = Math.round(lerp(22, 8, detailMix));
+  const cols = Math.ceil(S / cell);
+  const rows = Math.ceil(S / cell);
+  const time = modeState.time * num('speed');
+  const circle = { x: 0.5, y: 0.5, radius: num('radius') };
+  const palette = on('foam') ? '      .,:;~+*#%@' : ' .,-~:;=+*#%@';
+
+  ctx.save();
+  ctx.fillStyle = ink(1);
+  ctx.font = `${Math.round(cell * 1.04)}px "DM Mono", monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  for (let row = 0; row < rows; row += 1) {
+    const y = (row + 0.5) * cell;
+    const v = 1 - y / S;
+    for (let col = 0; col < cols; col += 1) {
+      const x = (col + 0.5) * cell;
+      const u = x / S;
+      const circleDx = u - circle.x;
+      const circleDy = v - circle.y;
+      const circleDistance2 = circleDx * circleDx + circleDy * circleDy;
+      if (circleDistance2 < circle.radius * circle.radius) continue;
+
+      /* Потенциальное течение вокруг цилиндра: поток идёт вниз экрана,
+         перед кругом сжимается, по бокам ускоряется и смыкается позади. */
+      const influence = circle.radius * circle.radius / Math.max(circleDistance2, 0.0001);
+      const flowU = circle.x + circleDx * (1 - influence);
+      const flowV = circle.y + circleDy * (1 + influence);
+      const circleDistance4 = circleDistance2 * circleDistance2;
+      let flowVelocityX = 2 * circle.radius * circle.radius * circleDx * circleDy / circleDistance4;
+      let flowVelocityY = -(1 + circle.radius * circle.radius
+        * (circleDx * circleDx - circleDy * circleDy) / circleDistance4);
+      let wakeShadow = 0;
+      let wakeEnvelope = 0;
+      let field = Math.sin(flowV * 22 + flowU * 2.2 + time * 0.92) * 0.35;
+      field += Math.sin(flowV * 38 - flowU * 6.5 + time * 0.64) * 0.18;
+      field += Math.sin(flowV * 15 + flowU * 8.0 + time * 0.37) * 0.09;
+
+      const flowSpeed = Math.hypot(flowVelocityX, flowVelocityY);
+      const surfaceDistance = Math.sqrt(circleDistance2) - circle.radius;
+      const nearCircle = Math.exp(-surfaceDistance * 18);
+      const pressure = circleDy > 0 ? Math.max(0, 1 - flowSpeed) * nearCircle : 0;
+      field += pressure * 0.46 + (flowSpeed - 1) * nearCircle * 0.12;
+
+      /* Ниже круга — след тела, которое относительно воды движется вверх:
+         две сдвиговые дорожки и медленно виляющая сердцевина. */
+      const downstream = Math.max(0, -circleDy - circle.radius);
+      if (downstream > 0) {
+        const wakeWidth = circle.radius * 0.7 + downstream * 0.20;
+        const edgeDistance = Math.abs(Math.abs(circleDx) - wakeWidth);
+        const edgeWake = Math.exp(-edgeDistance * 34) * Math.exp(-downstream * 1.4);
+        const wakeCenter = Math.sin(downstream * 31 - time * 3.2) * circle.radius * 0.36;
+        const coreDistance = Math.abs(circleDx - wakeCenter);
+        const coreWake = Math.exp(-coreDistance * 19) * Math.exp(-downstream * 2.0);
+        wakeEnvelope = Math.exp(-Math.abs(circleDx) / (circle.radius + downstream * 0.24))
+          * Math.exp(-downstream * 1.45);
+        flowVelocityX += Math.sin(downstream * 31 - time * 3.2) * wakeEnvelope * 0.78;
+        flowVelocityY *= 1 - wakeEnvelope * 0.66;
+        wakeShadow = wakeEnvelope * 0.24;
+        field += Math.sin(downstream * 43 - time * 3.5 + Math.sign(circleDx) * 0.8) * edgeWake * 0.48;
+        field += Math.sin(downstream * 34 - time * 2.7) * coreWake * 0.22;
+      }
+
+      for (const trail of modeState.trails) {
+        const dx = u - trail.x;
+        const dy = v - trail.y;
+        const distance = Math.hypot(dx, dy);
+        const life = Math.exp(-trail.age * 0.58) * trail.strength * num('amount');
+        const radius = trail.age * (0.11 + trail.strength * 0.055);
+        const front = Math.exp(-Math.abs(distance - radius) * 17);
+        field += Math.sin((distance - radius) * 54) * front * life * 0.9;
+      }
+
+      const mouseDistance = Math.hypot(u - modeState.mouse.x, v - modeState.mouse.y);
+      const force = Math.min(Math.hypot(modeState.velocity.x, modeState.velocity.y) * 26, 1) * num('amount');
+      field += Math.sin(mouseDistance * 48 - time * 3) * Math.exp(-mouseDistance * mouseDistance * 32) * force;
+      const level = clamp(0.5 + field * 0.62 - wakeShadow, 0, 1);
+      const index = Math.min(palette.length - 1, Math.floor(level * palette.length));
+      let glyph = palette[index];
+      if (!on('foam') && level > 0.22 && level < 0.72
+        && (nearCircle > 0.055 || wakeEnvelope > 0.075)) {
+        const screenVelocityX = flowVelocityX;
+        const screenVelocityY = -flowVelocityY;
+        const horizontal = Math.abs(screenVelocityX);
+        const vertical = Math.abs(screenVelocityY);
+        if (vertical > horizontal * 1.45) glyph = '|';
+        else if (horizontal > vertical * 1.45) glyph = '-';
+        else glyph = screenVelocityX * screenVelocityY > 0 ? '\\' : '/';
+      }
+      if (glyph === ' ') continue;
+      ctx.globalAlpha = 0.18 + level * 0.82;
+      ctx.fillText(glyph, x, y);
+    }
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = ink(0.97);
+  ctx.beginPath();
+  ctx.arc(circle.x * S, (1 - circle.y) * S, circle.radius * S, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+}
+
+MODES.ascii = {
+  label: 'ascii',
+  note: 'Поток знаков идёт сверху вниз, обтекает белый круг и оставляет за ним след — как если бы круг двигался сквозь воду снизу вверх. Мышь добавляет свои возмущения.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
+    { type: 'range', key: 'amount', label: 'эхо', min: 0, max: 2, step: 0.05, value: 1.1 },
+    { type: 'range', key: 'detail', label: 'кегль', min: 0.55, max: 2.2, step: 0.05, value: 1.15 },
+    { type: 'range', key: 'radius', label: 'круг', min: 0.05, max: 0.2, step: 0.005, value: 0.11 },
+    { type: 'toggle', key: 'foam', label: 'только пена', value: false },
+  ],
+  setup: setupWaterMotion,
+  onMove: moveWaterStudy,
+  onDown: moveWaterStudy,
+  step: stepWaterStudy,
+  draw: drawAsciiWater,
+};
+
+MODES.pixel = waterStudyMode(
+  WATER_PIXEL_FRAGMENT,
+  'Низкоразрешённая вода с четырьмя ступенями света. Курсор запускает квадратные фронты и россыпь пиксельной пены.',
+  { mode: 'пиксели', speed: 'течение', amount: 'всплеск', detail: 'разрешение' },
+  { speed: 0.76, amount: 1.15, detail: 0.9 },
+);
+
+/* ---------- эхо апекса ---------- */
+
+/* Импульс проходит по одной ноге к вершине и возвращается по другой. На
+   кончике его надо поймать кликом: удачный клик разворачивает маршрут, поздний
+   или сделанный не на той ноге гасит эхо. */
+
+const ECHO = {
+  apex: { x: 0.57, y: 0.18 },
+  feet: [{ x: 0.25, y: GROUND }, { x: 0.57, y: GROUND }],
+};
+
+function echoPoint(side, phase, t) {
+  const start = ECHO.feet[side];
+  const end = ECHO.feet[1 - side];
+  return phase === 0
+    ? { x: lerp(start.x, ECHO.apex.x, t), y: lerp(start.y, ECHO.apex.y, t) }
+    : { x: lerp(ECHO.apex.x, end.x, t), y: lerp(ECHO.apex.y, end.y, t) };
+}
+
+function echoSide() {
+  const split = (ECHO.feet[0].x + ECHO.feet[1].x) / 2;
+  return pointer.x < split ? 0 : 1;
+}
+
+MODES.echo = {
+  label: 'эхо',
+  note: 'Кликни по одной ноге — импульс пойдёт к вершине. Кликни по другой, когда он почти дошёл: эхо развернётся. Ранний, поздний или неверный клик гасит импульс. Красное — сорванное эхо.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'tempo', label: 'темп', min: 0.35, max: 1.4, step: 0.05, value: 0.8 },
+    { type: 'range', key: 'window', label: 'окно', min: 0.05, max: 0.3, step: 0.01, value: 0.14 },
+    { type: 'button', label: 'заново', action: () => MODES.echo.setup() },
+  ],
+
+  setup() {
+    modeState.pulse = null;
+    modeState.echoes = 0;
+    modeState.misses = 0;
+    modeState.flash = 0;
+    modeState.trail = [];
+  },
+
+  onDown() {
+    const side = echoSide();
+    if (!modeState.pulse) {
+      modeState.pulse = { from: side, to: 1 - side, phase: 0, t: 0 };
+      return;
+    }
+
+    const pulse = modeState.pulse;
+    const window = num('window');
+    const arriving = pulse.phase === 1 && side === pulse.to;
+    const caught = arriving && pulse.t >= 1 - window && pulse.t < 1;
+    if (!caught) {
+      modeState.misses += 1;
+      modeState.flash = -1;
+      modeState.pulse = null;
+      return;
+    }
+
+    modeState.echoes += 1;
+    modeState.flash = 1;
+    modeState.trail.push({ from: pulse.from, to: pulse.to });
+    if (modeState.trail.length > 8) modeState.trail.shift();
+    modeState.pulse = { from: pulse.to, to: pulse.from, phase: 0, t: 0 };
+  },
+
+  step() {
+    modeState.flash *= 0.9;
+    const pulse = modeState.pulse;
+    if (!pulse) return;
+
+    pulse.t += STEP * num('tempo') * 1.8;
+    if (pulse.t < 1) return;
+    if (pulse.phase === 0) {
+      pulse.phase = 1;
+      pulse.t = 0;
+      return;
+    }
+
+    modeState.misses += 1;
+    modeState.flash = -1;
+    modeState.pulse = null;
+  },
+
+  draw() {
+    baseline();
+    for (const trail of modeState.trail) {
+      legs(
+        ECHO.apex.x,
+        ECHO.apex.y,
+        ECHO.feet[trail.from].x,
+        ECHO.feet[trail.from].y,
+        ECHO.feet[trail.to].x,
+        ECHO.feet[trail.to].y,
+        0.13,
+        STEM * 0.65,
+      );
+    }
+
+    legs(
+      ECHO.apex.x,
+      ECHO.apex.y,
+      ECHO.feet[0].x,
+      ECHO.feet[0].y,
+      ECHO.feet[1].x,
+      ECHO.feet[1].y,
+      0.85,
+      STEM,
+    );
+    dot(ECHO.apex.x, ECHO.apex.y, Math.abs(modeState.flash) > 0.12 ? RED : INK, 0.012);
+
+    for (const foot of ECHO.feet) {
+      ctx.beginPath();
+      ctx.arc(foot.x * S, foot.y * S, 0.025 * S, 0, TAU);
+      ctx.strokeStyle = ink(0.2);
+      ctx.lineWidth = 0.002 * S;
+      ctx.stroke();
+    }
+
+    if (modeState.pulse) {
+      const pulse = modeState.pulse;
+      const point = echoPoint(pulse.from, pulse.phase, pulse.t);
+      dot(point.x, point.y, ink(1), 0.014);
+      if (pulse.phase === 1) {
+        const remaining = 1 - pulse.t;
+        line(
+          ECHO.feet[pulse.to].x,
+          ECHO.feet[pulse.to].y,
+          ECHO.feet[pulse.to].x,
+          ECHO.feet[pulse.to].y + 0.045 * remaining,
+          ink(0.5),
+          0.004,
+        );
+      }
+    }
+
+    drawStatus(
+      `${count(modeState.echoes, 'эхо', 'эхо', 'эхо')} · ${count(modeState.misses, 'срыв', 'срыва', 'срывов')}`,
+      modeState.flash < -0.12,
+    );
+  },
+};
+
+/* ---------- развилка маршрутов ---------- */
+
+/* Вершина принимает одиночный поток и отправляет его в одну из двух ног.
+   Цель меняется после каждого выпуска, а маршрут фиксируется в момент входа. */
+
+const FORK = {
+  apex: { x: 0.57, y: 0.18 },
+  feet: [{ x: 0.25, y: GROUND }, { x: 0.57, y: GROUND }],
+};
+
+function forkPoint(side, t) {
+  return {
+    x: lerp(FORK.apex.x, FORK.feet[side].x, t),
+    y: lerp(FORK.apex.y, FORK.feet[side].y, t),
+  };
+}
+
+function forkSetRoute(side) {
+  modeState.route = side;
+}
+
+MODES.fork = {
+  label: 'развилка',
+  note: 'Кликай слева или справа от вершины, чтобы перевести поток в нужную ногу; работают и стрелки. Цель отмечена у выхода, но маршрут фиксируется в момент входа. Красное — поток ушёл не туда.',
+  cursor: 'pointer',
+  tools: [
+    { type: 'range', key: 'tempo', label: 'темп', min: 0.25, max: 1.2, step: 0.05, value: 0.55 },
+    { type: 'range', key: 'pause', label: 'пауза', min: 0.25, max: 1.4, step: 0.05, value: 0.7 },
+    { type: 'button', label: 'заново', action: () => MODES.fork.setup() },
+  ],
+
+  setup() {
+    modeState.route = 0;
+    modeState.target = 0;
+    modeState.packet = null;
+    modeState.wait = 0;
+    modeState.good = 0;
+    modeState.bad = 0;
+    modeState.flash = 0;
+  },
+
+  onDown() {
+    const split = (FORK.feet[0].x + FORK.feet[1].x) / 2;
+    forkSetRoute(pointer.x < split ? 0 : 1);
+  },
+
+  onMove() {
+    if (!pointer.down) return;
+    const split = (FORK.feet[0].x + FORK.feet[1].x) / 2;
+    forkSetRoute(pointer.x < split ? 0 : 1);
+  },
+
+  onKey(event, down) {
+    if (!down) return;
+    if (event.code === 'ArrowLeft') forkSetRoute(0);
+    if (event.code === 'ArrowRight') forkSetRoute(1);
+    if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') event.preventDefault();
+  },
+
+  step() {
+    modeState.flash *= 0.9;
+    if (modeState.packet) {
+      modeState.packet.t += STEP * num('tempo') * 1.7;
+      if (modeState.packet.t < 1) return;
+
+      if (modeState.packet.route === modeState.packet.target) {
+        modeState.good += 1;
+        modeState.flash = 1;
+      } else {
+        modeState.bad += 1;
+        modeState.flash = -1;
+      }
+      modeState.target = 1 - modeState.target;
+      modeState.packet = null;
+      modeState.wait = 0;
+      return;
+    }
+
+    modeState.wait += STEP;
+    if (modeState.wait < num('pause')) return;
+    modeState.packet = {
+      route: modeState.route,
+      target: modeState.target,
+      t: 0,
+    };
+  },
+
+  draw() {
+    baseline();
+    const active = modeState.route;
+    legs(
+      FORK.apex.x,
+      FORK.apex.y,
+      FORK.feet[0].x,
+      FORK.feet[0].y,
+      FORK.feet[1].x,
+      FORK.feet[1].y,
+      0.3,
+      STEM,
+    );
+    line(
+      FORK.apex.x,
+      FORK.apex.y,
+      FORK.feet[active].x,
+      FORK.feet[active].y,
+      ink(0.95),
+      STEM * 1.45,
+    );
+
+    dot(FORK.apex.x, FORK.apex.y, Math.abs(modeState.flash) > 0.12 ? RED : INK, 0.012);
+    for (let side = 0; side < 2; side += 1) {
+      const foot = FORK.feet[side];
+      ctx.beginPath();
+      ctx.arc(foot.x * S, foot.y * S, 0.025 * S, 0, TAU);
+      ctx.strokeStyle = side === modeState.target ? ink(0.75) : ink(0.18);
+      ctx.lineWidth = side === modeState.target ? 0.004 * S : 0.002 * S;
+      ctx.stroke();
+    }
+
+    if (modeState.packet) {
+      const point = forkPoint(modeState.packet.route, modeState.packet.t);
+      const right = modeState.packet.route === modeState.packet.target;
+      dot(point.x, point.y, right ? ink(1) : RED, 0.014);
+    }
+
+    drawStatus(
+      `${count(modeState.good, 'попадание', 'попадания', 'попаданий')} · ${count(modeState.bad, 'ошибка', 'ошибки', 'ошибок')}`,
+      modeState.flash < -0.12,
+    );
+  },
+};
 
 /* ---------- стремянка ---------- */
 
@@ -686,5 +1714,6 @@ MODES.slope = {
 startLab({
   title: 'Л · две ноги',
   modes: MODES,
-  start: 'root',
+  start: 'river',
+  ground: 'ink',
 });

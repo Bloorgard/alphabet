@@ -144,11 +144,11 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .ya-leaders b { font-weight: 400; color: rgba(22, 22, 22, .38); }
 .ya-leaders i { font-style: normal; }
 .ya-empty { color: rgba(22, 22, 22, .38); }
-.ya-wallet { margin-bottom: 22px !important; color: var(--ink); font-size: 15px; letter-spacing: .04em; }
+.ya-wallet { margin-bottom: 6px !important; color: var(--ink); font-size: 15px; letter-spacing: .04em; }
 /* Суточный лимит стоит под кошельком: две цифры об одном — сколько есть и
    сколько сегодня отдадут. Исчерпанный день приглушается, а не краснеет:
    это не ошибка, а завтрашняя клетка. */
-.ya-daily { margin-top: -16px !important; margin-bottom: 22px !important; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: rgba(22, 22, 22, .45); }
+.ya-daily { margin: 0 0 22px !important; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: rgba(22, 22, 22, .45); }
 .ya-daily[data-spent="true"] { color: rgba(22, 22, 22, .3); }
 .ya-place { margin-bottom: 22px; }
 .ya-place p { margin-bottom: 6px !important; }
@@ -193,26 +193,37 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .wall-credit[data-game="true"] { color: rgba(241, 237, 229, .62); }
 .letter-workspace[data-ground="paper"] .wall-credit { color: rgba(22, 22, 22, .3); }
 .letter-workspace[data-ground="paper"] .wall-credit[data-game="true"] { color: rgba(22, 22, 22, .62); }
-.letter-workspace[data-ground="paper"] 
-}
 
 .ya-count { position: absolute; top: 73%; left: 6%; margin: 0; color: rgba(22, 22, 22, .55); }
 .ya-rules { position: absolute; left: 6%; bottom: 7%; width: 56%; color: rgba(22, 22, 22, .38); }
 .ya-rules summary { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .ya-rules p { margin: 10px 0 0; line-height: 1.5; letter-spacing: .02em; text-transform: none; }
 
-/* Телефон: панель ложится под холст строкой, лидеры выстраиваются в ряд,
-   правила прячутся — в квадрат размером с ладонь всё не влезает. */
+/* Телефон: окно Я перестаёт быть квадратом. Квадрат — компромисс ради
+   десктопа, а на вытянутом экране он загоняет кошелёк, лимит и кнопку
+   постановки за нижний край: играть можно, а поставить клетку нечем.
+   Холст остаётся квадратом сверху, панель ложится под ним в потоке. */
 @media (max-width: 560px) {
-  .ya-panel { top: 77%; right: 6%; bottom: auto; left: 6%; width: auto; }
+  .letter-dialog:has(.ya-panel) { width: calc(100vw - 2 * var(--gap)); height: calc(100dvh - 2 * var(--gap)); aspect-ratio: auto; }
+  .letter-workspace:has(.ya-panel) { display: flex; flex-direction: column; gap: 12px; padding: 46px 6% 22px; overflow-y: auto; }
+  .letter-workspace:has(.ya-panel) #letter-canvas { flex: none; width: 100%; height: auto; aspect-ratio: 1 / 1; }
+  .letter-workspace:has(.ya-panel) .ya-count { position: static; order: 2; }
+  /* Панель прижата к низу: холст сверху, воздух посередине, управление под
+     большим пальцем — телефон держат снизу. */
+  .letter-workspace:has(.ya-panel) .ya-panel { position: static; order: 3; width: auto; margin-top: auto; }
+  .ya-panel { top: 72%; right: 6%; bottom: auto; left: 6%; width: auto; }
   /* Заголовки колонок съедают две строки из четырёх доступных: на телефоне
      и так понятно, что имена — это лидеры, а число — твой запас. */
   .ya-title { display: none; }
-  .ya-leaders { display: flex; gap: 12px; margin-bottom: 10px; }
+  /* Лидеров столько же, сколько игровых букв, и с каждой новой строка
+     длиннее. Перенос обязателен: без него хвост уезжает за край экрана
+     и последняя буква просто пропадает. */
+  .ya-leaders { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-bottom: 10px; }
   .ya-leaders li { grid-template-columns: auto auto auto; gap: 4px; padding: 0; }
-  .ya-wallet { margin-bottom: 10px !important; font-size: 13px; }
+  .ya-wallet { margin-bottom: 4px !important; font-size: 13px; }
+  .ya-daily { margin-bottom: 12px !important; }
   .ya-place { margin-bottom: 10px; }
-  .ya-count { top: 74%; }
+  .ya-count { top: 67%; }
   .ya-rules { display: none; }
 }
 
