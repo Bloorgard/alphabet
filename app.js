@@ -10,7 +10,7 @@ import { mountZ } from './letters/z.js?v=8';
 import { mountI } from './letters/i.js?v=9';
 import { mountJ } from './letters/j.js?v=1';
 import { mountK } from './letters/k.js?v=15';
-import { mountL } from './letters/l.js?v=7';
+import { mountL } from './letters/l.js?v=9';
 import { mountYa } from './letters/ya.js?v=19';
 import { mountCredit } from './wall.js?v=11';
 

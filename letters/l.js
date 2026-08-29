@@ -392,6 +392,9 @@ export function mountL(workspace) {
     state.climb = 0;
     state.tilt = 0;
     state.play = state.play !== false;
+    /* Масштаб переживает сброс: смена режима зовёт reset, а расти буква
+       должна плавно. */
+    if (state.zoom === undefined) state.zoom = params.size;
     state.panels = null;
     state.mark = '';
     sent = false;
@@ -412,7 +415,7 @@ export function mountL(workspace) {
   }
 
   function bodyNow() {
-    return letterBody(Math.min(1 + level() * 0.06, 2.6) * params.size, state.slide, state.lift, state.tilt);
+    return letterBody(Math.min(1 + level() * 0.06, 2.6) * state.zoom, state.slide, state.lift, state.tilt);
   }
 
   /* Управление одинаково с клавиш и с курсора: и то и другое задаёт скорость
@@ -460,6 +463,9 @@ export function mountL(workspace) {
 
   function step() {
     steer();
+    /* Размер догоняет заданный, а не прыгает к нему: смена режима меняет
+       букву втрое, и скачок читался бы подменой, а не тем же телом. */
+    state.zoom += (params.size - state.zoom) * Math.min(1, 3 * STEP);
     state.age += STEP;
     if (state.flash > 0) state.flash -= STEP;
 
@@ -845,7 +851,6 @@ export function mountL(workspace) {
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = 'веди Л стрелками или курсором · клин — очко, крест — жизнь, кругляш ничей';
 
   const panel = document.createElement('div');
   panel.className = 'sketch-panel';
@@ -874,7 +879,13 @@ export function mountL(workspace) {
          воду, а не ловить, поэтому вещи там по умолчанию убраны — вернуть их
          можно переключателем. */
       if (play) Object.assign(params, PARAMS);
-      else params.items = false;
+      else {
+        params.items = false;
+        /* Песочница — не партия, а место посмотреть на букву и покрутить её
+           устройство. Поэтому Л встаёт во весь рост: разглядывать, как вода
+           обходит косую ногу и срывается с прямой, на игровой мишени нечем. */
+        params.size = GEAR.find((item) => item.key === 'size').max;
+      }
       reset();
       syncPanel();
     });
@@ -946,6 +957,11 @@ export function mountL(workspace) {
     note.textContent = state.play
       ? 'результат идёт в общий счёт'
       : 'ручки открыты, результат не в зачёт';
+    /* Подсказка внизу кадра держится того же режима: в песочнице ловить
+       нечего, и правила ловли там только сбивают. */
+    hint.textContent = state.play
+      ? 'веди Л стрелками или курсором · клин — очко, крест — жизнь, кругляш ничей'
+      : 'песочница: ручки открыты, счёта нет · веди Л стрелками или курсором';
     for (const knob of gear) {
       knob.input.disabled = state.play;
       knob.input.value = params[knob.key];
