@@ -219,13 +219,17 @@ export function mountYa(workspace) {
     if (!state) return;
 
     const picked = ownerName(chosen && markAt(chosen));
-    leadersTitle.textContent = opened ? `Лучшие в ${opened}` : 'Лидеры';
+    /* Возврат живёт в самом заголовке: отдельная строка «← лидеры» под
+       заголовком читалась как второй заголовок и ломала таблицу, потому
+       что стояла её строкой. */
+    leadersTitle.innerHTML = opened
+      ? `<button type="button" data-back>← лучшие в ${opened}</button>`
+      : 'Лидеры';
     if (opened) {
       /* Десятка раскрывается на месте лидеров: в неё попадают за игру,
          значит смотреть её ходят отсюда же. */
       const rows = state.top?.[opened] || [];
-      leaders.innerHTML = `<li class="ya-back"><button type="button" data-back>← лидеры</button></li>`
-        + (rows.length
+      leaders.innerHTML = (rows.length
           ? rows.map(([name, value], i) => row(`${i + 1}`, name, value, name === picked)).join('')
           : '<li class="ya-empty">в этой букве ещё не играли</li>');
     } else {
@@ -372,6 +376,7 @@ export function mountYa(workspace) {
   nameInput.addEventListener('keydown', onKey);
   meChange.addEventListener('click', onRename);
   leaders.addEventListener('click', onLeaders);
+  leadersTitle.addEventListener('click', onLeaders);
   leaders.addEventListener('pointerover', onLeaderHover);
   leaders.addEventListener('pointerleave', onLeaderHover);
   window.addEventListener('resize', onResize);
@@ -388,6 +393,7 @@ export function mountYa(workspace) {
     nameInput.removeEventListener('keydown', onKey);
     meChange.removeEventListener('click', onRename);
     leaders.removeEventListener('click', onLeaders);
+    leadersTitle.removeEventListener('click', onLeaders);
     leaders.removeEventListener('pointerover', onLeaderHover);
     leaders.removeEventListener('pointerleave', onLeaderHover);
     window.removeEventListener('resize', onResize);
