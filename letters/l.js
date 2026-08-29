@@ -48,7 +48,18 @@ const CATCH = 0.019;          /* с какого расстояния вещь �
 const BASE_RISE = 0.055;
 const BASE_SPREAD = 0.1;
 
-const PARAMS = { crowd: 1200, tail: 12, fade: true, spark: true, chips: false };
+const PARAMS = { stream: 1, curl: 1, size: 1, crowd: 1200, tail: 12, fade: true, spark: true, chips: false };
+
+/* Снаряжение партии: течение, охота грани отдавать вихрь и рост буквы. На
+   рекорде эти ручки закрыты — иначе результат ставится не рукой, а тихой
+   водой и мелкой мишенью. */
+const GEAR = [
+  { key: 'stream', label: 'течение', min: 0.5, max: 1.8, step: 0.05 },
+  { key: 'curl', label: 'завихрение', min: 0, max: 2, step: 0.05 },
+  { key: 'size', label: 'рост буквы', min: 0.6, max: 1.8, step: 0.05 },
+];
+
+/* Вид воды к результату отношения не имеет и открыт всегда. */
 const CONTROLS = [
   { key: 'crowd', label: 'рой', min: 300, max: 2400, step: 50 },
   { key: 'tail', label: 'хвост', min: 2, max: 22, step: 1 },
@@ -379,6 +390,7 @@ export function mountL(workspace) {
     state.lift = 0;
     state.climb = 0;
     state.tilt = 0;
+    state.play = state.play !== false;
     state.panels = null;
     state.mark = '';
     sent = false;
@@ -399,7 +411,7 @@ export function mountL(workspace) {
   }
 
   function bodyNow() {
-    return letterBody(Math.min(1 + level() * 0.06, 2.6), state.slide, state.lift, state.tilt);
+    return letterBody(Math.min(1 + level() * 0.06, 2.6) * params.size, state.slide, state.lift, state.tilt);
   }
 
   /* Управление одинаково с клавиш и с курсора: и то и другое задаёт скорость
@@ -441,7 +453,7 @@ export function mountL(workspace) {
     const y = corner.y - 0.02;
     flowAt(x, y, state.blobs, stream, state.sway, panels, probe);
     const edge = Math.hypot(probe.x, probe.y) * heelOf(body, side);
-    state.blobs.push({ x, y, seed: -side * 0.5 * edge * edge * beat * 2.65 * churn * 0.08, turn: 0, age: 0 });
+    state.blobs.push({ x, y, seed: -side * 0.5 * edge * edge * beat * 2.65 * params.curl * churn * 0.08, turn: 0, age: 0 });
     while (state.blobs.length > 40) state.blobs.shift();
   }
 
@@ -453,7 +465,7 @@ export function mountL(workspace) {
     const rank = level();
     const pace = 1 + rank * 0.13;
     const churn = 1 + rank * 0.2;
-    const stream = Math.max(0.17 * pace + state.climb * 0.6, 0.02);
+    const stream = Math.max(0.17 * pace * params.stream + state.climb * 0.6, 0.02);
     const body = bodyNow();
     const panels = panelsFor(body);
     const sway = state.sway;
@@ -577,7 +589,7 @@ export function mountL(workspace) {
         if (state.lives <= 0) {
           state.lives = 0;
           state.over = true;
-          if (!sent) {
+          if (state.play && !sent) {
             sent = true;
             reportScore('Л', state.score);
           }
@@ -825,9 +837,51 @@ export function mountL(workspace) {
   panel.dataset.letterLayer = '';
   panel.hidden = true;
 
+  /* Панель начинается с режима: сперва человек видит, во что играет, и уже
+     потом — ручки. Так же устроена панель у К. */
+  const modes = document.createElement('div');
+  modes.className = 'sketch-modes';
+  panel.append(modes);
+
   const note = document.createElement('p');
-  note.textContent = 'ручки меняют только вид воды: сложность растёт из счёта, а не отсюда.';
   panel.append(note);
+
+  function modeButton(labelText, play) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sketch-mode';
+    button.textContent = labelText;
+    button.addEventListener('click', () => {
+      if (state.play === play) return;
+      state.play = play;
+      /* Возврат на рекорд восстанавливает снаряжение: накрученное в песочнице
+         не должно уезжать в зачётную партию. */
+      if (play) Object.assign(params, PARAMS);
+      reset();
+      syncPanel();
+    });
+    modes.append(button);
+    return button;
+  }
+
+  const playButton = modeButton('на рекорд', true);
+  const freeButton = modeButton('песочница', false);
+
+  const gear = [];
+  for (const control of GEAR) {
+    const label = document.createElement('label');
+    label.textContent = control.label;
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = control.min;
+    input.max = control.max;
+    input.step = control.step;
+    input.value = params[control.key];
+    input.addEventListener('input', () => { params[control.key] = Number(input.value); });
+    label.append(input);
+    panel.append(label);
+    gear.push({ key: control.key, input });
+  }
 
   for (const control of CONTROLS) {
     const label = document.createElement('label');
@@ -863,6 +917,18 @@ export function mountL(workspace) {
   resetButton.addEventListener('click', reset);
   panel.append(resetButton);
 
+  function syncPanel() {
+    playButton.setAttribute('aria-pressed', String(state.play));
+    freeButton.setAttribute('aria-pressed', String(!state.play));
+    note.textContent = state.play
+      ? 'результат идёт в общий счёт'
+      : 'ручки открыты, результат не в зачёт';
+    for (const knob of gear) {
+      knob.input.disabled = state.play;
+      knob.input.value = params[knob.key];
+    }
+  }
+
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'sketch-toggle';
@@ -875,6 +941,7 @@ export function mountL(workspace) {
   });
 
   reset();
+  syncPanel();
   workspace.append(hint, panel, toggle);
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(workspace);
