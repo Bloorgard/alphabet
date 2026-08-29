@@ -1346,6 +1346,8 @@ function setupAscii() {
   modeState.eddies = [];
   modeState.shed = 0;
   modeState.side = 1;
+  modeState.fronts = [];
+  modeState.bow = 0;
 }
 
 function stepAscii() {
@@ -1438,6 +1440,8 @@ function setupAscii() {
   modeState.eddies = [];
   modeState.shed = 0;
   modeState.side = 1;
+  modeState.fronts = [];
+  modeState.bow = 0;
 }
 
 function stepAscii() {
@@ -1456,6 +1460,22 @@ function stepAscii() {
   }
 
   if (!on('body')) return;
+
+  /* Тело неподвижно в кадре, но относительно воды идёт непрерывно — значит
+     и волну гонит непрерывно. Носовые фронты рождаются раз в такт, дальше
+     живут в воде сами: сносятся течением и расходятся. Расходятся медленнее,
+     чем идёт тело, поэтому их огибающая и складывается в клин. */
+  modeState.bow += STEP;
+  if (modeState.bow >= 0.11) {
+    modeState.bow = 0;
+    modeState.fronts.push({ x: body.apex.x, y: body.apex.y, age: 0 });
+    if (modeState.fronts.length > 26) modeState.fronts.shift();
+  }
+  for (const front of modeState.fronts) {
+    front.age += STEP;
+    front.y -= flow * STEP;
+  }
+  while (modeState.fronts.length && modeState.fronts[0].age > 3.2) modeState.fronts.shift();
 
   /* Частота схода растёт со скоростью и падает с размером тела — число
      Струхаля почти постоянно, поэтому шаг дорожки держится сам. */
@@ -1576,6 +1596,20 @@ function drawAsciiWater() {
         flowVelocityY += (ex / reach) * swirl;
       }
 
+      for (const front of modeState.fronts) {
+        const dx = u - front.x;
+        const dy = v - front.y;
+        const reach = Math.hypot(dx, dy);
+        const radius = front.age * asciiFlowSpeed() * 0.55;
+        /* Гребень узкий, и считать синус вдали от него незачем. */
+        if (Math.abs(reach - radius) > 0.13) continue;
+        /* Фронтов в воде десятки, и каждый должен быть тих: громкими они
+           складываются не в клин, а в пятно вокруг тела. */
+        const life = Math.exp(-front.age * 0.5) * 0.24;
+        const crest = Math.exp(-Math.abs(reach - radius) * 26);
+        field += Math.sin((reach - radius) * 44) * crest * life;
+      }
+
       for (const trail of modeState.trails) {
         const dx = u - trail.x;
         const dy = v - trail.y;
@@ -1623,7 +1657,7 @@ function drawAsciiWater() {
 
 MODES.ascii = {
   label: 'ascii',
-  note: 'Л идёт вверх, камера держит её в центре — поэтому река едет сверху вниз. Перед буквой вода встаёт бугром, вдоль бортов проседает, позади остаётся волновая тень, а с углов по очереди срываются вихри: косой борт срывает сильнее прямого. Выключи «букву», чтобы увидеть, сколько в картине от неё.',
+  note: 'Л идёт вверх, камера держит её в центре — поэтому река едет сверху вниз. Перед буквой вода встаёт бугром, вдоль бортов проседает, позади остаётся волновая тень, а с углов по очереди срываются вихри: косой борт срывает сильнее прямого. С носа непрерывно сходят волновые фронты — они живут в воде сами и складываются в клин. Выключи «букву», чтобы увидеть, сколько в картине от неё.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
