@@ -1914,7 +1914,8 @@ function swirlSeed(part, y) {
 }
 
 function swirlFlow() {
-  return num('speed') * 0.26;
+  /* Игра разгоняет реку по мере счёта; в трассерах поправка равна единице. */
+  return num('speed') * 0.26 * (modeState.pace || 1);
 }
 
 function setupSwirl() {
@@ -2168,18 +2169,8 @@ function stepSwirlChips(blobs, flow, panels, body, standing, sway) {
   }
 
   const probe = { x: 0, y: 0 };
-  const step = 0.012;
   for (const chip of chips) {
-    swirlVelocity(chip.x, chip.y - step, blobs, flow, probe, panels, sway);
-    const downX = probe.x;
-    swirlVelocity(chip.x, chip.y + step, blobs, flow, probe, panels, sway);
-    const upX = probe.x;
-    swirlVelocity(chip.x - step, chip.y, blobs, flow, probe, panels, sway);
-    const leftY = probe.y;
-    swirlVelocity(chip.x + step, chip.y, blobs, flow, probe, panels, sway);
-    const rightY = probe.y;
-    chip.turn += ((rightY - leftY) - (upX - downX)) / (4 * step) * 0.5 * STEP;
-
+    chip.turn += swirlSpin(chip.x, chip.y, blobs, flow, panels, sway) * STEP;
     swirlVelocity(chip.x, chip.y, blobs, flow, probe, panels, sway);
     let vx = probe.x;
     let vy = probe.y;
@@ -2313,7 +2304,7 @@ function stepSwirl() {
   }
 }
 
-function drawSwirl() {
+function drawSwirl(hush) {
   const body = letterBody();
   const tail = Math.max(2, Math.round(num('tail')));
 
@@ -2414,6 +2405,8 @@ function drawSwirl() {
   }
   ctx.restore();
 
+  if (hush) return;
+
   /* Число вихрей меняется каждый кадр — в углу это дёргалось и мешало
      смотреть. Держим показание полсекунды. Округлять его не стоит: с тех пор
      как углы срывают по очереди, вихрей единицы, и десяток съедал бы всё. */
@@ -2429,17 +2422,17 @@ MODES.swirl = {
   note: 'Вода здесь не поле, а рой: точки идут по течению и тянут за собой хвост из прошлых положений — получаются линии тока. Контур Л они встречают по-настоящему: сквозь грань не проходят, гасят нормальную составляющую и скользят вдоль. Обтекание держат источники, разложенные по самому контуру и подобранные так, чтобы сквозь каждую грань не шло ни капли, — иначе точки расходятся перед буквой и больше не сходятся, за кормой навсегда остаётся пустая труба. Поэтому и возмущение имеет форму буквы, а не окружности. Вихри никто не расставляет по расписанию: завихренность рождается на стенке, сходит с острых углов, и сила схода берётся из скорости у самой грани — у Л косая нога разгоняет сильнее прямой. Дальше вихри двигают друг друга сами: дорожка складывается из их взаимного вращения, а не из формулы. «Завихрение» задаёт, насколько охотно грань отдаёт вихрь; «симметрия» ставит вершину посередине, и обе ноги начинают срывать одинаково. Стрелки водят букву: влево-вправо поперёк реки, вверх-вниз — прибавить и убавить ход. Всё это входит в задачу наравне со сносом. Идущее вбок тело расталкивает воду боком, а не просто едет по картинке; на ходу оно кренится в сторону поворота, и накренённая грань иначе встречает воду; вверх буква идёт против воды быстрее — бурун крепчает, вниз слабеет. Три опции добавляют к рисунку по одной вещи и по умолчанию выключены: «угасание» гасит дальний конец хвоста, и линия читается направленной; «блик» изредка зажигает одиночную искру на гребне — у каждой точки своя фаза, поэтому вода не мигает целиком; «щепки» подмешивают в рой сорок с лишним отрезков, которые поворачиваются вместе с водой — угловая скорость плавающего тела равна половине завихренности, так что вихрь становится виден без единой стрелки.',
   cursor: 'crosshair',
   tools: [
-    { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
-    { type: 'range', key: 'crowd', label: 'рой', min: 200, max: 3000, step: 50, value: 1600 },
-    { type: 'range', key: 'curl', label: 'завихрение', min: 0, max: 3, step: 0.05, value: 1 },
-    { type: 'range', key: 'tail', label: 'хвост', min: 2, max: 22, step: 1, value: 14 },
-    { type: 'range', key: 'rise', label: 'рост', min: 0.06, max: 0.2, step: 0.005, value: 0.12 },
-    { type: 'range', key: 'spread', label: 'раствор', min: 0.08, max: 0.34, step: 0.01, value: 0.2 },
+    { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.65 },
+    { type: 'range', key: 'crowd', label: 'рой', min: 200, max: 3000, step: 50, value: 1800 },
+    { type: 'range', key: 'curl', label: 'завихрение', min: 0, max: 3, step: 0.05, value: 2.65 },
+    { type: 'range', key: 'tail', label: 'хвост', min: 2, max: 22, step: 1, value: 8 },
+    { type: 'range', key: 'rise', label: 'рост', min: 0.06, max: 0.2, step: 0.005, value: 0.13 },
+    { type: 'range', key: 'spread', label: 'раствор', min: 0.08, max: 0.34, step: 0.01, value: 0.23 },
     { type: 'toggle', key: 'body', label: 'буква', value: true },
-    { type: 'toggle', key: 'even', label: 'симметрия', value: false },
-    { type: 'toggle', key: 'fade', label: 'угасание', value: false },
-    { type: 'toggle', key: 'spark', label: 'блик', value: false },
-    { type: 'toggle', key: 'chips', label: 'щепки', value: false },
+    { type: 'toggle', key: 'even', label: 'симметрия', value: true },
+    { type: 'toggle', key: 'fade', label: 'угасание', value: true },
+    { type: 'toggle', key: 'spark', label: 'блик', value: true },
+    { type: 'toggle', key: 'chips', label: 'щепки', value: true },
   ],
   setup: setupSwirl,
   step: stepSwirl,
@@ -2454,6 +2447,201 @@ MODES.swirl = {
   },
 };
 
+
+/* Игра. Та же река и та же буква, но теперь по течению плывут вещи. Ловить
+   треугольники — очки; крестики — потеря жизни; кружки не дают ничего и стоят
+   в наборе нарочно: без нейтральной вещи выбор сводился бы к «хватай всё, что
+   не крест», а так его каждый раз приходится делать глазами. Ничего не падает
+   по расписанию сверху вниз: вещи несёт то же поле, что и трассеры, поэтому у
+   буквы они обтекают нос и заворачивают в вихри — увернуться от креста можно,
+   но и подвести его к себе течением тоже. */
+const GAME_LIVES = 3;
+const GAME_SIZE = 0.019;
+
+function gameLevel() {
+  return Math.floor(modeState.score / 6);
+}
+
+function setupGame() {
+  setupSwirl();
+  modeState.items = [];
+  modeState.score = 0;
+  modeState.lives = GAME_LIVES;
+  modeState.flash = 0;
+  modeState.over = false;
+  modeState.drop = 0;
+  modeState.pace = 1;
+}
+
+/* Угловая скорость плавающего тела — половина завихренности; её берём
+   разностью скоростей вокруг точки. Тем же считаются и щепки. */
+function swirlSpin(x, y, blobs, flow, panels, sway) {
+  const probe = { x: 0, y: 0 };
+  const step = 0.012;
+  swirlVelocity(x, y - step, blobs, flow, probe, panels, sway);
+  const downX = probe.x;
+  swirlVelocity(x, y + step, blobs, flow, probe, panels, sway);
+  const upX = probe.x;
+  swirlVelocity(x - step, y, blobs, flow, probe, panels, sway);
+  const leftY = probe.y;
+  swirlVelocity(x + step, y, blobs, flow, probe, panels, sway);
+  const rightY = probe.y;
+  return (((rightY - leftY) - (upX - downX)) / (4 * step)) * 0.5;
+}
+
+function stepGame() {
+  /* Уровень поднимает и скорость реки, и долю крестов. Считаем его до шага
+     воды: течение читается из того же места, что и всюду. */
+  modeState.pace = 1 + gameLevel() * 0.12;
+  stepSwirl();
+
+  const level = gameLevel();
+  const flow = swirlFlow();
+  const body = letterBody();
+  const blobs = modeState.blobs;
+  const panels = on('body') ? swirlPanels(body) : null;
+  const sway = modeState.sway;
+  const probe = { x: 0, y: 0 };
+
+  if (modeState.flash > 0) modeState.flash -= STEP;
+
+  if (!modeState.over) {
+    modeState.drop += STEP;
+    const beat = Math.max(0.9 - level * 0.06, 0.34);
+    if (modeState.drop >= beat) {
+      modeState.drop = 0;
+      /* Крестов со временем больше, но не больше половины набора: иначе
+         ловить становится нечего и игра превращается в бег от всего. */
+      const harm = Math.min(0.16 + level * 0.05, 0.46);
+      const roll = Math.random();
+      modeState.items.push({
+        x: 0.08 + Math.random() * 0.84,
+        y: 1.06,
+        kind: roll < harm ? 'крест' : roll < harm + (1 - harm) * 0.62 ? 'клин' : 'круг',
+        turn: Math.random() * 6.283,
+      });
+    }
+  }
+
+  for (let i = modeState.items.length - 1; i >= 0; i -= 1) {
+    const item = modeState.items[i];
+    swirlVelocity(item.x, item.y, blobs, flow, probe, panels, sway);
+    item.turn += swirlSpin(item.x, item.y, blobs, flow, panels, sway) * STEP;
+    item.x += probe.x * STEP;
+    item.y += probe.y * STEP;
+    if (item.x < 0) item.x += 1;
+    if (item.x > 1) item.x -= 1;
+    if (item.y < -0.08) {
+      modeState.items.splice(i, 1);
+      continue;
+    }
+
+    if (modeState.over || !on('body')) continue;
+    if (letterDistance(item.x, item.y, body) > GAME_SIZE) continue;
+    modeState.items.splice(i, 1);
+    if (item.kind === 'клин') modeState.score += 1;
+    else if (item.kind === 'крест') {
+      modeState.lives -= 1;
+      modeState.flash = 0.6;
+      if (modeState.lives <= 0) {
+        modeState.lives = 0;
+        modeState.over = true;
+      }
+    }
+  }
+}
+
+/* Крест рисуем четырёхлучевой звездой с вогнутыми боками: у прямого креста на
+   вращении теряется угол, а у звезды видно, как её ведёт. */
+function drawGameItem(item) {
+  const reach = GAME_SIZE * S;
+  const x = item.x * S;
+  const y = (1 - item.y) * S;
+  ctx.beginPath();
+  if (item.kind === 'круг') {
+    ctx.arc(x, y, reach * 0.62, 0, Math.PI * 2);
+  } else if (item.kind === 'клин') {
+    for (let i = 0; i < 3; i += 1) {
+      const angle = item.turn + (i * Math.PI * 2) / 3 - Math.PI / 2;
+      const px = x + Math.cos(angle) * reach;
+      const py = y + Math.sin(angle) * reach;
+      if (i) ctx.lineTo(px, py);
+      else ctx.moveTo(px, py);
+    }
+    ctx.closePath();
+  } else {
+    for (let i = 0; i < 8; i += 1) {
+      const angle = item.turn + (i * Math.PI) / 4;
+      const span = i % 2 ? reach * 0.34 : reach;
+      const px = x + Math.cos(angle) * span;
+      const py = y + Math.sin(angle) * span;
+      if (i) ctx.lineTo(px, py);
+      else ctx.moveTo(px, py);
+    }
+    ctx.closePath();
+  }
+  ctx.fill();
+}
+
+function drawGame() {
+  drawSwirl(true);
+
+  ctx.save();
+  ctx.fillStyle = ink(1);
+  for (const item of modeState.items) drawGameItem(item);
+
+  /* Единственная краска на сцене — на событии: удар о крест. Она держится
+     полсекунды и гаснет, поэтому красным всегда обозначено происшествие, а не
+     положение дел. */
+  if (modeState.flash > 0) {
+    const body = letterBody();
+    ctx.fillStyle = RED;
+    ctx.beginPath();
+    body.rim.forEach((point, i) => {
+      const x = point.x * S;
+      const y = (1 - point.y) * S;
+      if (i) ctx.lineTo(x, y);
+      else ctx.moveTo(x, y);
+    });
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  const tally = `${count(modeState.score, 'очко', 'очка', 'очков')} · ${count(modeState.lives, 'жизнь', 'жизни', 'жизней')}`;
+  drawStatus(modeState.over ? `конец · ${count(modeState.score, 'очко', 'очка', 'очков')}` : tally, modeState.flash > 0 || modeState.over);
+}
+
+MODES.game = {
+  label: 'игра',
+  note: 'Та же река и та же буква, но по течению плывут вещи. Стрелки ведут Л: влево-вправо поперёк реки, вверх-вниз — прибавить и убавить ход. Клин — очко, крест — жизнь, кругляш не даёт ничего и стоит в наборе нарочно: без нейтральной вещи выбор свёлся бы к «хватай всё, что не крест». Жизней три. Ничего не падает по расписанию: вещи несёт то же поле, что и трассеры, поэтому у носа они обтекают букву, а в вихрях заворачивают — крест можно объехать, но можно и подвести к себе течением. Каждые шесть очков река ускоряется, вещи идут чаще и крестов среди них больше — до половины набора, не выше: иначе ловить станет нечего. Красным помечено происшествие, а не положение дел: удар о крест держится полсекунды и гаснет. «Заново» и клавиша R начинают сначала.',
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.65 },
+    { type: 'range', key: 'crowd', label: 'рой', min: 200, max: 3000, step: 50, value: 1400 },
+    { type: 'range', key: 'curl', label: 'завихрение', min: 0, max: 3, step: 0.05, value: 2.65 },
+    { type: 'range', key: 'tail', label: 'хвост', min: 2, max: 22, step: 1, value: 8 },
+    { type: 'range', key: 'rise', label: 'рост', min: 0.04, max: 0.14, step: 0.005, value: 0.055 },
+    { type: 'range', key: 'spread', label: 'раствор', min: 0.05, max: 0.2, step: 0.01, value: 0.1 },
+    { type: 'toggle', key: 'body', label: 'буква', value: true },
+    { type: 'toggle', key: 'even', label: 'симметрия', value: true },
+    { type: 'toggle', key: 'fade', label: 'угасание', value: true },
+    { type: 'toggle', key: 'spark', label: 'блик', value: true },
+    { type: 'toggle', key: 'chips', label: 'щепки', value: false },
+    { type: 'button', label: 'заново', action: () => setMode('game') },
+  ],
+  setup: setupGame,
+  step: stepGame,
+  draw: drawGame,
+  onKey(event, down) {
+    if (event.key === 'ArrowLeft') modeState.goLeft = down;
+    else if (event.key === 'ArrowRight') modeState.goRight = down;
+    else if (event.key === 'ArrowUp') modeState.goUp = down;
+    else if (event.key === 'ArrowDown') modeState.goDown = down;
+    else return;
+    event.preventDefault();
+  },
+};
 
 MODES.echo = {
   label: 'эхо',
