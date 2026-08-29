@@ -1546,6 +1546,28 @@ function drawAsciiWater() {
      целиком: у блоков доля закраски и есть шкала. */
   const stretch = blocks ? (cell + 0.6) / Math.max(ctx.measureText('\u2588').width, 0.001) : 1;
   if (stretch !== 1) ctx.scale(stretch, 1);
+  /* Тон растянут на клетку, а треугольник направления — нет: широкий он
+     читается флажком, а не течением. Поэтому штрихи копим и рисуем вторым
+     проходом: save/restore на каждой клетке стоил половины кадров. */
+  const marks = [];
+
+  /* Радиус и запас фронта не зависят от клетки, а клеток десять тысяч:
+     раньше на каждую из них приходился ещё и опрос ползунка. Считаем
+     кольцо один раз за кадр и отбраковываем по квадрату расстояния. */
+  const flowNow = asciiFlowSpeed();
+  const echo = num('amount');
+  const rings = modeState.fronts.map((front) => {
+    const radius = front.age * flowNow * 0.55;
+    const inner = Math.max(radius - 0.13, 0);
+    return {
+      x: front.x,
+      y: front.y,
+      radius,
+      inner2: inner * inner,
+      outer2: (radius + 0.13) * (radius + 0.13),
+      life: Math.exp(-front.age * 0.5) * 0.24,
+    };
+  });
 
   for (let row = 0; row < rows; row += 1) {
     const y = (row + 0.5) * cell;
@@ -1568,6 +1590,13 @@ function drawAsciiWater() {
 
       if (standing) {
         near = Math.exp(-rim * 9);
+      }
+
+      /* Всё, что считается через нормаль, входит с множителем near, а он
+         на полклетки от борта уже меньше сотой. Дальше нормаль не считаем:
+         численный градиент — четыре расстояния до контура на клетку, и это
+         самая дорогая часть кадра. */
+      if (standing && rim < 0.55) {
         const normal = letterNormal(u, v, body);
 
         /* У борта вода не может идти сквозь тело: нормальную составляющую
@@ -1589,7 +1618,9 @@ function drawAsciiWater() {
         const push = near * 0.5;
         flowU = u + normal.x * push * 0.12;
         flowV = v + normal.y * push * 0.12;
+      }
 
+      if (standing) {
         const behind = Math.max(0, body.left.y - v);
         const halfWidth = body.spread * 0.5 + behind * 0.35;
         const across = (u - 0.5) / Math.max(halfWidth, 0.0001);
@@ -1628,32 +1659,31 @@ function drawAsciiWater() {
         flowVelocityY += (ex / reach) * swirl;
       }
 
-      for (const front of modeState.fronts) {
-        const dx = u - front.x;
-        const dy = v - front.y;
-        const reach = Math.hypot(dx, dy);
-        const radius = front.age * asciiFlowSpeed() * 0.55;
+      for (const ring of rings) {
+        const dx = u - ring.x;
+        const dy = v - ring.y;
+        const reach2 = dx * dx + dy * dy;
         /* Гребень узкий, и считать синус вдали от него незачем. */
-        if (Math.abs(reach - radius) > 0.13) continue;
+        if (reach2 > ring.outer2 || reach2 < ring.inner2) continue;
         /* Фронтов в воде десятки, и каждый должен быть тих: громкими они
            складываются не в клин, а в пятно вокруг тела. */
-        const life = Math.exp(-front.age * 0.5) * 0.24;
-        const crest = Math.exp(-Math.abs(reach - radius) * 26);
-        field += Math.sin((reach - radius) * 44) * crest * life;
+        const offset = Math.sqrt(reach2) - ring.radius;
+        const crest = Math.exp(-Math.abs(offset) * 26);
+        field += Math.sin(offset * 44) * crest * ring.life;
       }
 
       for (const trail of modeState.trails) {
         const dx = u - trail.x;
         const dy = v - trail.y;
         const reach = Math.hypot(dx, dy);
-        const life = Math.exp(-trail.age * 0.58) * trail.strength * num('amount');
+        const life = Math.exp(-trail.age * 0.58) * trail.strength * echo;
         const radius = trail.age * (0.11 + trail.strength * 0.055);
         const front = Math.exp(-Math.abs(reach - radius) * 17);
         field += Math.sin((reach - radius) * 54) * front * life * 0.9;
       }
 
       const mouseDistance = Math.hypot(u - modeState.mouse.x, v - modeState.mouse.y);
-      const force = Math.min(Math.hypot(modeState.velocity.x, modeState.velocity.y) * 26, 1) * num('amount');
+      const force = Math.min(Math.hypot(modeState.velocity.x, modeState.velocity.y) * 26, 1) * echo;
       field += Math.sin(mouseDistance * 48 - time * 3) * Math.exp(-mouseDistance * mouseDistance * 32) * force;
 
       /* Сначала наклон — им задают размах воды, потом срез снизу: он убирает
@@ -1664,9 +1694,13 @@ function drawAsciiWater() {
       const index = Math.min(ramp.length - 1, Math.floor(level * ramp.length));
       let glyph = ramp[index];
       let stroke = false;
-      /* У блоков штрих закрывает клетку целиком, поэтому пускаем его только
-         на гребни: внизу шкалы тон важнее направления. */
-      if (on('strokes') && level > (blocks ? 0.58 : 0.12) && (near > 0.055 || wakeEnvelope > 0.03)) {
+      /* Штрих ставим не рядом с телом, а там, где вода действительно
+         поворачивает: меряем отклонение от общего сноса вниз. По близости
+         выходило кольцо вокруг буквы и сплошные поля одинаковых стрелок —
+         обводка области, а не течение. Стрелка вниз там, где и так всё
+         едет вниз, не сообщает ничего. */
+      const swing = Math.hypot(flowVelocityX, flowVelocityY + 1);
+      if (on('strokes') && level > 0.18 && swing > 0.22) {
         stroke = true;
         const screenVelocityX = flowVelocityX;
         const screenVelocityY = -flowVelocityY;
@@ -1685,21 +1719,18 @@ function drawAsciiWater() {
       /* Гамма растягивает верх: знаков там мало и они близки по весу,
          так что тона у гребней даёт прозрачность, а не набор. */
       ctx.globalAlpha = 0.22 + Math.pow(level, 0.62) * 0.78;
-      /* Тон растянут на клетку, а треугольник направления — нет: широкий
-         он читается флажком, а не течением. */
-      if (stroke && stretch !== 1) {
-        ctx.save();
-        ctx.scale(1 / stretch, 1);
-        ctx.fillText(glyph, x, y);
-        ctx.restore();
-      } else {
-        ctx.fillText(glyph, x / stretch, y);
-      }
+      if (stroke && stretch !== 1) marks.push(glyph, x, y, ctx.globalAlpha);
+      else ctx.fillText(glyph, x / stretch, y);
     }
   }
 
-  ctx.globalAlpha = 1;
   if (stretch !== 1) ctx.scale(1 / stretch, 1);
+  for (let i = 0; i < marks.length; i += 4) {
+    ctx.globalAlpha = marks[i + 3];
+    ctx.fillText(marks[i], marks[i + 1], marks[i + 2]);
+  }
+
+  ctx.globalAlpha = 1;
   if (standing) {
     ctx.fillStyle = ink(0.97);
     ctx.beginPath();
@@ -1714,7 +1745,7 @@ function drawAsciiWater() {
 
 MODES.ascii = {
   label: 'ascii',
-  note: 'Л идёт вверх, камера держит её в центре — поэтому река едет сверху вниз. Перед буквой вода встаёт бугром, вдоль бортов проседает, позади остаётся волновая тень, а с углов по очереди срываются вихри: косой борт срывает сильнее прямого. С носа непрерывно сходят волновые фронты — они живут в воде сами и складываются в клин. «Симметрия» ставит вершину посередине, и обе грани начинают срывать поровну: видно, что несимметричный след — заслуга именно Л. «Буква» убирает тело целиком. «Размах» задаёт силу воды, «срез» съедает спокойную гладь снизу и оставляет одни гребни, а «штрихи» показывают направление течения — теперь их можно включить вместе со срезом. «Блоки» меняют набор: у пунктуации плотный конец обрывается на @, у геометрии ступень — это доля закрашенной клетки, и штрихи показывают все восемь направлений треугольниками.',
+  note: 'Л идёт вверх, камера держит её в центре — поэтому река едет сверху вниз. Перед буквой вода встаёт бугром, вдоль бортов проседает, позади остаётся волновая тень, а с углов по очереди срываются вихри: косой борт срывает сильнее прямого. С носа непрерывно сходят волновые фронты — они живут в воде сами и складываются в клин. «Симметрия» ставит вершину посередине, и обе грани начинают срывать поровну: видно, что несимметричный след — заслуга именно Л. «Буква» убирает тело целиком. «Размах» задаёт силу воды, «срез» съедает спокойную гладь снизу и оставляет одни гребни, а «штрихи» показывают направление там, где вода поворачивает: у косой грани, на срывах и в вихрях. Стрелка вниз посреди реки, которая и так вся едет вниз, ничего не сообщает, поэтому ровный снос остаётся тоном. «Блоки» меняют набор: у пунктуации плотный конец обрывается на @, у геометрии ступень — это доля закрашенной клетки, и штрихи показывают все восемь направлений треугольниками.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
