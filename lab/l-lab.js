@@ -1328,12 +1328,66 @@ MODES.ripple = waterStudyMode(
   { speed: 0.68, amount: 1.1, detail: 1.05 },
 );
 
+/* Круг идёт вверх, камера держит его в центре — значит вода едет вниз. Снос
+   копится в scroll: рисунок ряби привязан к воде, а не к экрану, поэтому река
+   действительно течёт, а не мерцает фазами на месте.
+
+   След — не подрисованная дорожка, а вихри. Они срываются с боков круга по
+   очереди (так и сходит дорожка Кармана), уносятся вниз вместе с водой,
+   разбухают и затухают: круг оставляет след на воде, а не под собой. */
+
+function asciiFlowSpeed() {
+  return num('speed') * 0.26;
+}
+
+function setupAscii() {
+  setupWaterMotion();
+  modeState.scroll = 0;
+  modeState.eddies = [];
+  modeState.shed = 0;
+  modeState.side = 1;
+}
+
+function stepAscii() {
+  stepWaterStudy();
+  const flow = asciiFlowSpeed();
+  const radius = num('radius');
+  modeState.scroll += flow * STEP;
+
+  for (const eddy of modeState.eddies) {
+    eddy.age += STEP;
+    eddy.y -= flow * STEP;
+    /* Дорожка расходится книзу: вихри расползаются от оси, как на натуре. */
+    eddy.x += eddy.spin * 0.018 * STEP;
+  }
+  while (modeState.eddies.length && (modeState.eddies[0].y < -0.2 || modeState.eddies[0].age > 7)) {
+    modeState.eddies.shift();
+  }
+
+  /* Частота схода растёт со скоростью и падает с размером тела — число
+     Струхаля почти постоянно, поэтому шаг дорожки держится сам. */
+  modeState.shed += STEP;
+  const period = (1.5 * radius) / Math.max(flow, 0.02);
+  if (modeState.shed >= period) {
+    modeState.shed = 0;
+    modeState.side = -modeState.side;
+    modeState.eddies.push({
+      x: 0.5 + modeState.side * radius * 0.82,
+      y: 0.5 - radius * 0.45,
+      spin: modeState.side,
+      age: 0,
+    });
+    if (modeState.eddies.length > 14) modeState.eddies.shift();
+  }
+}
+
 function drawAsciiWater() {
   const detailMix = clamp((num('detail') - 0.55) / 1.65, 0, 1);
   const cell = Math.round(lerp(22, 8, detailMix));
   const cols = Math.ceil(S / cell);
   const rows = Math.ceil(S / cell);
   const time = modeState.time * num('speed');
+  const drift = modeState.scroll;
   const circle = { x: 0.5, y: 0.5, radius: num('radius') };
   const palette = on('foam') ? '      .,:;~+*#%@' : ' .,-~:;=+*#%@';
 
@@ -1365,9 +1419,12 @@ function drawAsciiWater() {
         * (circleDx * circleDx - circleDy * circleDy) / circleDistance4);
       let wakeShadow = 0;
       let wakeEnvelope = 0;
-      let field = Math.sin(flowV * 22 + flowU * 2.2 + time * 0.92) * 0.35;
-      field += Math.sin(flowV * 38 - flowU * 6.5 + time * 0.64) * 0.18;
-      field += Math.sin(flowV * 15 + flowU * 8.0 + time * 0.37) * 0.09;
+      /* Рябь считается от координаты воды, а не экрана: снос уносит рисунок
+         вниз, и течение видно даже там, где круг ни при чём. */
+      const waterV = flowV + drift;
+      let field = Math.sin(waterV * 22 + flowU * 2.2 + time * 0.22) * 0.22;
+      field += Math.sin(waterV * 38 - flowU * 6.5 + time * 0.16) * 0.11;
+      field += Math.sin(waterV * 15 + flowU * 8.0 + time * 0.09) * 0.06;
 
       const flowSpeed = Math.hypot(flowVelocityX, flowVelocityY);
       const surfaceDistance = Math.sqrt(circleDistance2) - circle.radius;
@@ -1375,24 +1432,27 @@ function drawAsciiWater() {
       const pressure = circleDy > 0 ? Math.max(0, 1 - flowSpeed) * nearCircle : 0;
       field += pressure * 0.46 + (flowSpeed - 1) * nearCircle * 0.12;
 
-      /* Ниже круга — след тела, которое относительно воды движется вверх:
-         две сдвиговые дорожки и медленно виляющая сердцевина. */
-      const downstream = Math.max(0, -circleDy - circle.radius);
-      if (downstream > 0) {
-        const wakeWidth = circle.radius * 0.7 + downstream * 0.20;
-        const edgeDistance = Math.abs(Math.abs(circleDx) - wakeWidth);
-        const edgeWake = Math.exp(-edgeDistance * 34) * Math.exp(-downstream * 1.4);
-        const wakeCenter = Math.sin(downstream * 31 - time * 3.2) * circle.radius * 0.36;
-        const coreDistance = Math.abs(circleDx - wakeCenter);
-        const coreWake = Math.exp(-coreDistance * 19) * Math.exp(-downstream * 2.0);
-        wakeEnvelope = Math.exp(-Math.abs(circleDx) / (circle.radius + downstream * 0.24))
-          * Math.exp(-downstream * 1.45);
-        flowVelocityX += Math.sin(downstream * 31 - time * 3.2) * wakeEnvelope * 0.78;
-        flowVelocityY *= 1 - wakeEnvelope * 0.66;
-        wakeShadow = wakeEnvelope * 0.24;
-        field += Math.sin(downstream * 43 - time * 3.5 + Math.sign(circleDx) * 0.8) * edgeWake * 0.48;
-        field += Math.sin(downstream * 34 - time * 2.7) * coreWake * 0.22;
+      /* Сорванные вихри: каждый крутит воду вокруг себя и продавливает её
+         в ядре. Знаки чередуются, поэтому дорожка сама выходит виляющей —
+         вилять руками не нужно. */
+      for (const eddy of modeState.eddies) {
+        const ex = u - eddy.x;
+        const ey = v - eddy.y;
+        const distance2 = ex * ex + ey * ey;
+        const core = circle.radius * (0.42 + eddy.age * 0.26);
+        const q = distance2 / (core * core);
+        if (q > 9) continue;
+        const decay = Math.exp(-eddy.age * 0.42) * Math.exp(-q);
+        const distance = Math.max(Math.sqrt(distance2), 0.004);
+        /* Ядро проваливается, а по кромке вода вздымается: у вихря видно
+           и воронку, и вал вокруг неё. */
+        field += decay * (Math.min(q, 2.4) - 0.9) * 0.62;
+        wakeEnvelope = Math.max(wakeEnvelope, decay);
+        const swirl = eddy.spin * decay * 2.4;
+        flowVelocityX += (-ey / distance) * swirl;
+        flowVelocityY += (ex / distance) * swirl;
       }
+      wakeShadow = wakeEnvelope * 0.2;
 
       for (const trail of modeState.trails) {
         const dx = u - trail.x;
@@ -1411,7 +1471,7 @@ function drawAsciiWater() {
       const index = Math.min(palette.length - 1, Math.floor(level * palette.length));
       let glyph = palette[index];
       if (!on('foam') && level > 0.22 && level < 0.72
-        && (nearCircle > 0.055 || wakeEnvelope > 0.075)) {
+        && (nearCircle > 0.055 || wakeEnvelope > 0.03)) {
         const screenVelocityX = flowVelocityX;
         const screenVelocityY = -flowVelocityY;
         const horizontal = Math.abs(screenVelocityX);
@@ -1436,7 +1496,7 @@ function drawAsciiWater() {
 
 MODES.ascii = {
   label: 'ascii',
-  note: 'Поток знаков идёт сверху вниз, обтекает белый круг и оставляет за ним след — как если бы круг двигался сквозь воду снизу вверх. Мышь добавляет свои возмущения.',
+  note: 'Круг идёт вверх, камера держит его в центре — поэтому река едет сверху вниз. Он расталкивает набегающую воду, а с боков по очереди срываются вихри: их уносит вниз вместе с течением, и они разбухают и гаснут. След остаётся на воде, а не под кругом. Мышь добавляет свои возмущения.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
@@ -1445,10 +1505,10 @@ MODES.ascii = {
     { type: 'range', key: 'radius', label: 'круг', min: 0.05, max: 0.2, step: 0.005, value: 0.11 },
     { type: 'toggle', key: 'foam', label: 'только пена', value: false },
   ],
-  setup: setupWaterMotion,
+  setup: setupAscii,
   onMove: moveWaterStudy,
   onDown: moveWaterStudy,
-  step: stepWaterStudy,
+  step: stepAscii,
   draw: drawAsciiWater,
 };
 
