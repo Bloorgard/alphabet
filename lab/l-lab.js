@@ -1892,6 +1892,25 @@ function swirlFill() {
    скорость на каждой грани должна погаситься. Геометрия меняется только
    ползунками, поэтому решаем не каждый кадр, а при смене формы. */
 const SWIRL_PANELS = 8;
+const swirlProbe = { x: 0, y: 0 };
+
+/* Влияние отрезка целиком, а не точки в его середине. Точечная замена
+   гасила течение сквозь борт лишь наполовину, воду прижимало к обшивке, и
+   ближние точки прилипали к грани, обводя букву светлой линией. Формула
+   обычная для отрезка постоянной силы: вдоль — логарифм отношения расстояний
+   до концов, поперёк — угол, под которым отрезок виден из точки. */
+function swirlPanelFlow(panel, x, y, out) {
+  const dx = x - panel.x0;
+  const dy = y - panel.y0;
+  const along = dx * panel.tx + dy * panel.ty;
+  const away = dx * panel.nx + dy * panel.ny;
+  const head = along * along + away * away;
+  const tailX = along - panel.len;
+  const tail = tailX * tailX + away * away;
+  out.x = 0.5 * Math.log(Math.max(head, 1e-12) / Math.max(tail, 1e-12));
+  out.y = Math.atan2(away, tailX) - Math.atan2(away, along);
+  return out;
+}
 
 function swirlPanels(body) {
   const mark = `${body.height}|${body.spread}|${body.apex.x}`;
@@ -1906,20 +1925,21 @@ function swirlPanels(body) {
     const ey = to.y - from.y;
     const len = Math.hypot(ex, ey) / SWIRL_PANELS;
     for (let i = 0; i < SWIRL_PANELS; i += 1) {
-      const t = (i + 0.5) / SWIRL_PANELS;
-      const x = from.x + ex * t;
-      const y = from.y + ey * t;
-      let nx = ey;
-      let ny = -ex;
-      const norm = Math.hypot(nx, ny) || 1;
-      nx /= norm;
-      ny /= norm;
+      const t = i / SWIRL_PANELS;
+      const x0 = from.x + ex * t;
+      const y0 = from.y + ey * t;
+      const x = x0 + (ex / SWIRL_PANELS) * 0.5;
+      const y = y0 + (ey / SWIRL_PANELS) * 0.5;
+      const tx = ex / (len * SWIRL_PANELS);
+      const ty = ey / (len * SWIRL_PANELS);
+      let nx = -ty;
+      let ny = tx;
       /* Знак нормали берём у самого контура, а не из порядка вершин. */
       if (letterDistance(x + nx * 0.004, y + ny * 0.004, body) < 0) {
         nx = -nx;
         ny = -ny;
       }
-      panels.push({ x, y, nx, ny, len, flux: 0 });
+      panels.push({ x, y, x0, y0, tx, ty, nx, ny, len, flux: 0 });
     }
   }
 
@@ -1934,22 +1954,20 @@ function swirlPanels(body) {
    останется домножить. */
 function swirlBalance(panels) {
   const n = panels.length;
+  const probe = { x: 0, y: 0 };
   const a = [];
   for (let i = 0; i < n; i += 1) {
     const row = new Float64Array(n + 1);
     for (let j = 0; j < n; j += 1) {
       if (i === j) {
-        /* Своё влияние у отрезка конечное: половина плотности источника.
-           В здешних единицах — π, делённое на длину отрезка. Взятая с
-           потолка половина оставляла отрезки почти без сопротивления, и
-           решение выходило на два порядка сильнее нужного. */
-        row[j] = Math.PI / panels[i].len;
+        /* На собственной середине отрезок виден под развёрнутым углом. */
+        row[j] = Math.PI;
         continue;
       }
-      const dx = panels[i].x - panels[j].x;
-      const dy = panels[i].y - panels[j].y;
-      const r2 = dx * dx + dy * dy + 0.0004;
-      row[j] = (dx * panels[i].nx + dy * panels[i].ny) / r2;
+      swirlPanelFlow(panels[j], panels[i].x, panels[i].y, probe);
+      const wx = probe.x * panels[j].tx + probe.y * panels[j].nx;
+      const wy = probe.x * panels[j].ty + probe.y * panels[j].ny;
+      row[j] = wx * panels[i].nx + wy * panels[i].ny;
     }
     row[n] = panels[i].ny;
     a.push(row);
@@ -1972,16 +1990,19 @@ function swirlBalance(panels) {
     }
   }
   let net = 0;
+  let span = 0;
   for (let i = 0; i < n; i += 1) {
     panels[i].flux = a[i][n] / (a[i][i] || 1e-9);
-    net += panels[i].flux;
+    net += panels[i].flux * panels[i].len;
+    span += panels[i].len;
   }
   /* Замкнутое тело не рождает и не глотает воду: сумма источников обязана
      быть нулём. Приближённое решение давала её ненулевой, и буква работала
      насосом — гнала воду от себя во все стороны с силой почти в снос, отчего
-     ниже по течению выдувалась пустота во весь кадр. Сносим средним: монополь
-     уходит, а расклад по граням остаётся. */
-  const drift = net / n;
+     ниже по течению выдувалась пустота во весь кадр. Считать надо расход, то
+     есть силу, помноженную на длину отрезка. Сносим постоянной плотностью:
+     монополь уходит, а расклад по граням остаётся. */
+  const drift = net / span;
   for (let i = 0; i < n; i += 1) panels[i].flux -= drift;
 }
 
@@ -1999,13 +2020,12 @@ function swirlVelocity(x, y, blobs, flow, out, panels) {
      раскладываются источники, подобранные так, чтобы сквозь каждую грань
      не шло ни капли: возмущение принимает форму буквы, а не окружности. */
   if (panels) {
+    const local = swirlProbe;
     for (const panel of panels) {
-      const dx = x - panel.x;
-      const dy = y - panel.y;
-      const r2 = dx * dx + dy * dy + 0.0004;
-      const k = (panel.flux * flow) / r2;
-      vx += dx * k;
-      vy += dy * k;
+      swirlPanelFlow(panel, x, y, local);
+      const share = panel.flux * flow;
+      vx += (local.x * panel.tx + local.y * panel.nx) * share;
+      vy += (local.x * panel.ty + local.y * panel.ny) * share;
     }
   }
 
@@ -2182,7 +2202,7 @@ function drawSwirl() {
 
 MODES.swirl = {
   label: 'трассеры',
-  note: 'Вода здесь не поле, а рой: точки идут по течению и тянут за собой хвост из прошлых положений — получаются линии тока. Контур Л они встречают по-настоящему: сквозь грань не проходят, гасят нормальную составляющую и скользят вдоль. Обтекание вдали держат источники, разложенные по самому контуру и подобранные так, чтобы сквозь каждую грань не шло ни капли, — иначе точки расходятся перед буквой и больше не сходятся, за кормой навсегда остаётся пустая труба. Поэтому и возмущение имеет форму буквы, а не окружности. Вихри никто не расставляет по расписанию: завихренность рождается на стенке, сходит с острых углов, и сила схода берётся из скорости у самой грани — у Л косая нога разгоняет сильнее прямой. Дальше вихри двигают друг друга сами: дорожка складывается из их взаимного вращения, а не из формулы. «Завихрение» задаёт, насколько охотно грань отдаёт вихрь; «симметрия» ставит вершину посередине, и обе ноги начинают срывать одинаково.',
+  note: 'Вода здесь не поле, а рой: точки идут по течению и тянут за собой хвост из прошлых положений — получаются линии тока. Контур Л они встречают по-настоящему: сквозь грань не проходят, гасят нормальную составляющую и скользят вдоль. Обтекание держат источники, разложенные по самому контуру и подобранные так, чтобы сквозь каждую грань не шло ни капли, — иначе точки расходятся перед буквой и больше не сходятся, за кормой навсегда остаётся пустая труба. Поэтому и возмущение имеет форму буквы, а не окружности. Вихри никто не расставляет по расписанию: завихренность рождается на стенке, сходит с острых углов, и сила схода берётся из скорости у самой грани — у Л косая нога разгоняет сильнее прямой. Дальше вихри двигают друг друга сами: дорожка складывается из их взаимного вращения, а не из формулы. «Завихрение» задаёт, насколько охотно грань отдаёт вихрь; «симметрия» ставит вершину посередине, и обе ноги начинают срывать одинаково.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
