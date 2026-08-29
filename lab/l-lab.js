@@ -1392,6 +1392,12 @@ function stepAscii() {
    рельефом. Но плотных символов в моноширинном шрифте всего горстка, поэтому
    градаций в светлом конце знаками не набрать — там их доберёт прозрачность. */
 const ASCII_RAMP = ' .,:;~-+=*#%&@';
+/* Знаки набраны из пунктуации, и плотный конец у них короткий: после * # % & @
+   добирать нечем. У геометрических блоков шкала — доля закрашенной клетки,
+   поэтому ступени ровные с обоих концов. Штрихи там тоже честнее: не |-/\,
+   а восемь направлений треугольниками. */
+const BLOCK_RAMP = ' \u00b7\u2591\u2592\u2593\u2588';
+const BLOCK_STROKES = { up: '\u25b2', down: '\u25bc', left: '\u25c0', right: '\u25b6', ne: '\u25e5', nw: '\u25e4', se: '\u25e2', sw: '\u25e3' };
 
 function letterBody() {
   const height = num('rise') * 2.4;
@@ -1526,12 +1532,20 @@ function drawAsciiWater() {
   const standing = on('body');
   const gain = num('gain');
   const floor = num('floor');
+  const blocks = on('blocks');
+  const ramp = blocks ? BLOCK_RAMP : ASCII_RAMP;
 
   ctx.save();
   ctx.fillStyle = ink(1);
   ctx.font = `${Math.round(cell * 1.04)}px "DM Mono", monospace`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  /* Блочные знаки уже кегля клетки: у моноширинного шрифта ширина знака
+     около 0.6 высоты, и сплошной █ вышел бы вертикальной полоской, а поле —
+     штрихкодом. Растягиваем ряд по горизонтали, чтобы клетка закрывалась
+     целиком: у блоков доля закраски и есть шкала. */
+  const stretch = blocks ? (cell + 0.6) / Math.max(ctx.measureText('\u2588').width, 0.001) : 1;
+  if (stretch !== 1) ctx.scale(stretch, 1);
 
   for (let row = 0; row < rows; row += 1) {
     const y = (row + 0.5) * cell;
@@ -1647,14 +1661,23 @@ function drawAsciiWater() {
          шкалу, чтобы срез не съедал заодно и градации. */
       const raw = 0.5 + field * gain - wakeEnvelope * 0.2;
       const level = clamp((raw - floor) / Math.max(1 - floor, 0.08), 0, 1);
-      const index = Math.min(ASCII_RAMP.length - 1, Math.floor(level * ASCII_RAMP.length));
-      let glyph = ASCII_RAMP[index];
-      if (on('strokes') && level > 0.12 && (near > 0.055 || wakeEnvelope > 0.03)) {
+      const index = Math.min(ramp.length - 1, Math.floor(level * ramp.length));
+      let glyph = ramp[index];
+      let stroke = false;
+      /* У блоков штрих закрывает клетку целиком, поэтому пускаем его только
+         на гребни: внизу шкалы тон важнее направления. */
+      if (on('strokes') && level > (blocks ? 0.58 : 0.12) && (near > 0.055 || wakeEnvelope > 0.03)) {
+        stroke = true;
         const screenVelocityX = flowVelocityX;
         const screenVelocityY = -flowVelocityY;
         const horizontal = Math.abs(screenVelocityX);
         const vertical = Math.abs(screenVelocityY);
-        if (vertical > horizontal * 1.45) glyph = '|';
+        if (blocks) {
+          if (vertical > horizontal * 1.45) glyph = screenVelocityY < 0 ? BLOCK_STROKES.up : BLOCK_STROKES.down;
+          else if (horizontal > vertical * 1.45) glyph = screenVelocityX > 0 ? BLOCK_STROKES.right : BLOCK_STROKES.left;
+          else if (screenVelocityX > 0) glyph = screenVelocityY < 0 ? BLOCK_STROKES.ne : BLOCK_STROKES.se;
+          else glyph = screenVelocityY < 0 ? BLOCK_STROKES.nw : BLOCK_STROKES.sw;
+        } else if (vertical > horizontal * 1.45) glyph = '|';
         else if (horizontal > vertical * 1.45) glyph = '-';
         else glyph = screenVelocityX * screenVelocityY > 0 ? '\\' : '/';
       }
@@ -1662,11 +1685,21 @@ function drawAsciiWater() {
       /* Гамма растягивает верх: знаков там мало и они близки по весу,
          так что тона у гребней даёт прозрачность, а не набор. */
       ctx.globalAlpha = 0.22 + Math.pow(level, 0.62) * 0.78;
-      ctx.fillText(glyph, x, y);
+      /* Тон растянут на клетку, а треугольник направления — нет: широкий
+         он читается флажком, а не течением. */
+      if (stroke && stretch !== 1) {
+        ctx.save();
+        ctx.scale(1 / stretch, 1);
+        ctx.fillText(glyph, x, y);
+        ctx.restore();
+      } else {
+        ctx.fillText(glyph, x / stretch, y);
+      }
     }
   }
 
   ctx.globalAlpha = 1;
+  if (stretch !== 1) ctx.scale(1 / stretch, 1);
   if (standing) {
     ctx.fillStyle = ink(0.97);
     ctx.beginPath();
@@ -1681,7 +1714,7 @@ function drawAsciiWater() {
 
 MODES.ascii = {
   label: 'ascii',
-  note: 'Л идёт вверх, камера держит её в центре — поэтому река едет сверху вниз. Перед буквой вода встаёт бугром, вдоль бортов проседает, позади остаётся волновая тень, а с углов по очереди срываются вихри: косой борт срывает сильнее прямого. С носа непрерывно сходят волновые фронты — они живут в воде сами и складываются в клин. «Симметрия» ставит вершину посередине, и обе грани начинают срывать поровну: видно, что несимметричный след — заслуга именно Л. «Буква» убирает тело целиком. «Размах» задаёт силу воды, «срез» съедает спокойную гладь снизу и оставляет одни гребни, а «штрихи» показывают направление течения — теперь их можно включить вместе со срезом.',
+  note: 'Л идёт вверх, камера держит её в центре — поэтому река едет сверху вниз. Перед буквой вода встаёт бугром, вдоль бортов проседает, позади остаётся волновая тень, а с углов по очереди срываются вихри: косой борт срывает сильнее прямого. С носа непрерывно сходят волновые фронты — они живут в воде сами и складываются в клин. «Симметрия» ставит вершину посередине, и обе грани начинают срывать поровну: видно, что несимметричный след — заслуга именно Л. «Буква» убирает тело целиком. «Размах» задаёт силу воды, «срез» съедает спокойную гладь снизу и оставляет одни гребни, а «штрихи» показывают направление течения — теперь их можно включить вместе со срезом. «Блоки» меняют набор: у пунктуации плотный конец обрывается на @, у геометрии ступень — это доля закрашенной клетки, и штрихи показывают все восемь направлений треугольниками.',
   cursor: 'crosshair',
   tools: [
     { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
@@ -1694,6 +1727,7 @@ MODES.ascii = {
     { type: 'toggle', key: 'body', label: 'буква', value: true },
     { type: 'toggle', key: 'even', label: 'симметрия', value: false },
     { type: 'toggle', key: 'strokes', label: 'штрихи', value: true },
+    { type: 'toggle', key: 'blocks', label: 'блоки', value: true },
   ],
   setup: setupAscii,
   onMove: moveWaterStudy,
