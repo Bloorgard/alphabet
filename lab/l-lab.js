@@ -1887,8 +1887,6 @@ function swirlFill() {
   modeState.crowd = crowd;
 }
 
-/* Скорость в точке: общий снос плюс то, что наводят вихри. Ядро конечного
-   радиуса — иначе у самого центра скорость улетает в бесконечность. */
 /* Контур разбирается на отрезки, у каждого — середина и внешняя нормаль.
    Источники на них подбираются решением маленькой системы: нормальная
    скорость на каждой грани должна погаситься. Геометрия меняется только
@@ -1987,19 +1985,20 @@ function swirlBalance(panels) {
   for (let i = 0; i < n; i += 1) panels[i].flux -= drift;
 }
 
-function swirlVelocity(x, y, blobs, flow, out, body) {
+/* Скорость в точке: снос, обтекание тела и наводка вихрей. Ядро у вихря
+   конечного радиуса — иначе в самом центре скорость улетает в бесконечность. */
+function swirlVelocity(x, y, blobs, flow, out, panels) {
   let vx = 0;
   let vy = -flow;
 
-    /* Обтекание вдали. Одной стенки мало: точки расходятся перед буквой и
+  /* Обтекание вдали. Одной стенки мало: точки расходятся перед буквой и
      больше не сходятся, за кормой навсегда остаётся пустая труба. Раньше
      здесь стоял диполь — обтекание круглого тела, — и он выдавал себя
      круглым же пятном возмущения вокруг Л, с резким швом по краю, потому
      что внутри своего радиуса он попросту не работал. Теперь по контуру
      раскладываются источники, подобранные так, чтобы сквозь каждую грань
      не шло ни капли: возмущение принимает форму буквы, а не окружности. */
-  if (body) {
-    const panels = swirlPanels(body);
+  if (panels) {
     for (const panel of panels) {
       const dx = x - panel.x;
       const dy = y - panel.y;
@@ -2028,13 +2027,13 @@ function swirlVelocity(x, y, blobs, flow, out, body) {
    никто не расставляет по расписанию — сила схода берётся из скорости у
    грани, а грань у Л разная: косая разгоняет сильнее прямой. Дальше вихри
    двигают друг друга сами, и дорожка складывается из их взаимного вращения. */
-function swirlShed(body, blobs, flow) {
+function swirlShed(body, panels, blobs, flow) {
   const probe = { x: 0, y: 0 };
   for (const side of [-1, 1]) {
     const corner = side < 0 ? body.left : body.right;
     const x = corner.x + side * 0.02;
     const y = corner.y + 0.004;
-    swirlVelocity(x, y, blobs, flow, probe, body);
+    swirlVelocity(x, y, blobs, flow, probe, panels);
     const edge = Math.hypot(probe.x, probe.y) * letterHeel(body, side);
     blobs.push({
       x,
@@ -2054,25 +2053,31 @@ function stepSwirl() {
   const body = letterBody();
   const standing = on('body');
   const probe = { x: 0, y: 0 };
+  /* Раскладку по контуру берём один раз за кадр: внутри вызова скорости она
+     сверялась бы заново на каждую из двух тысяч точек. */
+  const panels = standing ? swirlPanels(body) : null;
 
   if (standing) {
     modeState.shed += STEP;
-    const beat = 0.055 / Math.max(flow / 0.16, 0.25);
+    /* Число Струхаля почти постоянно: такт схода растёт с телом и падает со
+       скоростью. Здесь стояло одно лишь течение, и «раствор» на ритм
+       дорожки не влиял вовсе — хотя у широкой Л вихри обязаны сходить реже. */
+    const beat = (0.05 * body.spread) / Math.max(flow, 0.02);
     if (modeState.shed >= beat) {
       modeState.shed = 0;
-      swirlShed(body, blobs, flow);
+      swirlShed(body, panels, blobs, flow);
     }
   }
 
   /* Вихри несёт течение и наводят друг друга — сами себя не крутят. */
   for (const blob of blobs) {
-    swirlVelocity(blob.x, blob.y, blobs, flow, probe, standing ? body : null);
-    const own = blob.turn / SWIRL_CORE;
+    /* Себя вихрь не крутит: на нулевом расстоянии наводка выходит нулевой
+       сама, поэтому его можно не исключать из списка. */
+    swirlVelocity(blob.x, blob.y, blobs, flow, probe, panels);
     blob.x += probe.x * STEP;
-    blob.y += (probe.y - 0) * STEP;
+    blob.y += probe.y * STEP;
     blob.age += STEP;
     blob.turn *= 1 - 0.5 * STEP;
-    void own;
   }
   for (let i = blobs.length - 1; i >= 0; i -= 1) {
     /* Убираем по возрасту и по уходу за кадр. По величине нельзя: сила вихря
@@ -2082,7 +2087,7 @@ function stepSwirl() {
   }
 
   for (const part of parts) {
-    swirlVelocity(part.x, part.y, blobs, flow, probe, standing ? body : null);
+    swirlVelocity(part.x, part.y, blobs, flow, probe, panels);
     let vx = probe.x;
     let vy = probe.y;
 
@@ -2133,7 +2138,11 @@ function drawSwirl() {
      Четыре пути вместо тысячи — иначе кадр уходит на смену прозрачности. */
   const bands = [[], [], [], []];
   for (const part of modeState.parts) {
-    bands[Math.min(3, Math.floor(part.swing * 2.6))].push(part);
+    /* Индекс берём с обеих сторон: на первом кадре после смены режима
+       ползунки могут быть ещё не разложены, скорость выходит NaN — и полоса
+       по такому индексу не находится вовсе. */
+    const band = Math.floor(part.swing * 2.6);
+    bands[band >= 0 && band < 3 ? band : 3].push(part);
   }
 
   for (let band = 0; band < 4; band += 1) {
