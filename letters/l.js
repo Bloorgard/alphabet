@@ -56,7 +56,7 @@ const PARAMS = { items: true, stream: 1, curl: 1, size: 1, crowd: 1200, tail: 12
 const GEAR = [
   { key: 'stream', label: 'течение', min: 0.5, max: 1.8, step: 0.05 },
   { key: 'curl', label: 'завихрение', min: 0, max: 2, step: 0.05 },
-  { key: 'size', label: 'рост буквы', min: 0.6, max: 1.8, step: 0.05 },
+  { key: 'size', label: 'рост буквы', min: 0.6, max: 2.3, step: 0.05 },
 ];
 
 /* Вид воды к результату отношения не имеет и открыт всегда. */
