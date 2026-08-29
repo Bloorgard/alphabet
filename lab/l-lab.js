@@ -1374,12 +1374,18 @@ function letterBody() {
      сравнение честное. */
   const apexX = on('even') ? 0.5 : 0.5 + spread * 0.5;
   const foot = 0.5 - height * 0.5;
+  const apex = { x: apexX, y: 0.5 + height * 0.5 };
+  const right = { x: 0.5 + spread * 0.5, y: foot };
+  const left = { x: 0.5 - spread * 0.5, y: foot };
+  const girth = Math.max(spread * 0.5, height * 0.42);
   return {
     height,
     spread,
-    apex: { x: apexX, y: 0.5 + height * 0.5 },
-    right: { x: 0.5 + spread * 0.5, y: foot },
-    left: { x: 0.5 - spread * 0.5, y: foot },
+    apex,
+    right,
+    left,
+    mid: { x: (apex.x + right.x + left.x) / 3, y: (apex.y + right.y + left.y) / 3 },
+    girth: girth * girth,
   };
 }
 
@@ -1834,6 +1840,252 @@ function echoSide() {
   const split = (ECHO.feet[0].x + ECHO.feet[1].x) / 2;
   return pointer.x < split ? 0 : 1;
 }
+
+/* Вода не полем, а роем. У каждой точки своя скорость: снос тянет её вниз,
+   контур Л она встречает по-настоящему — сквозь грань не проходит, а гасит
+   нормальную составляющую и скользит вдоль. Вихри никто не расставляет:
+   точки чувствуют соседей, вязкость подтягивает их к общей скорости, а
+   давление растаскивает при сгущении — сорванный с угла слой сдвига
+   сворачивается сам. Хвост из прошлых положений превращает рой в линии тока:
+   у косой ноги линия идёт долго и полого, у прямой рвётся сразу за углом. */
+const SWIRL_TAIL = 22;
+const SWIRL_CORE = 0.0016;
+
+function swirlSeed(part, y) {
+  part.x = Math.random();
+  part.y = y;
+  for (let i = 0; i < SWIRL_TAIL; i += 1) {
+    part.px[i] = part.x;
+    part.py[i] = part.y;
+  }
+  part.head = 0;
+}
+
+function swirlFlow() {
+  return num('speed') * 0.26;
+}
+
+function setupSwirl() {
+  modeState.parts = [];
+  modeState.blobs = [];
+  modeState.crowd = 0;
+  modeState.shed = 0;
+  swirlFill();
+}
+
+function swirlFill() {
+  const crowd = Math.round(num('crowd'));
+  if (crowd === modeState.crowd) return;
+  const parts = modeState.parts;
+  while (parts.length > crowd) parts.pop();
+  while (parts.length < crowd) {
+    const part = { x: 0, y: 0, px: new Float64Array(SWIRL_TAIL), py: new Float64Array(SWIRL_TAIL), head: 0, swing: 0 };
+    swirlSeed(part, Math.random());
+    parts.push(part);
+  }
+  modeState.crowd = crowd;
+}
+
+/* Скорость в точке: общий снос плюс то, что наводят вихри. Ядро конечного
+   радиуса — иначе у самого центра скорость улетает в бесконечность. */
+function swirlVelocity(x, y, blobs, flow, out, body) {
+  let vx = 0;
+  let vy = -flow;
+
+  /* Тело в потоке — это не только стенка. Одного отталкивания у обшивки мало:
+     точки расходятся перед буквой и больше не сходятся, за кормой навсегда
+     остаётся пустая труба. В воде линии тока замыкает само тело, поэтому
+     добавляем классическое обтекание — поле диполя, у которого на поверхности
+     скорость чисто касательная, а вдали снос ровный. Форму держит уже стенка,
+     диполю достаточно радиуса с букву. */
+  if (body) {
+    const dx = x - body.mid.x;
+    const dy = y - body.mid.y;
+    const r2 = dx * dx + dy * dy;
+    if (r2 > body.girth) {
+      const share = body.girth / r2;
+      const dot = (vy * dy) / r2;
+      vx -= share * (2 * dot * dx);
+      vy -= share * (2 * dot * dy - vy);
+    }
+  }
+  for (const blob of blobs) {
+    const dx = x - blob.x;
+    const dy = y - blob.y;
+    const r2 = dx * dx + dy * dy + SWIRL_CORE;
+    const k = blob.turn / r2;
+    vx -= dy * k;
+    vy += dx * k;
+  }
+  out.x = vx;
+  out.y = vy;
+  return out;
+}
+
+/* Завихренность рождается на стенке: вода не может скользить по борту без
+   трения, и весь этот сдвиг сходит с острого угла в воду. Поэтому вихри
+   никто не расставляет по расписанию — сила схода берётся из скорости у
+   грани, а грань у Л разная: косая разгоняет сильнее прямой. Дальше вихри
+   двигают друг друга сами, и дорожка складывается из их взаимного вращения. */
+function swirlShed(body, blobs, flow) {
+  const probe = { x: 0, y: 0 };
+  for (const side of [-1, 1]) {
+    const corner = side < 0 ? body.left : body.right;
+    const x = corner.x + side * 0.02;
+    const y = corner.y + 0.004;
+    swirlVelocity(x, y, blobs, flow, probe, body);
+    const edge = Math.hypot(probe.x, probe.y) * letterHeel(body, side);
+    blobs.push({
+      x,
+      y,
+      turn: -side * edge * edge * 0.011 * num('curl'),
+      age: 0,
+    });
+  }
+  while (blobs.length > 260) blobs.shift();
+}
+
+function stepSwirl() {
+  swirlFill();
+  const parts = modeState.parts;
+  const blobs = modeState.blobs;
+  const flow = swirlFlow();
+  const body = letterBody();
+  const standing = on('body');
+  const probe = { x: 0, y: 0 };
+
+  if (standing) {
+    modeState.shed += STEP;
+    const beat = 0.055 / Math.max(flow / 0.16, 0.25);
+    if (modeState.shed >= beat) {
+      modeState.shed = 0;
+      swirlShed(body, blobs, flow);
+    }
+  }
+
+  /* Вихри несёт течение и наводят друг друга — сами себя не крутят. */
+  for (const blob of blobs) {
+    swirlVelocity(blob.x, blob.y, blobs, flow, probe, standing ? body : null);
+    const own = blob.turn / SWIRL_CORE;
+    blob.x += probe.x * STEP;
+    blob.y += (probe.y - 0) * STEP;
+    blob.age += STEP;
+    blob.turn *= 1 - 0.16 * STEP;
+    void own;
+  }
+  for (let i = blobs.length - 1; i >= 0; i -= 1) {
+    if (blobs[i].y < -0.25 || Math.abs(blobs[i].turn) < 0.00002) blobs.splice(i, 1);
+  }
+
+  for (const part of parts) {
+    swirlVelocity(part.x, part.y, blobs, flow, probe, standing ? body : null);
+    let vx = probe.x;
+    let vy = probe.y;
+
+    if (standing) {
+      const rim = letterDistance(part.x, part.y, body);
+      if (rim < 0.02) {
+        const normal = letterNormal(part.x, part.y, body);
+        if (rim < 0.004) {
+          const out = 0.004 - rim;
+          part.x += normal.x * out;
+          part.y += normal.y * out;
+        }
+        /* Сквозь борт точка не идёт: нормальную составляющую гасим у самой
+           обшивки и отпускаем на расстоянии — так линия тока сама ложится
+           вдоль грани, а не ломается об неё. */
+        const into = vx * normal.x + vy * normal.y;
+        if (into < 0) {
+          const grip = 1 - Math.max(rim, 0) / 0.02;
+          vx -= into * normal.x * grip;
+          vy -= into * normal.y * grip;
+        }
+      }
+    }
+
+    part.swing = Math.hypot(vx, vy + flow) / Math.max(flow, 0.02);
+    part.x += vx * STEP;
+    part.y += vy * STEP;
+    if (part.x < 0) part.x += 1;
+    if (part.x > 1) part.x -= 1;
+    if (part.y < -0.04) swirlSeed(part, 1.04);
+
+    part.head = (part.head + 1) % SWIRL_TAIL;
+    part.px[part.head] = part.x;
+    part.py[part.head] = part.y;
+  }
+}
+
+function drawSwirl() {
+  const body = letterBody();
+  const tail = Math.max(2, Math.round(num('tail')));
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineWidth = Math.max(1, S * 0.0016);
+
+  /* Разбираем рой на четыре ленты по тому, насколько точка отклонилась от
+     общего сноса: ровная вода уходит в фон, закрученная выступает вперёд.
+     Четыре пути вместо тысячи — иначе кадр уходит на смену прозрачности. */
+  const bands = [[], [], [], []];
+  for (const part of modeState.parts) {
+    bands[Math.min(3, Math.floor(part.swing * 2.6))].push(part);
+  }
+
+  for (let band = 0; band < 4; band += 1) {
+    if (!bands[band].length) continue;
+    ctx.strokeStyle = ink(0.18 + band * 0.27);
+    ctx.beginPath();
+    for (const part of bands[band]) {
+      let first = true;
+      for (let i = tail - 1; i >= 0; i -= 1) {
+        const at = (part.head - i + SWIRL_TAIL * 2) % SWIRL_TAIL;
+        const back = (at + SWIRL_TAIL - 1) % SWIRL_TAIL;
+        const x = part.px[at] * S;
+        const y = (1 - part.py[at]) * S;
+        /* Точка, ушедшая за край, возвращается с другой стороны — хвост через
+           весь кадр рисовать нельзя. */
+        if (first || Math.abs(part.px[at] - part.px[back]) > 0.5) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+        first = false;
+      }
+    }
+    ctx.stroke();
+  }
+
+  if (on('body')) {
+    ctx.fillStyle = ink(0.97);
+    ctx.beginPath();
+    ctx.moveTo(body.apex.x * S, (1 - body.apex.y) * S);
+    ctx.lineTo(body.right.x * S, (1 - body.right.y) * S);
+    ctx.lineTo(body.left.x * S, (1 - body.left.y) * S);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  drawStatus(count(modeState.blobs.length, 'вихрь', 'вихря', 'вихрей'), false);
+}
+
+MODES.swirl = {
+  label: 'трассеры',
+  note: 'Вода здесь не поле, а рой: точки идут по течению и тянут за собой хвост из прошлых положений — получаются линии тока. Контур Л они встречают по-настоящему: сквозь грань не проходят, гасят нормальную составляющую и скользят вдоль. Обтекание вдали держит поле диполя — иначе точки расходятся перед буквой и больше не сходятся, за кормой навсегда остаётся пустая труба. Вихри никто не расставляет по расписанию: завихренность рождается на стенке, сходит с острых углов, и сила схода берётся из скорости у самой грани — у Л косая нога разгоняет сильнее прямой. Дальше вихри двигают друг друга сами: дорожка складывается из их взаимного вращения, а не из формулы. «Завихрение» задаёт, насколько охотно грань отдаёт вихрь; «симметрия» ставит вершину посередине, и обе ноги начинают срывать одинаково.
+  cursor: 'crosshair',
+  tools: [
+    { type: 'range', key: 'speed', label: 'течение', min: 0.15, max: 1.8, step: 0.05, value: 0.62 },
+    { type: 'range', key: 'crowd', label: 'рой', min: 200, max: 3000, step: 50, value: 1600 },
+    { type: 'range', key: 'curl', label: 'завихрение', min: 0, max: 3, step: 0.05, value: 1 },
+    { type: 'range', key: 'tail', label: 'хвост', min: 2, max: 22, step: 1, value: 14 },
+    { type: 'range', key: 'rise', label: 'рост', min: 0.06, max: 0.2, step: 0.005, value: 0.12 },
+    { type: 'range', key: 'spread', label: 'раствор', min: 0.08, max: 0.34, step: 0.01, value: 0.2 },
+    { type: 'toggle', key: 'body', label: 'буква', value: true },
+    { type: 'toggle', key: 'even', label: 'симметрия', value: false },
+  ],
+  setup: setupSwirl,
+  step: stepSwirl,
+  draw: drawSwirl,
+};
+
 
 MODES.echo = {
   label: 'эхо',
