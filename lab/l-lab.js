@@ -2218,7 +2218,7 @@ function stepSwirlSlide() {
   if (Math.abs(modeState.slide) === 0.3) modeState.sway = 0;
   if (Math.abs(modeState.lift) === 0.2) modeState.climb = 0;
   /* Крен догоняет ход с запозданием — иначе поворот выходит дёрганым. */
-  modeState.tilt += (-modeState.sway * 0.9 - modeState.tilt) * Math.min(1, 4 * STEP);
+  modeState.tilt += (-modeState.sway * 1.9 - modeState.tilt) * Math.min(1, 4 * STEP);
 }
 
 function stepSwirl() {
