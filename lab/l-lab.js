@@ -1350,39 +1350,6 @@ function setupAscii() {
   modeState.bow = 0;
 }
 
-function stepAscii() {
-  stepWaterStudy();
-  const flow = asciiFlowSpeed();
-  const radius = num('radius');
-  modeState.scroll += flow * STEP;
-
-  for (const eddy of modeState.eddies) {
-    eddy.age += STEP;
-    eddy.y -= flow * STEP;
-    /* Дорожка расходится книзу: вихри расползаются от оси, как на натуре. */
-    eddy.x += eddy.spin * 0.018 * STEP;
-  }
-  while (modeState.eddies.length && (modeState.eddies[0].y < -0.2 || modeState.eddies[0].age > 7)) {
-    modeState.eddies.shift();
-  }
-
-  /* Частота схода растёт со скоростью и падает с размером тела — число
-     Струхаля почти постоянно, поэтому шаг дорожки держится сам. */
-  modeState.shed += STEP;
-  const period = (1.5 * radius) / Math.max(flow, 0.02);
-  if (modeState.shed >= period) {
-    modeState.shed = 0;
-    modeState.side = -modeState.side;
-    modeState.eddies.push({
-      x: 0.5 + modeState.side * radius * 0.82,
-      y: 0.5 - radius * 0.45,
-      spin: modeState.side,
-      age: 0,
-    });
-    if (modeState.eddies.length > 14) modeState.eddies.shift();
-  }
-}
-
 /* Тело сцены — не круг, а силуэт Л: вершина по курсу, прямой борт вдоль хода,
    наклонный расходится. Всё, что вода делает с телом, считается от расстояния
    до его контура, поэтому форма буквы попадает и в отражение, и в тень, и в
@@ -1484,23 +1451,28 @@ function stepAscii() {
     modeState.eddies.shift();
   }
 
+  /* Фронты живут в воде сами и стареют всегда, даже когда буква убрана:
+     раньше выход стоял выше, и снятая буква не убирала след, а замораживала
+     его — клин повисал в кадре навсегда. Теперь он доживает своё и уходит
+     вниз по течению. */
+  for (const front of modeState.fronts) {
+    front.age += STEP;
+    front.y -= flow * STEP;
+  }
+  while (modeState.fronts.length && modeState.fronts[0].age > 3.2) modeState.fronts.shift();
+
   if (!on('body')) return;
 
   /* Тело неподвижно в кадре, но относительно воды идёт непрерывно — значит
-     и волну гонит непрерывно. Носовые фронты рождаются раз в такт, дальше
-     живут в воде сами: сносятся течением и расходятся. Расходятся медленнее,
-     чем идёт тело, поэтому их огибающая и складывается в клин. */
+     и волну гонит непрерывно. Носовые фронты рождаются раз в такт и дальше
+     расходятся медленнее, чем идёт тело, поэтому их огибающая складывается
+     в клин. */
   modeState.bow += STEP;
   if (modeState.bow >= 0.11) {
     modeState.bow = 0;
     modeState.fronts.push({ x: body.apex.x, y: body.apex.y, age: 0 });
     if (modeState.fronts.length > 26) modeState.fronts.shift();
   }
-  for (const front of modeState.fronts) {
-    front.age += STEP;
-    front.y -= flow * STEP;
-  }
-  while (modeState.fronts.length && modeState.fronts[0].age > 3.2) modeState.fronts.shift();
 
   /* Частота схода растёт со скоростью и падает с размером тела — число
      Струхаля почти постоянно, поэтому шаг дорожки держится сам. */
@@ -1717,8 +1689,13 @@ function drawAsciiWater() {
       const pace = Math.hypot(flowVelocityX, flowVelocityY);
       if (on('strokes') && level > 0.18 && swing > 0.22 && pace > 0.35) {
         stroke = true;
+        /* Рисуем не саму скорость, а её отклонение от общего сноса — то же,
+           по чему штрих и отбирается. Абсолютная скорость в реке почти всюду
+           направлена вниз, и поле выходило сплошной массой одинаковых
+           треугольников. У отклонения же вихрь читается вращением, а нос —
+           расступлением. */
         const screenVelocityX = flowVelocityX;
-        const screenVelocityY = -flowVelocityY;
+        const screenVelocityY = -(flowVelocityY + 1);
         const horizontal = Math.abs(screenVelocityX);
         const vertical = Math.abs(screenVelocityY);
         if (blocks) {
