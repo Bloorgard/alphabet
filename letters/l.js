@@ -48,7 +48,7 @@ const CATCH = 0.019;          /* с какого расстояния вещь �
 const BASE_RISE = 0.055;
 const BASE_SPREAD = 0.1;
 
-const PARAMS = { stream: 1, curl: 1, size: 1, crowd: 1200, tail: 12, fade: true, spark: true, chips: false };
+const PARAMS = { items: true, stream: 1, curl: 1, size: 1, crowd: 1200, tail: 12, fade: true, spark: true, chips: false };
 
 /* Снаряжение партии: течение, охота грани отдавать вихрь и рост буквы. На
    рекорде эти ручки закрыты — иначе результат ставится не рукой, а тихой
@@ -65,6 +65,7 @@ const CONTROLS = [
   { key: 'tail', label: 'хвост', min: 2, max: 22, step: 1 },
 ];
 const SWITCHES = [
+  { key: 'items', label: 'вещи' },
   { key: 'fade', label: 'угасание' },
   { key: 'spark', label: 'блик' },
   { key: 'chips', label: 'щепки' },
@@ -541,7 +542,9 @@ export function mountL(workspace) {
       }
     }
 
-    if (!state.over) {
+    if (!params.items) state.items.length = 0;
+
+    if (params.items && !state.over) {
       state.drop += STEP;
       /* Частота падает долей, а не вычитанием: вычитание упирается в пол и
          дальше не давит. */
@@ -644,8 +647,20 @@ export function mountL(workspace) {
      точками следом за счётом: сколько набрал и сколько осталось читается
      разом. Так же устроено у К. */
   function status() {
+    if (!params.items) {
+      ctx.font = "10px 'DM Mono', ui-monospace, monospace";
+      ctx.letterSpacing = '.08em';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = ink(0.5);
+      ctx.fillText('ПЕСОЧНИЦА', ox + S / 2, oy + 25);
+      ctx.textAlign = 'left';
+      ctx.letterSpacing = '0px';
+      return;
+    }
+
     const tail = state.over ? ' · клик — заново' : '';
-    const text = `${state.score} ${plural(state.score)}${tail}`.toUpperCase();
+    const text = `${state.play ? '' : 'песочница · '}${state.score} ${plural(state.score)}${tail}`.toUpperCase();
 
     ctx.font = "10px 'DM Mono', ui-monospace, monospace";
     ctx.letterSpacing = '.08em';
@@ -855,8 +870,11 @@ export function mountL(workspace) {
       if (state.play === play) return;
       state.play = play;
       /* Возврат на рекорд восстанавливает снаряжение: накрученное в песочнице
-         не должно уезжать в зачётную партию. */
+         не должно уезжать в зачётную партию. В песочницу же идут смотреть на
+         воду, а не ловить, поэтому вещи там по умолчанию убраны — вернуть их
+         можно переключателем. */
       if (play) Object.assign(params, PARAMS);
+      else params.items = false;
       reset();
       syncPanel();
     });
@@ -897,6 +915,7 @@ export function mountL(workspace) {
     panel.append(label);
   }
 
+  const switches = [];
   for (const item of SWITCHES) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -906,8 +925,12 @@ export function mountL(workspace) {
     button.addEventListener('click', () => {
       params[item.key] = !params[item.key];
       button.setAttribute('aria-pressed', String(params[item.key]));
+      /* Вещи — не отделка: убрали и вернули, значит партия новая, иначе счёт
+         продолжится с прежнего, а жизни успели уйти в тишине. */
+      if (item.key === 'items') reset();
     });
     panel.append(button);
+    switches.push({ key: item.key, button });
   }
 
   const resetButton = document.createElement('button');
@@ -927,6 +950,8 @@ export function mountL(workspace) {
       knob.input.disabled = state.play;
       knob.input.value = params[knob.key];
     }
+    /* Смена режима убирает вещи сама, и переключатель обязан это показать. */
+    for (const item of switches) item.button.setAttribute('aria-pressed', String(params[item.key]));
   }
 
   const toggle = document.createElement('button');
