@@ -1973,7 +1973,18 @@ function swirlBalance(panels) {
       for (let k = col; k <= n; k += 1) a[row][k] -= factor * a[col][k];
     }
   }
-  for (let i = 0; i < n; i += 1) panels[i].flux = a[i][n] / (a[i][i] || 1e-9);
+  let net = 0;
+  for (let i = 0; i < n; i += 1) {
+    panels[i].flux = a[i][n] / (a[i][i] || 1e-9);
+    net += panels[i].flux;
+  }
+  /* Замкнутое тело не рождает и не глотает воду: сумма источников обязана
+     быть нулём. Приближённое решение давала её ненулевой, и буква работала
+     насосом — гнала воду от себя во все стороны с силой почти в снос, отчего
+     ниже по течению выдувалась пустота во весь кадр. Сносим средним: монополь
+     уходит, а расклад по граням остаётся. */
+  const drift = net / n;
+  for (let i = 0; i < n; i += 1) panels[i].flux -= drift;
 }
 
 function swirlVelocity(x, y, blobs, flow, out, body) {
@@ -2028,11 +2039,11 @@ function swirlShed(body, blobs, flow) {
     blobs.push({
       x,
       y,
-      turn: -side * edge * edge * 0.011 * num('curl'),
+      turn: -side * edge * edge * 0.005 * num('curl'),
       age: 0,
     });
   }
-  while (blobs.length > 260) blobs.shift();
+  while (blobs.length > 160) blobs.shift();
 }
 
 function stepSwirl() {
@@ -2060,14 +2071,14 @@ function stepSwirl() {
     blob.x += probe.x * STEP;
     blob.y += (probe.y - 0) * STEP;
     blob.age += STEP;
-    blob.turn *= 1 - 0.16 * STEP;
+    blob.turn *= 1 - 0.5 * STEP;
     void own;
   }
   for (let i = blobs.length - 1; i >= 0; i -= 1) {
     /* Убираем по возрасту и по уходу за кадр. По величине нельзя: сила вихря
        растёт как квадрат скорости, и на тихом течении все они разом
        оказывались ниже порога — дорожка исчезала целиком. */
-    if (blobs[i].y < -0.25 || blobs[i].age > 7) blobs.splice(i, 1);
+    if (blobs[i].y < -0.25 || blobs[i].age > 3.5) blobs.splice(i, 1);
   }
 
   for (const part of parts) {
