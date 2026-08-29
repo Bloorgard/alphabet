@@ -5,12 +5,15 @@
    раствор между кончиками ног. Поэтому механики здесь крутят раствор, а не
    контур: буква не нарисована поверх сцены, а получена из её устройства.
 
-   Тринадцать подходов:
+   Четырнадцать подходов:
 
      корень     вершина как развилка: справа стержень идёт своим курсом,
                 слева отходит боковой, и каждая нога кончается новой Л
      циркуль    Л как измеритель с неравными плечами: шагает через ногу,
                 считает строку растворами и оставляет цепочку арок
+     кильватер  Л как обводы лодки сверху: след складывается из волн, которые
+                держатся за ней, и даёт клин Кельвина; правый борт идёт вдоль
+                хода и молчит, поэтому половины следа не зеркальны
      стремянка  наклонная — лестница, вертикальная — подпорка; узко поставил —
                 валится, широко — разъезжается и не достаёт
      ходьба     две клавиши на две ноги: буква видна только в тот миг, когда
@@ -489,6 +492,231 @@ MODES.river = {
   draw() {
     drawRiverWater(modeState);
     drawRiverBoat();
+  },
+};
+
+/* ---------- кильватер ---------- */
+
+/* След корабля — не рябь и не свечение вдоль борта, а волновой клин Кельвина:
+   волна держится за лодкой, только если её фазовая скорость равна U·cos ψ,
+   откуда k(ψ) = k0/cos²ψ. Всё поле — одна сумма плоских волн по углу; клин
+   в arcsin(1/3) ≈ 19,47°, поперечные дуги и расходящиеся перья складываются
+   из интерференции сами, без единой ручной маски.
+
+   Букву это берёт всерьёз. Правый борт Л идёт вдоль курса и волны почти не
+   гонит, левый расходится и гонит вовсю, поэтому след выходит односторонним:
+   такой картины равнобедренный нос не даст. Раствор ног двигает второй
+   источник, и весь узор перестраивается вместе с начертанием. */
+
+const WAKE_VERTEX = `
+attribute vec2 a_position;
+varying vec2 v_uv;
+void main() {
+  v_uv = a_position * 0.5 + 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}
+`;
+
+const WAKE_FRAGMENT = `
+precision highp float;
+
+varying vec2 v_uv;
+uniform vec2 u_resolution;
+uniform float u_k0;
+uniform float u_psimax;
+uniform float u_glint;
+uniform float u_exposure;
+uniform vec3 u_ink;
+uniform vec3 u_paper;
+uniform float u_heel;
+uniform vec2 u_bow;
+uniform vec2 u_ribs[3];
+
+const int SAMPLES = 88;
+
+/* Сумма даёт высоту и оба наклона разом: фаза известна аналитически, поэтому
+   градиент берётся тут же и трёх проходов ради нормали не нужно. */
+void wakeFrom(vec2 p, vec2 src, float amp, inout float h, inout vec2 grad) {
+  vec2 rel = p - src;
+  float s = -rel.y;
+  float n = rel.x;
+  if (s <= 0.0) return;
+
+  float gate = amp * smoothstep(0.0, 0.02, s) * exp(-s * 0.55);
+  float span = 2.0 * u_psimax / float(SAMPLES);
+  for (int i = 0; i < SAMPLES; i += 1) {
+    float psi = -u_psimax + (float(i) + 0.5) * span;
+    float c = cos(psi);
+    float si = sin(psi);
+    float k = u_k0 / (c * c);
+    float phase = k * (s * c + n * si);
+    /* Вес гасит края веера: там k растёт как 1/cos², и волна ушла бы в муар. */
+    float w = gate * c * c * c;
+    h += cos(phase) * w;
+    float wave = -sin(phase) * w;
+    grad += wave * vec2(k * si, -k * c);
+  }
+}
+
+void main() {
+  vec2 p = v_uv;
+  float h = 0.0;
+  vec2 grad = vec2(0.0);
+  /* Нос даёт симметричный клин, а вытеснение у Л целиком на наклонном борту:
+     источники идут вдоль него, и левая половина следа получает вторую систему
+     волн, которой на правой стороне взяться неоткуда. */
+  wakeFrom(p, u_bow, 1.0, h, grad);
+  wakeFrom(p, u_ribs[0], u_heel * 0.5, h, grad);
+  wakeFrom(p, u_ribs[1], u_heel * 0.36, h, grad);
+  wakeFrom(p, u_ribs[2], u_heel * 0.24, h, grad);
+
+  float scale = 0.9 / float(SAMPLES);
+  h *= scale;
+  grad *= scale;
+
+  vec3 normal = normalize(vec3(-grad * 0.045, 1.0));
+  vec3 light = normalize(vec3(-0.42, 0.44, 0.79));
+  vec3 view = vec3(0.0, 0.0, 1.0);
+  vec3 halfway = normalize(light + view);
+  float diffuse = max(dot(normal, light), 0.0);
+  float specular = pow(max(dot(normal, halfway), 0.0), 96.0);
+  float fresnel = pow(1.0 - max(dot(normal, view), 0.0), 4.0);
+  float crest = pow(clamp(h * 6.0 + 0.5, 0.0, 1.0), 12.0) * 0.09;
+
+  float vignette = 1.0 - dot(v_uv - 0.5, v_uv - 0.5) * 0.3;
+  float lit = (0.018 + diffuse * 0.03 + specular * 0.7 * u_glint
+    + fresnel * 0.05 + crest) * vignette;
+  /* Цвет берётся из констант каркаса: гладь — цвет поля, гребень — цвет метки.
+     Поэтому переключение фона переворачивает сцену само, без второй ветки. */
+  float crestShade = min(1.0 - exp(-lit * u_exposure), 0.92);
+  gl_FragColor = vec4(mix(u_paper, u_ink, crestShade), 1.0);
+}
+`;
+
+/* Каркас держит цвета строками rgba, шейдеру нужны доли единицы. */
+function wakeTone(color) {
+  const [r, g, b] = color.match(/[\d.]+/g).map(Number);
+  return new Float32Array([r / 255, g / 255, b / 255]);
+}
+
+function wakeWater() {
+  const surface = document.createElement('canvas');
+  const gl = surface.getContext('webgl', { alpha: false, antialias: false });
+  const program = gl.createProgram();
+  gl.attachShader(program, riverShader(gl, gl.VERTEX_SHADER, WAKE_VERTEX));
+  gl.attachShader(program, riverShader(gl, gl.FRAGMENT_SHADER, WAKE_FRAGMENT));
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1, 1, -1, -1, 1,
+    -1, 1, 1, -1, 1, 1,
+  ]), gl.STATIC_DRAW);
+  gl.useProgram(program);
+  const position = gl.getAttribLocation(program, 'a_position');
+  gl.enableVertexAttribArray(position);
+  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+
+  return {
+    surface,
+    gl,
+    program,
+    resolution: gl.getUniformLocation(program, 'u_resolution'),
+    k0: gl.getUniformLocation(program, 'u_k0'),
+    psimax: gl.getUniformLocation(program, 'u_psimax'),
+    glint: gl.getUniformLocation(program, 'u_glint'),
+    exposure: gl.getUniformLocation(program, 'u_exposure'),
+    inkColor: gl.getUniformLocation(program, 'u_ink'),
+    paperColor: gl.getUniformLocation(program, 'u_paper'),
+    heel: gl.getUniformLocation(program, 'u_heel'),
+    bow: gl.getUniformLocation(program, 'u_bow'),
+    ribs: gl.getUniformLocation(program, 'u_ribs'),
+  };
+}
+
+/* Силуэт Л сверху: вершина — нос, правый борт вдоль курса, левый расходится.
+   Координаты холста; в шейдере ось Y смотрит вверх, поэтому источники
+   пересчитываются зеркально. */
+const WAKE_HULL = { apex: { x: 0.56, y: 0.13 }, stern: 0.34 };
+
+function wakeHull(spread) {
+  const apex = WAKE_HULL.apex;
+  const stern = WAKE_HULL.stern;
+  return {
+    apex,
+    right: { x: apex.x, y: stern },
+    left: { x: apex.x - spread, y: stern },
+  };
+}
+
+/* Наклонный борт разбит на три точки вытеснения: чем дальше от носа, тем
+   шире корпус и тем слабее вклад — волну гонит вход в воду, а не борт целиком.
+   Шейдеру они уходят в его системе координат, где ось Y смотрит вверх. */
+function wakeRibs(hull) {
+  const out = [];
+  for (const u of [0.34, 0.62, 0.9]) {
+    out.push(lerp(hull.apex.x, hull.left.x, u), 1 - lerp(hull.apex.y, hull.left.y, u));
+  }
+  return new Float32Array(out);
+}
+
+function drawWakeHull(hull) {
+  ctx.beginPath();
+  ctx.moveTo(hull.apex.x * S, hull.apex.y * S);
+  ctx.lineTo(hull.right.x * S, hull.right.y * S);
+  ctx.lineTo(hull.left.x * S, hull.left.y * S);
+  ctx.closePath();
+  ctx.fillStyle = ink(0.97);
+  ctx.fill();
+}
+
+MODES.wake = {
+  label: 'кильватер',
+  note: 'Нос стоит, вода набегает. След — не рябь, а клин Кельвина: он складывается из волн, которые держатся за лодкой, и потому даёт поперечные дуги и расходящиеся перья сам. Правый борт Л идёт вдоль хода и волны не гонит, левый расходится и гонит: клин остаётся, но половины перестают быть зеркальными. Раствор ног двигает борт, и узор пересобирается.',
+  cursor: 'default',
+  tools: [
+    { type: 'range', key: 'ход', label: 'ход', min: 0.45, max: 1.8, step: 0.05, value: 0.95 },
+    { type: 'range', key: 'spread', label: 'раствор', min: 0.06, max: 0.26, step: 0.01, value: 0.15 },
+    { type: 'range', key: 'feather', label: 'перья', min: 0.6, max: 1.3, step: 0.05, value: 0.95 },
+    { type: 'range', key: 'heel', label: 'борт', min: 0, max: 1.6, step: 0.05, value: 0.9 },
+    { type: 'range', key: 'glint', label: 'свет', min: 0.2, max: 1.6, step: 0.05, value: 0.85 },
+    { type: 'range', key: 'exposure', label: 'яркость', min: 0.5, max: 4, step: 0.1, value: 2.2 },
+  ],
+
+  setup() {
+    modeState.water = wakeWater();
+  },
+
+  draw() {
+    const water = modeState.water;
+    const size = Math.max(1, Math.round(S));
+    if (water.surface.width !== size) {
+      water.surface.width = size;
+      water.surface.height = size;
+    }
+
+    const hull = wakeHull(num('spread'));
+    const speed = num('ход');
+
+    water.gl.viewport(0, 0, size, size);
+    water.gl.useProgram(water.program);
+    water.gl.uniform2f(water.resolution, size, size);
+    /* k0 = g/U²: чем быстрее ход, тем длиннее волна, а угол клина не меняется. */
+    water.gl.uniform1f(water.k0, 90 / (speed * speed));
+    water.gl.uniform1f(water.psimax, num('feather'));
+    water.gl.uniform1f(water.glint, num('glint'));
+    water.gl.uniform1f(water.exposure, num('exposure'));
+    water.gl.uniform1f(water.heel, num('heel'));
+    water.gl.uniform3fv(water.inkColor, wakeTone(INK));
+    water.gl.uniform3fv(water.paperColor, wakeTone(PAPER));
+    water.gl.uniform2f(water.bow, hull.apex.x, 1 - hull.apex.y);
+    water.gl.uniform2fv(water.ribs, wakeRibs(hull));
+    water.gl.drawArrays(water.gl.TRIANGLES, 0, 6);
+
+    ctx.drawImage(water.surface, 0, 0, S, S);
+    drawWakeHull(hull);
   },
 };
 
