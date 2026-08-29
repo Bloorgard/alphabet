@@ -48,15 +48,15 @@ const CATCH = 0.019;          /* с какого расстояния вещь �
 const BASE_RISE = 0.055;
 const BASE_SPREAD = 0.1;
 
-const PARAMS = { crowd: 1200, tail: 12, fade: 1, spark: 1, chips: 0 };
+const PARAMS = { crowd: 1200, tail: 12, fade: true, spark: true, chips: false };
 const CONTROLS = [
-  ['crowd', 'рой', 300, 2400, 50],
-  ['tail', 'хвост', 2, 22, 1],
+  { key: 'crowd', label: 'рой', min: 300, max: 2400, step: 50 },
+  { key: 'tail', label: 'хвост', min: 2, max: 22, step: 1 },
 ];
 const SWITCHES = [
-  ['fade', 'угасание'],
-  ['spark', 'блик'],
-  ['chips', 'щепки'],
+  { key: 'fade', label: 'угасание' },
+  { key: 'spark', label: 'блик' },
+  { key: 'chips', label: 'щепки' },
 ];
 
 /* ---------- геометрия буквы ---------- */
@@ -826,32 +826,32 @@ export function mountL(workspace) {
   panel.hidden = true;
 
   const note = document.createElement('p');
-  note.textContent = 'ручки меняют только вид воды: сложность растёт из счёта.';
+  note.textContent = 'ручки меняют только вид воды: сложность растёт из счёта, а не отсюда.';
   panel.append(note);
 
-  for (const [key, labelText, min, max, stepValue] of CONTROLS) {
+  for (const control of CONTROLS) {
     const label = document.createElement('label');
-    label.textContent = labelText;
+    label.textContent = control.label;
     const input = document.createElement('input');
     input.type = 'range';
-    input.min = min;
-    input.max = max;
-    input.step = stepValue;
-    input.value = params[key];
-    input.addEventListener('input', () => { params[key] = Number(input.value); });
+    input.min = control.min;
+    input.max = control.max;
+    input.step = control.step;
+    input.value = params[control.key];
+    input.addEventListener('input', () => { params[control.key] = Number(input.value); });
     label.append(input);
     panel.append(label);
   }
 
-  for (const [key, labelText] of SWITCHES) {
+  for (const item of SWITCHES) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'sketch-mode';
-    button.textContent = labelText;
-    button.setAttribute('aria-pressed', String(Boolean(params[key])));
+    button.className = 'sketch-switch';
+    button.textContent = item.label;
+    button.setAttribute('aria-pressed', String(params[item.key]));
     button.addEventListener('click', () => {
-      params[key] = params[key] ? 0 : 1;
-      button.setAttribute('aria-pressed', String(Boolean(params[key])));
+      params[item.key] = !params[item.key];
+      button.setAttribute('aria-pressed', String(params[item.key]));
     });
     panel.append(button);
   }
