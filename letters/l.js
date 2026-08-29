@@ -299,6 +299,15 @@ function heelOf(body, side) {
   return 0.4 + Math.min(Math.abs(body.apex.x - foot.x) / Math.max(body.height, 0.0001), 1.4) * 0.9;
 }
 
+function plural(value) {
+  const tail = value % 100;
+  if (tail > 10 && tail < 20) return 'очков';
+  const last = value % 10;
+  if (last === 1) return 'очко';
+  if (last > 1 && last < 5) return 'очка';
+  return 'очков';
+}
+
 export function mountL(workspace) {
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
@@ -618,6 +627,37 @@ export function mountL(workspace) {
     ctx.closePath();
   }
 
+  /* Подпись встаёт в верхнюю строку между заголовком слева и крестиком
+     справа, поэтому берёт их кегль в пикселях, а не долю стороны. Жизни —
+     точками следом за счётом: сколько набрал и сколько осталось читается
+     разом. Так же устроено у К. */
+  function status() {
+    const tail = state.over ? ' · клик — заново' : '';
+    const text = `${state.score} ${plural(state.score)}${tail}`.toUpperCase();
+
+    ctx.font = "10px 'DM Mono', ui-monospace, monospace";
+    ctx.letterSpacing = '.08em';
+    const gap = 0.02 * S;
+    const stride = 0.022 * S;
+    const radius = 0.0065 * S;
+    const width = ctx.measureText(text).width;
+    const startX = ox + S / 2 - (width + gap + LIVES * stride) / 2;
+    const baseline = oy + 25;
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = state.flash > 0 || state.over ? RED : ink(0.5);
+    ctx.fillText(text, startX, baseline);
+
+    for (let i = 0; i < LIVES; i += 1) {
+      ctx.beginPath();
+      ctx.arc(startX + width + gap + i * stride + radius, baseline - radius * 0.6, radius, 0, Math.PI * 2);
+      ctx.fillStyle = i < state.lives ? ink(0.5) : ink(0.13);
+      ctx.fill();
+    }
+    ctx.letterSpacing = '0px';
+  }
+
   function draw() {
     ctx.clearRect(0, 0, W, H);
 
@@ -700,19 +740,7 @@ export function mountL(workspace) {
 
     /* Счёт и жизни — положение дел, они чернильные. Красным помечено только
        происшествие: конец партии. */
-    /* Счёт стоит под подписью буквы, слева сверху. Справа сверху у окна свои
-       дела — ссылка на холст и крестик, — и цифры там наезжали на них. */
-    ctx.save();
-    ctx.font = '11px "DM Mono", monospace';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.letterSpacing = '0.08em';
-    ctx.fillStyle = state.over ? RED : ink(0.5);
-    const tally = state.over
-      ? `конец · ${state.score}`
-      : `${state.score} · ${'●'.repeat(state.lives)}`;
-    ctx.fillText(tally, 16, 44);
-    ctx.restore();
+    status();
   }
 
   function resize() {
