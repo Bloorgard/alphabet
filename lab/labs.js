@@ -74,6 +74,10 @@ const LABS = [
     chosen: 'рогатка бумажная',
   },
   {
+    slug: 'n', letter: 'Н', title: 'кузнечик', tile: true,
+    mechanics: ['кузнечик'],
+  },
+  {
     slug: 'ya', letter: 'Я', title: 'холст из чужих я', tile: true,
     mechanics: ['холст', 'рост', 'касса'],
   },
