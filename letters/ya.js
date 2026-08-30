@@ -7,7 +7,7 @@
    подсказывает форму, но не запирает в ней, ставить можно и мимо. */
 
 import { YA_AREA, YA_MASK, maskCells } from '../ya-mask.js?v=1';
-import { joinPlayer, loadState, plural, putMark, renamePlayer } from '../wall.js?v=11';
+import { joinPlayer, loadState, plural, putMark, renamePlayer } from '../wall.js?v=12';
 
 const BOX = { x: 0.06, y: 0.14, size: 0.56 };
 /* На телефоне холст занимает всю ширину окна: отступ оставлен ровно под
