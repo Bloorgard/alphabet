@@ -13,6 +13,7 @@ const DANGER_Y = 0.52;
 const FLOOR_Y = 0.94;
 const LETTER_HEIGHT = 0.8;
 const LETTER_RAISE = 15 / 720;
+const LETTER_CENTER_X = 370 / 718;
 const MAX_DRAW = 0.22;
 const ONBOARDING = 'alphabet:m-onboarding';
 const PILE = [
@@ -69,9 +70,9 @@ export function mountM(workspace) {
   const pointer = { x: 0.5, y: 0.5, px: 0.5, py: 0.5 };
   const letterY = (y) => (426 / 718) + ((y / 718) - (426 / 718)) * LETTER_HEIGHT - LETTER_RAISE;
   const leftLeg = [[143.971, 426], [240, 426], [179.029, 595], [83, 595]]
-    .map(([x, y]) => point(0.5 + ((x / 718) - 0.5) * 0.95, letterY(y)));
+    .map(([x, y]) => point(0.5 + ((x / 718) - LETTER_CENTER_X) * 0.95, letterY(y)));
   const rightLeg = [[596.029, 426], [500, 426], [560.971, 595], [657, 595]]
-    .map(([x, y]) => point(0.5 + ((x / 718) - 0.5) * 0.95, letterY(y)));
+    .map(([x, y]) => point(0.5 + ((x / 718) - LETTER_CENTER_X) * 0.95, letterY(y)));
   const anchorT = ROPE_R / (leftLeg[2].y - leftLeg[1].y);
   const leftAnchor = point(lerp(leftLeg[1].x, leftLeg[2].x, anchorT), lerp(leftLeg[1].y, leftLeg[2].y, anchorT));
   const rightAnchor = point(lerp(rightLeg[1].x, rightLeg[2].x, anchorT), lerp(rightLeg[1].y, rightLeg[2].y, anchorT));
