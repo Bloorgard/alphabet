@@ -818,17 +818,14 @@ const slingshot = {
 /* Тот же жгут, другой костюм — размеры и раскладка сняты напрямую с
    авторского SVG-референса (холст 718×718, координаты здесь — те же точки,
    делённые на 718). Свои цвета не завязаны на setGround/INK: этот режим
-   ничего не переключает глобально, чтобы не задевать остальные вкладки.
-   Синий и красный вместе — сознательный пробный костюм для сравнения, а не
-   следование правилу «одна краска». */
+   ничего не переключает глобально, чтобы не задевать остальные вкладки. */
 const PAPER_BG = '#F2EDE5';
 const PAPER_INK = '#000000';
-const PAPER_BLUE = '#3300FF';
 const PAPER_RED = '#FF0000';
 
 /* Ноги сведены на 5% к центру относительно референса — автор попросил
-   сблизить их. Канат крепится ровно в верхний внутренний угол каждой ноги
-   (а не в отдельную точку рядом), чтобы шов не торчал углом. */
+   сблизить их. Канат уходит в внутренний скос чуть ниже верхней грани:
+   так он продолжается в массу ноги, а не торчит из острого угла. */
 const PAPER_LEG_NARROW = 0.95;
 function paperNarrowX(x) { return 0.5 + (x - 0.5) * PAPER_LEG_NARROW; }
 
@@ -837,11 +834,23 @@ const PAPER_LEG_L = [[143.971, 426], [240, 426], [179.029, 595], [83, 595]]
 const PAPER_LEG_R = [[596.029, 426], [500, 426], [560.971, 595], [657, 595]]
   .map(([x, y]) => mPoint(paperNarrowX(x / 718), y / 718));
 
-const PAPER_ANCHOR_L = PAPER_LEG_L[1];
-const PAPER_ANCHOR_R = PAPER_LEG_R[1];
+const PAPER_ROPE_WIDTH = 0.014;
+const PAPER_ROPE_RADIUS = PAPER_ROPE_WIDTH / 2;
+const PAPER_ANCHOR_T = PAPER_ROPE_RADIUS / (PAPER_LEG_L[2].y - PAPER_LEG_L[1].y);
+const PAPER_ANCHOR_L = mPoint(
+  lerp(PAPER_LEG_L[1].x, PAPER_LEG_L[2].x, PAPER_ANCHOR_T),
+  lerp(PAPER_LEG_L[1].y, PAPER_LEG_L[2].y, PAPER_ANCHOR_T),
+);
+const PAPER_ANCHOR_R = mPoint(
+  lerp(PAPER_LEG_R[1].x, PAPER_LEG_R[2].x, PAPER_ANCHOR_T),
+  lerp(PAPER_LEG_R[1].y, PAPER_LEG_R[2].y, PAPER_ANCHOR_T),
+);
 
 const PAPER_TARGET_COUNT = 5;
-const PAPER_TARGET_R = 0.045;
+const PAPER_TARGET_R = 0.035;
+const PAPER_ONBOARDING_KEY = 'alphabet:m-paper-sling-onboarding';
+const PAPER_CLICK_SLOP = 0.012;
+const PAPER_CATCH_DEPTH = 0.2;
 
 /* Мишени не садятся друг на друга: перебрасываем точку, пока не найдём
    свободное место (с запасом), а не просто ставим как попало. */
@@ -909,6 +918,28 @@ function resolveCircleCollisions(balls, iterations) {
   }
 }
 
+function distanceToSegment(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSq = dx * dx + dy * dy;
+  const t = lengthSq ? clamp(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSq, 0, 1) : 0;
+  return Math.hypot(point.x - (start.x + dx * t), point.y - (start.y + dy * t));
+}
+
+function paperRopeCatchPoint(start, end, r) {
+  const minX = modeState.rope[0].x;
+  const maxX = modeState.rope[modeState.rope.length - 1].x;
+  const steps = Math.max(1, Math.ceil(Math.hypot(end.x - start.x, end.y - start.y) / 0.008));
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    const point = mPoint(lerp(start.x, end.x, t), lerp(start.y, end.y, t));
+    const contactY = ropeHeightAt(point.x) - r - PAPER_ROPE_RADIUS;
+    const gap = point.y - contactY;
+    if (point.x >= minX && point.x <= maxX && gap <= PAPER_CATCH_DEPTH) return mPoint(point.x, contactY);
+  }
+  return null;
+}
+
 const PILE_DAMPING = 0.9;
 
 /* Verlet, а не явная скорость: та же схема, что у каната. Коррекция
@@ -945,10 +976,9 @@ function drawPaperLeg(points) {
 
 
 function drawPaperProp(prop) {
-  const color = prop.state === 'dragging' ? PAPER_RED : PAPER_BLUE;
   const r = prop.r || 0.026;
   if (prop.kind === 'letter') {
-    ctx.fillStyle = color;
+    ctx.fillStyle = PAPER_INK;
     ctx.font = `${Math.round(r * 2.4 * S)}px 'DM Mono', ui-monospace, monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -959,23 +989,48 @@ function drawPaperProp(prop) {
   }
   ctx.beginPath();
   ctx.arc(prop.x * S, prop.y * S, r * S, 0, Math.PI * 2);
-  ctx.fillStyle = color;
+  ctx.fillStyle = PAPER_BG;
   ctx.fill();
+  ctx.strokeStyle = PAPER_INK;
+  ctx.lineWidth = 0.0025 * S;
+  ctx.stroke();
 }
 
 function drawPaperTarget(target) {
   ctx.beginPath();
   ctx.arc(target.x * S, target.y * S, target.r * S, 0, Math.PI * 2);
-  ctx.strokeStyle = PAPER_INK;
-  ctx.lineWidth = 0.0022 * S;
-  ctx.stroke();
-  ctx.strokeStyle = PAPER_RED;
-  ctx.lineWidth = 0.0013 * S;
+  ctx.fillStyle = PAPER_RED;
+  ctx.fill();
+}
+
+function finishPaperOnboarding() {
+  if (!modeState.onboarding) return;
+  modeState.onboarding = false;
+  localStorage.setItem(PAPER_ONBOARDING_KEY, '1');
+}
+
+function drawPaperOnboarding() {
+  if (!modeState.onboarding) return;
+  const t = modeState.onboardingT;
+  const source = mPoint(0.16, 0.9);
+  const loaded = mPoint(0.5, ropeHeightAt(0.5) - 0.035);
+  const pulled = mPoint(0.5, 0.82);
+  const move = clamp((t - 0.8) / 1.2, 0, 1);
+  const pull = clamp((t - 2.4) / 1.2, 0, 1);
+  const position = t < 2 ? mPoint(lerp(source.x, loaded.x, move), lerp(source.y, loaded.y, move))
+    : mPoint(lerp(loaded.x, pulled.x, pull), lerp(loaded.y, pulled.y, pull));
+
+  ctx.fillStyle = 'rgba(0,0,0,0.62)';
+  ctx.font = `${Math.round(S * 0.019)}px 'DM Mono', ui-monospace, monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillText('возьми шар · положи на жгут · тяни вниз', S * 0.5, S * 0.18);
+  ctx.textAlign = 'left';
   ctx.beginPath();
-  ctx.moveTo(target.x * S, (target.y - target.r * 1.35) * S);
-  ctx.lineTo(target.x * S, (target.y + target.r * 1.35) * S);
-  ctx.moveTo((target.x - target.r * 1.35) * S, target.y * S);
-  ctx.lineTo((target.x + target.r * 1.35) * S, target.y * S);
+  ctx.arc(position.x * S, position.y * S, 0.022 * S, 0, Math.PI * 2);
+  ctx.fillStyle = PAPER_BG;
+  ctx.fill();
+  ctx.strokeStyle = PAPER_INK;
+  ctx.lineWidth = 0.0025 * S;
   ctx.stroke();
 }
 
@@ -983,18 +1038,23 @@ function drawSlingshotPaper() {
   ctx.fillStyle = PAPER_BG;
   ctx.fillRect(0, 0, S, S);
 
-  for (let i = 1; i < modeState.rope.length; i += 1) mLine(modeState.rope[i - 1], modeState.rope[i], PAPER_INK, 0.014);
+  for (let i = 1; i < modeState.rope.length; i += 1) mLine(modeState.rope[i - 1], modeState.rope[i], PAPER_INK, PAPER_ROPE_WIDTH);
   drawPaperLeg(PAPER_LEG_L);
   drawPaperLeg(PAPER_LEG_R);
 
   for (const ball of modeState.pileBalls) {
     ctx.beginPath();
     ctx.arc(ball.x * S, ball.y * S, ball.r * S, 0, Math.PI * 2);
-    ctx.fillStyle = PAPER_BLUE;
+    ctx.fillStyle = PAPER_BG;
     ctx.fill();
+    ctx.strokeStyle = PAPER_INK;
+    ctx.lineWidth = 0.0025 * S;
+    ctx.stroke();
   }
   ctx.setLineDash([0.006 * S, 0.006 * S]);
-  ctx.strokeStyle = modeState.over ? PAPER_RED : 'rgba(0,0,0,0.15)';
+  const nearest = Math.max(...modeState.targets.map((target) => target.y));
+  const danger = clamp((nearest - (PAPER_DANGER_Y - 0.18)) / 0.18, 0, 1);
+  ctx.strokeStyle = `rgba(255,0,0,${modeState.over ? 1 : 0.06 + danger * 0.74})`;
   ctx.lineWidth = 0.0015 * S;
   ctx.beginPath();
   ctx.moveTo(0, PAPER_DANGER_Y * S);
@@ -1004,6 +1064,7 @@ function drawSlingshotPaper() {
 
   for (const target of modeState.targets) drawPaperTarget(target);
   for (const prop of modeState.props) drawPaperProp(prop);
+  drawPaperOnboarding();
 
   if (modeState.ring > 0) {
     ctx.beginPath();
@@ -1035,11 +1096,16 @@ function resetSlingshotPaper() {
   modeState.pileBalls = PAPER_PILE.map((p) => ({ x: p.x, y: p.y, px: p.x, py: p.y, r: p.r }));
   for (let i = 0; i < 200; i += 1) stepPileBalls();
   modeState.over = false;
+  modeState.onboarding = !localStorage.getItem(PAPER_ONBOARDING_KEY);
+  modeState.onboardingT = 0;
+  modeState.dragFromPile = false;
+  modeState.dragMoved = false;
+  modeState.dragStart = null;
 }
 
 const slingshotPaper = {
   label: 'рогатка бумажная',
-  note: 'Мишени медленно опускаются — попадание отбрасывает их наверх и ускоряет падение. Дошла до черты — проигрыш. Несколько фигур на канате летят одним залпом.',
+  note: 'Кликни по шару, чтобы зарядить центр, или перетащи его в любое место на канате. Мишени медленно опускаются; несколько шаров летят одним залпом.',
   draw: drawSlingshotPaper,
   tools: [
     { type: 'toggle', key: 'letters', label: 'буквами', value: false },
@@ -1051,11 +1117,15 @@ const slingshotPaper = {
     resetSlingshotPaper();
   },
   step() {
+    if (modeState.onboarding) {
+      modeState.onboardingT += STEP;
+      if (modeState.onboardingT > 4.2) finishPaperOnboarding();
+    }
     if (modeState.heldNodeIndex !== null && modeState.dragProp) {
       const node = modeState.rope[modeState.heldNodeIndex];
       node.pinned = true;
       node.x = modeState.dragProp.x;
-      node.y = modeState.dragProp.y;
+      node.y = modeState.dragProp.y + (modeState.dragProp.r || 0.026) + PAPER_ROPE_RADIUS;
     }
     stepRope();
     stepPileBalls();
@@ -1068,8 +1138,8 @@ const slingshotPaper = {
       }
     }
 
-    const minX = modeState.rope[0].x + 0.02;
-    const maxX = modeState.rope[modeState.rope.length - 1].x - 0.02;
+    const minX = modeState.rope[0].x;
+    const maxX = modeState.rope[modeState.rope.length - 1].x;
 
     for (const prop of modeState.props) {
       if (prop.state === 'dragging') continue;
@@ -1079,8 +1149,8 @@ const slingshotPaper = {
         prop.vy += SLING_GRAVITY * STEP;
         prop.x += prop.vx * STEP;
         prop.y += prop.vy * STEP;
-        const ropeY = ropeHeightAt(prop.x) - r;
-        if (prop.y >= ropeY && prop.x > minX && prop.x < maxX) {
+        const ropeY = ropeHeightAt(prop.x) - r - PAPER_ROPE_RADIUS;
+        if (prop.y >= ropeY && prop.x >= minX && prop.x <= maxX) {
           prop.y = ropeY;
           prop.rollV = prop.vx * 0.5;
           prop.vx = 0;
@@ -1113,20 +1183,19 @@ const slingshotPaper = {
       }
 
       if (prop.state === 'flying') {
+        const previous = mPoint(prop.x, prop.y);
         prop.vy += SLING_GRAVITY * STEP;
         prop.x += prop.vx * STEP;
         prop.y += prop.vy * STEP;
-        if (!prop.scored && !modeState.over) {
+        if (!modeState.over) {
           for (const target of modeState.targets) {
-            if (Math.hypot(prop.x - target.x, prop.y - target.y) < target.r + r) {
-              prop.scored = true;
+            if (distanceToSegment(target, previous, prop) < target.r + r) {
               modeState.score += 1;
               modeState.hitAt = mPoint(target.x, target.y);
               modeState.ring = 1;
               const fresh = spawnPaperTarget(modeState.targets.filter((t) => t !== target), target.r);
               target.x = fresh.x;
               target.y = fresh.y;
-              break;
             }
           }
         }
@@ -1150,7 +1219,7 @@ const slingshotPaper = {
     resolveCircleCollisions(modeState.props.filter((prop) => prop.state === 'resting'), 6);
     for (const prop of modeState.props) {
       if (prop.state !== 'resting') continue;
-      const floor = ropeHeightAt(prop.x) - (prop.r || 0.026);
+      const floor = ropeHeightAt(prop.x) - (prop.r || 0.026) - PAPER_ROPE_RADIUS;
       prop.y += (floor - prop.y) * 0.35;
       if (prop.y > floor) prop.y = floor;
       prop.restX = prop.x;
@@ -1162,11 +1231,15 @@ const slingshotPaper = {
   },
   onDown() {
     if (modeState.over) { resetSlingshotPaper(); return; }
+    finishPaperOnboarding();
     for (const prop of modeState.props) {
       if (prop.state === 'flying') continue;
       if (Math.hypot(pointer.x - prop.x, pointer.y - prop.y) < 0.045) {
         modeState.dragProp = prop;
         modeState.heldNodeIndex = prop.state === 'resting' ? nearestRopeNode(prop.x) : null;
+        modeState.dragFromPile = false;
+        modeState.dragMoved = false;
+        modeState.dragStart = mPoint(pointer.x, pointer.y);
         prop.state = 'dragging';
         return;
       }
@@ -1189,12 +1262,45 @@ const slingshotPaper = {
       modeState.props.push(prop);
       modeState.dragProp = prop;
       modeState.heldNodeIndex = null;
+      modeState.dragFromPile = true;
+      modeState.dragMoved = false;
+      modeState.dragStart = mPoint(pointer.x, pointer.y);
     }
   },
-  onMove: slingshot.onMove,
+  onMove() {
+    if (modeState.dragProp && modeState.dragStart && !modeState.dragMoved) {
+      modeState.dragMoved = Math.hypot(pointer.x - modeState.dragStart.x, pointer.y - modeState.dragStart.y) > PAPER_CLICK_SLOP;
+    }
+    slingshot.onMove();
+    if (!modeState.dragFromPile || modeState.heldNodeIndex !== null || !modeState.dragProp) return;
+    const prop = modeState.dragProp;
+    const catchPoint = paperRopeCatchPoint(mPoint(pointer.px, pointer.py), mPoint(pointer.x, pointer.y), prop.r || 0.026);
+    if (!catchPoint) return;
+    modeState.heldNodeIndex = nearestRopeNode(catchPoint.x);
+    prop.restX = catchPoint.x;
+    prop.restY = catchPoint.y;
+  },
   onUp() {
     const prop = modeState.dragProp;
     if (!prop) return;
+
+    if (modeState.dragFromPile && !modeState.dragMoved) {
+      const x = 0.5;
+      const r = prop.r || 0.026;
+      prop.x = x;
+      prop.y = ropeHeightAt(x) - r - PAPER_ROPE_RADIUS;
+      prop.px = x;
+      prop.restX = prop.x;
+      prop.restY = prop.y;
+      prop.rollV = 0;
+      prop.state = 'resting';
+      modeState.dragProp = null;
+      modeState.heldNodeIndex = null;
+      modeState.dragFromPile = false;
+      modeState.dragMoved = false;
+      modeState.dragStart = null;
+      return;
+    }
 
     if (modeState.heldNodeIndex !== null) {
       const node = modeState.rope[modeState.heldNodeIndex];
@@ -1204,7 +1310,7 @@ const slingshotPaper = {
       const rawDx = prop.restX - prop.x;
       const rawDy = prop.restY - prop.y;
       const rawPull = Math.hypot(rawDx, rawDy);
-      if (rawPull > SLING_MIN_PULL) {
+      if (rawPull > SLING_MIN_PULL && rawDy < 0) {
         const pull = Math.min(SLING_MAX_PULL, rawPull);
         const power = num('power');
         const vx = (rawDx / rawPull) * pull * power;
@@ -1234,6 +1340,9 @@ const slingshotPaper = {
 
     modeState.dragProp = null;
     modeState.heldNodeIndex = null;
+    modeState.dragFromPile = false;
+    modeState.dragMoved = false;
+    modeState.dragStart = null;
   },
 };
 
