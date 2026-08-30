@@ -98,7 +98,7 @@ export async function loadState() {
     };
   }
 
-  const response = await fetch(`${API}/state`);
+  const response = await fetch(`${API}/state`, { cache: 'no-store' });
   if (!response.ok) throw new Error('нет состояния');
   const state = await response.json();
   /* Кошелёк приходит отдельно и только по токену: публичный ответ общий
