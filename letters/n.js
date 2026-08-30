@@ -23,8 +23,8 @@ const CONTROLS = [
   ['weight', 'масса', 0.15, 1.8, 0.05],
   ['size', 'размер', 0.45, 1, 0.05],
   ['width', 'ширина', 0.55, 1.8, 0.05],
-  ['contrast', 'контраст', 0, 1, 0.05],
   ['thickness', 'толщина', 0.5, 7.2, 0.05],
+  ['contrast', 'контраст', 0, 1, 0.05],
 ];
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
