@@ -283,10 +283,1054 @@ const bridge = {
   },
 };
 
-const MODES = { metronome, membrane, bridge };
+function resetRhythm() {
+  modeState.left = { angle: 0.503, speed: 0 };
+  modeState.right = { angle: 0.503, speed: 0 };
+  modeState.score = 0;
+  modeState.misses = 0;
+  modeState.over = false;
+  modeState.flashKind = null;
+  modeState.flashT = 0;
+}
+
+function rhythmBob(side) {
+  const state = side === 'left' ? modeState.left : modeState.right;
+  const anchor = side === 'left' ? mPoint(0.22, 0.2) : mPoint(0.78, 0.2);
+  const direction = side === 'left' ? 1 : -1;
+  return mPoint(anchor.x + direction * Math.sin(state.angle) * 0.58, anchor.y + Math.cos(state.angle) * 0.58);
+}
+
+function drawRhythm() {
+  drawFrame();
+  const left = rhythmBob('left');
+  const right = rhythmBob('right');
+  const gap = Math.hypot(left.x - right.x, left.y - right.y);
+  const hitWindow = num('window');
+
+  mLine(mPoint(0.22, 0.2), left, INK, 0.008);
+  mLine(mPoint(0.78, 0.2), right, INK, 0.008);
+  mCircle(mPoint(0.22, 0.2), 0.012, INK);
+  mCircle(mPoint(0.78, 0.2), 0.012, INK);
+  mCircle(left, 0.016, INK);
+  mCircle(right, 0.016, INK);
+
+  const mid = mPoint((left.x + right.x) / 2, (left.y + right.y) / 2);
+  if (gap < hitWindow && !modeState.over) {
+    ctx.beginPath();
+    ctx.arc(mid.x * S, mid.y * S, hitWindow * 0.5 * S, 0, Math.PI * 2);
+    ctx.strokeStyle = FAINT;
+    ctx.lineWidth = 0.002 * S;
+    ctx.stroke();
+  }
+
+  if (modeState.flashT > 0) {
+    ctx.beginPath();
+    ctx.arc(mid.x * S, mid.y * S, (0.03 + (1 - modeState.flashT) * 0.12) * S, 0, Math.PI * 2);
+    ctx.strokeStyle = modeState.flashKind === 'hit' ? RED : MUTED;
+    ctx.lineWidth = 0.002 * S;
+    ctx.globalAlpha = modeState.flashT;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  const lives = '●'.repeat(3 - modeState.misses) + '○'.repeat(modeState.misses);
+  drawStatus(`${modeState.score} · ${lives}`, modeState.flashKind === 'hit' && modeState.flashT > 0);
+
+  if (modeState.over) {
+    ctx.fillStyle = INK;
+    ctx.font = `${Math.round(S * 0.026)}px 'DM Mono', ui-monospace, monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('клик — заново', S * 0.5, S * 0.9);
+    ctx.textAlign = 'left';
+  }
+}
+
+const rhythm = {
+  label: 'ритм-ловушка',
+  note: 'Маятники расходятся и снова сходятся сами. Клик в момент, когда они рядом, — очко; клик мимо — минус жизнь. Три промаха — конец.',
+  draw: drawRhythm,
+  tools: [
+    { type: 'range', key: 'gravity', label: 'тяготение', min: 0.4, max: 1.6, step: 0.05, value: 0.9 },
+    { type: 'range', key: 'coupling', label: 'связь', min: 0.5, max: 6, step: 0.1, value: 3 },
+    { type: 'range', key: 'window', label: 'окно', min: 0.03, max: 0.12, step: 0.005, value: 0.07 },
+    { type: 'button', label: 'заново', action: resetRhythm },
+  ],
+  setup() {
+    resetRhythm();
+  },
+  step() {
+    if (modeState.over) return;
+    const { left, right } = modeState;
+    const coupling = num('coupling');
+    const gravity = num('gravity') * (1 + modeState.score * 0.03);
+    const acceleration = (item, other) => -gravity * Math.sin(item.angle) + coupling * (other.angle - item.angle);
+    left.speed += acceleration(left, right) * STEP;
+    right.speed += acceleration(right, left) * STEP;
+    left.angle = clamp(left.angle + left.speed * STEP, 0.14, 0.92);
+    right.angle = clamp(right.angle + right.speed * STEP, 0.14, 0.92);
+    modeState.flashT = Math.max(0, modeState.flashT - STEP * 1.8);
+  },
+  onDown() {
+    if (modeState.over) { resetRhythm(); return; }
+    const left = rhythmBob('left');
+    const right = rhythmBob('right');
+    const gap = Math.hypot(left.x - right.x, left.y - right.y);
+    if (gap < num('window')) {
+      modeState.score += 1;
+      modeState.flashKind = 'hit';
+    } else {
+      modeState.misses += 1;
+      modeState.flashKind = 'miss';
+      if (modeState.misses >= 3) modeState.over = true;
+    }
+    modeState.flashT = 1;
+  },
+  onMove() {},
+  onUp() {},
+};
+
+function resetRally() {
+  modeState.phase = 0;
+  modeState.dir = 1;
+  modeState.score = 0;
+  modeState.misses = 0;
+  modeState.over = false;
+  modeState.wasInZone = false;
+  modeState.resolved = true;
+  modeState.flashKind = null;
+  modeState.flashT = 0;
+}
+
+function rallyPoint(phase) {
+  const left = mPoint(0.22, 0.2);
+  const valley = mPoint(0.5, 0.78);
+  const right = mPoint(0.78, 0.2);
+  return phase <= 0.5 ? mPoint(lerp(left.x, valley.x, phase / 0.5), lerp(left.y, valley.y, phase / 0.5))
+    : mPoint(lerp(valley.x, right.x, (phase - 0.5) / 0.5), lerp(valley.y, right.y, (phase - 0.5) / 0.5));
+}
+
+function drawRally() {
+  drawFrame();
+  const left = mPoint(0.22, 0.2);
+  const valley = mPoint(0.5, 0.78);
+  const right = mPoint(0.78, 0.2);
+  mLine(left, valley, INK, 0.008);
+  mLine(valley, right, INK, 0.008);
+  mCircle(left, 0.012, INK);
+  mCircle(right, 0.012, INK);
+
+  const zoneHalf = num('window') / 2;
+  const zoneStart = rallyPoint(0.5 - zoneHalf);
+  const zoneEnd = rallyPoint(0.5 + zoneHalf);
+  mLine(zoneStart, zoneEnd, FAINT, 0.014);
+
+  const ball = rallyPoint(modeState.phase);
+  mCircle(ball, 0.016, modeState.over ? MUTED : INK);
+
+  if (modeState.flashT > 0) {
+    ctx.beginPath();
+    ctx.arc(valley.x * S, valley.y * S, (0.03 + (1 - modeState.flashT) * 0.12) * S, 0, Math.PI * 2);
+    ctx.strokeStyle = modeState.flashKind === 'hit' ? RED : MUTED;
+    ctx.lineWidth = 0.002 * S;
+    ctx.globalAlpha = modeState.flashT;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  const lives = '●'.repeat(3 - modeState.misses) + '○'.repeat(modeState.misses);
+  drawStatus(`${modeState.score} · ${lives}`, modeState.flashKind === 'hit' && modeState.flashT > 0);
+
+  if (modeState.over) {
+    ctx.fillStyle = INK;
+    ctx.font = `${Math.round(S * 0.026)}px 'DM Mono', ui-monospace, monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('клик — заново', S * 0.5, S * 0.9);
+    ctx.textAlign = 'left';
+  }
+}
+
+const rally = {
+  label: 'рэлли',
+  note: 'Мяч идёт от вершины к вершине через впадину. Клик точно во впадине держит рэлли; мимо окна — минус жизнь.',
+  draw: drawRally,
+  tools: [
+    { type: 'range', key: 'speed', label: 'скорость', min: 0.3, max: 1.4, step: 0.05, value: 0.6 },
+    { type: 'range', key: 'window', label: 'окно', min: 0.06, max: 0.28, step: 0.01, value: 0.16 },
+    { type: 'button', label: 'заново', action: resetRally },
+  ],
+  setup() {
+    resetRally();
+  },
+  step() {
+    if (modeState.over) return;
+    const speed = num('speed') * (1 + modeState.score * 0.05);
+    modeState.phase += modeState.dir * speed * STEP;
+    if (modeState.phase >= 1) { modeState.phase = 1; modeState.dir = -1; }
+    if (modeState.phase <= 0) { modeState.phase = 0; modeState.dir = 1; }
+
+    const zoneHalf = num('window') / 2;
+    const inZone = Math.abs(modeState.phase - 0.5) < zoneHalf;
+    if (inZone && !modeState.wasInZone) modeState.resolved = false;
+    if (!inZone && modeState.wasInZone && !modeState.resolved) {
+      modeState.misses += 1;
+      modeState.flashKind = 'miss';
+      modeState.flashT = 1;
+      if (modeState.misses >= 3) modeState.over = true;
+    }
+    modeState.wasInZone = inZone;
+    modeState.flashT = Math.max(0, modeState.flashT - STEP * 1.8);
+  },
+  onDown() {
+    if (modeState.over) { resetRally(); return; }
+    const zoneHalf = num('window') / 2;
+    const inZone = Math.abs(modeState.phase - 0.5) < zoneHalf;
+    if (inZone && !modeState.resolved) {
+      modeState.resolved = true;
+      modeState.score += 1;
+      modeState.flashKind = 'hit';
+    } else {
+      modeState.misses += 1;
+      modeState.flashKind = 'miss';
+      if (modeState.misses >= 3) modeState.over = true;
+    }
+    modeState.flashT = 1;
+  },
+  onMove() {},
+  onUp() {},
+};
+
+function spawnTarget() {
+  return {
+    x: 0.15 + Math.random() * 0.7,
+    y: 0.08 + Math.random() * 0.32,
+    r: 0.045,
+  };
+}
+
+const ROPE_N = 18;
+const ROPE_ANCHOR_L = mPoint(0.22, 0.2);
+const ROPE_ANCHOR_R = mPoint(0.78, 0.2);
+const ROPE_DAMPING = 0.995;
+const ROPE_GRAVITY = 2.2;
+const ROPE_ITER = 10;
+
+function initRope(anchorL, anchorR) {
+  const nodes = [];
+  for (let i = 0; i < ROPE_N; i += 1) {
+    const t = i / (ROPE_N - 1);
+    const x = lerp(anchorL.x, anchorR.x, t);
+    const y = lerp(anchorL.y, anchorR.y, t);
+    nodes.push({ x, y, px: x, py: y, pinned: i === 0 || i === ROPE_N - 1 });
+  }
+  modeState.rope = nodes;
+  modeState.ropeStraight = Math.hypot(anchorR.x - anchorL.x, anchorR.y - anchorL.y);
+}
+
+function stepRope() {
+  const g = ROPE_GRAVITY * STEP * STEP;
+  for (const node of modeState.rope) {
+    if (node.pinned) continue;
+    const vx = (node.x - node.px) * ROPE_DAMPING;
+    const vy = (node.y - node.py) * ROPE_DAMPING;
+    node.px = node.x;
+    node.py = node.y;
+    node.x += vx;
+    node.y += vy + g;
+  }
+  const rest = (modeState.ropeStraight * num('slack')) / (ROPE_N - 1);
+  for (let iter = 0; iter < ROPE_ITER; iter += 1) {
+    for (let i = 0; i < modeState.rope.length - 1; i += 1) {
+      const a = modeState.rope[i];
+      const b = modeState.rope[i + 1];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy) || 0.0001;
+      const diff = (dist - rest) / dist;
+      const ax = dx * 0.5 * diff;
+      const ay = dy * 0.5 * diff;
+      if (!a.pinned) { a.x += ax; a.y += ay; }
+      if (!b.pinned) { b.x -= ax; b.y -= ay; }
+    }
+  }
+}
+
+function ropeHeightAt(x) {
+  const nodes = modeState.rope;
+  for (let i = 0; i < nodes.length - 1; i += 1) {
+    const a = nodes[i];
+    const b = nodes[i + 1];
+    if ((x >= a.x && x <= b.x) || (x <= a.x && x >= b.x)) {
+      const t = (x - a.x) / ((b.x - a.x) || 0.0001);
+      return a.y + (b.y - a.y) * t;
+    }
+  }
+  return x < nodes[0].x ? nodes[0].y : nodes[nodes.length - 1].y;
+}
+
+function nearestRopeNode(x) {
+  let best = 1;
+  let bestDist = Infinity;
+  modeState.rope.forEach((node, i) => {
+    if (node.pinned) return;
+    const dist = Math.abs(node.x - x);
+    if (dist < bestDist) { bestDist = dist; best = i; }
+  });
+  return best;
+}
+
+function resetSlingshot(anchorL = ROPE_ANCHOR_L, anchorR = ROPE_ANCHOR_R, targets = null) {
+  initRope(anchorL, anchorR);
+  for (let i = 0; i < 500; i += 1) stepRope();
+  modeState.props = [];
+  modeState.dragProp = null;
+  modeState.heldNodeIndex = null;
+  modeState.targets = targets ? targets.map((t) => ({ ...t })) : [spawnTarget(), spawnTarget(), spawnTarget()];
+  modeState.score = 0;
+  modeState.ring = 0;
+  modeState.hitAt = mPoint(0.5, 0.5);
+}
+
+const AMMO_SHAPES = ['circle', 'square', 'triangle'];
+const AMMO_LETTERS = ['А', 'Б', 'В', 'Г', 'Д'];
+const SLOT_XS = [0.3, 0.4, 0.5, 0.6, 0.7];
+
+function ammoSlots() {
+  const useLetters = on('letters');
+  return SLOT_XS.map((x, i) => ({
+    x,
+    y: 0.92,
+    kind: useLetters ? 'letter' : 'shape',
+    glyph: useLetters ? AMMO_LETTERS[i % AMMO_LETTERS.length] : AMMO_SHAPES[i % AMMO_SHAPES.length],
+  }));
+}
+
+function drawAmmoIcon(x, y, size, kind, glyph, color) {
+  if (kind === 'letter') {
+    ctx.fillStyle = color;
+    ctx.font = `${Math.round(size * 2.4 * S)}px 'DM Mono', ui-monospace, monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(glyph, x * S, y * S);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    return;
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.006 * S;
+  if (glyph === 'circle') {
+    ctx.beginPath();
+    ctx.arc(x * S, y * S, size * S, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (glyph === 'square') {
+    ctx.strokeRect((x - size) * S, (y - size) * S, size * 2 * S, size * 2 * S);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(x * S, (y - size) * S);
+    ctx.lineTo((x - size) * S, (y + size) * S);
+    ctx.lineTo((x + size) * S, (y + size) * S);
+    ctx.closePath();
+    ctx.stroke();
+  }
+}
+
+function drawSlingshot() {
+  drawFrame();
+  for (let i = 1; i < modeState.rope.length; i += 1) mLine(modeState.rope[i - 1], modeState.rope[i], INK, 0.008);
+  mCircle(ROPE_ANCHOR_L, 0.012, INK);
+  mCircle(ROPE_ANCHOR_R, 0.012, INK);
+
+  for (const slot of ammoSlots()) drawAmmoIcon(slot.x, slot.y, 0.025, slot.kind, slot.glyph, INK);
+
+  for (const target of modeState.targets) {
+    ctx.strokeStyle = FAINT;
+    ctx.lineWidth = 0.004 * S;
+    ctx.beginPath();
+    ctx.arc(target.x * S, target.y * S, target.r * S, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  for (const prop of modeState.props) {
+    drawAmmoIcon(prop.x, prop.y, 0.026, prop.kind, prop.glyph, prop.state === 'dragging' ? RED : INK);
+  }
+
+  if (modeState.ring > 0) {
+    ctx.beginPath();
+    ctx.arc(modeState.hitAt.x * S, modeState.hitAt.y * S, (0.03 + (1 - modeState.ring) * 0.12) * S, 0, Math.PI * 2);
+    ctx.strokeStyle = RED;
+    ctx.lineWidth = 0.002 * S;
+    ctx.globalAlpha = modeState.ring;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  drawStatus(`${modeState.score}`, modeState.ring > 0.5);
+}
+
+const SLING_GRAVITY = 1.4;
+const SLING_POWER = 6.5;
+const SLING_MIN_PULL = 0.06;
+const SLING_MAX_PULL = 0.6;
+const ROLL_ACCEL = 6;
+const ROLL_FRICTION = 0.985;
+
+const slingshot = {
+  label: 'рогатка',
+  note: 'Кинь фигуру на канат — она скатится в середину. Схвати её там и оттяни, чтобы выстрелить в мишени.',
+  draw: drawSlingshot,
+  tools: [
+    { type: 'toggle', key: 'letters', label: 'буквами', value: false },
+    { type: 'range', key: 'slack', label: 'провис', min: 1.2, max: 3, step: 0.1, value: 1.5 },
+    { type: 'button', label: 'заново', action: resetSlingshot },
+  ],
+  setup() {
+    resetSlingshot();
+  },
+  step() {
+    if (modeState.heldNodeIndex !== null && modeState.dragProp) {
+      const node = modeState.rope[modeState.heldNodeIndex];
+      node.pinned = true;
+      node.x = modeState.dragProp.x;
+      node.y = modeState.dragProp.y;
+    }
+    stepRope();
+
+    const minX = modeState.rope[0].x + 0.02;
+    const maxX = modeState.rope[modeState.rope.length - 1].x - 0.02;
+
+    for (const prop of modeState.props) {
+      if (prop.state === 'dragging') continue;
+
+      if (prop.state === 'free') {
+        prop.vy += SLING_GRAVITY * STEP;
+        prop.x += prop.vx * STEP;
+        prop.y += prop.vy * STEP;
+        const ropeY = ropeHeightAt(prop.x);
+        if (prop.y >= ropeY && prop.x > minX && prop.x < maxX) {
+          prop.y = ropeY;
+          prop.rollV = prop.vx * 0.5;
+          prop.vx = 0;
+          prop.vy = 0;
+          prop.state = 'resting';
+          prop.restX = prop.x;
+          prop.restY = prop.y;
+        } else if (prop.y > 1.05 || prop.x < -0.1 || prop.x > 1.1) {
+          prop.dead = true;
+        }
+        continue;
+      }
+
+      if (prop.state === 'resting') {
+        const eps = 0.02;
+        const slope = (ropeHeightAt(prop.x + eps) - ropeHeightAt(prop.x - eps)) / (2 * eps);
+        prop.rollV = (prop.rollV || 0) + slope * ROLL_ACCEL * STEP;
+        prop.rollV *= ROLL_FRICTION;
+        prop.x += prop.rollV * STEP;
+        if (prop.x < minX) { prop.x = minX; prop.rollV = 0; }
+        if (prop.x > maxX) { prop.x = maxX; prop.rollV = 0; }
+        prop.y = ropeHeightAt(prop.x);
+        prop.restX = prop.x;
+        prop.restY = prop.y;
+        continue;
+      }
+
+      if (prop.state === 'flying') {
+        prop.vy += SLING_GRAVITY * STEP;
+        prop.x += prop.vx * STEP;
+        prop.y += prop.vy * STEP;
+        for (const target of modeState.targets) {
+          if (Math.hypot(prop.x - target.x, prop.y - target.y) < target.r + 0.02) {
+            prop.dead = true;
+            modeState.score += 1;
+            modeState.hitAt = mPoint(target.x, target.y);
+            modeState.ring = 1;
+            target.x = 0.15 + Math.random() * 0.7;
+            target.y = 0.08 + Math.random() * 0.32;
+            target.r = Math.max(0.025, 0.05 - modeState.score * 0.0015);
+            break;
+          }
+        }
+        if (!prop.dead && (prop.y > 1.05 || prop.x < -0.1 || prop.x > 1.1)) prop.dead = true;
+      }
+    }
+
+    modeState.props = modeState.props.filter((prop) => !prop.dead);
+    modeState.ring = Math.max(0, modeState.ring - STEP * 1.5);
+  },
+  onDown() {
+    for (const prop of modeState.props) {
+      if (prop.state === 'flying') continue;
+      if (Math.hypot(pointer.x - prop.x, pointer.y - prop.y) < 0.05) {
+        modeState.dragProp = prop;
+        modeState.heldNodeIndex = prop.state === 'resting' ? nearestRopeNode(prop.x) : null;
+        prop.state = 'dragging';
+        return;
+      }
+    }
+    for (const slot of ammoSlots()) {
+      if (Math.hypot(pointer.x - slot.x, pointer.y - slot.y) < 0.05) {
+        const prop = { x: slot.x, y: slot.y, vx: 0, vy: 0, kind: slot.kind, glyph: slot.glyph, state: 'dragging' };
+        modeState.props.push(prop);
+        modeState.dragProp = prop;
+        modeState.heldNodeIndex = null;
+        return;
+      }
+    }
+  },
+  onMove() {
+    if (!modeState.dragProp) return;
+    modeState.dragProp.x = pointer.x;
+    modeState.dragProp.y = pointer.y;
+  },
+  onUp() {
+    const prop = modeState.dragProp;
+    if (!prop) return;
+
+    if (modeState.heldNodeIndex !== null) {
+      const node = modeState.rope[modeState.heldNodeIndex];
+      node.pinned = false;
+      node.px = node.x;
+      node.py = node.y;
+      const rawDx = prop.restX - prop.x;
+      const rawDy = prop.restY - prop.y;
+      const rawPull = Math.hypot(rawDx, rawDy);
+      if (rawPull > SLING_MIN_PULL) {
+        const pull = Math.min(SLING_MAX_PULL, rawPull);
+        prop.vx = (rawDx / rawPull) * pull * SLING_POWER;
+        prop.vy = (rawDy / rawPull) * pull * SLING_POWER;
+        prop.state = 'flying';
+      } else {
+        prop.x = prop.restX;
+        prop.y = prop.restY;
+        prop.rollV = 0;
+        prop.state = 'resting';
+      }
+    } else {
+      prop.vx = 0;
+      prop.vy = 0;
+      prop.state = 'free';
+    }
+
+    modeState.dragProp = null;
+    modeState.heldNodeIndex = null;
+  },
+};
+
+/* Тот же жгут, другой костюм — размеры и раскладка сняты напрямую с
+   авторского SVG-референса (холст 718×718, координаты здесь — те же точки,
+   делённые на 718). Свои цвета не завязаны на setGround/INK: этот режим
+   ничего не переключает глобально, чтобы не задевать остальные вкладки.
+   Синий и красный вместе — сознательный пробный костюм для сравнения, а не
+   следование правилу «одна краска». */
+const PAPER_BG = '#F2EDE5';
+const PAPER_INK = '#000000';
+const PAPER_BLUE = '#3300FF';
+const PAPER_RED = '#FF0000';
+
+/* Ноги сведены на 5% к центру относительно референса — автор попросил
+   сблизить их. Канат крепится ровно в верхний внутренний угол каждой ноги
+   (а не в отдельную точку рядом), чтобы шов не торчал углом. */
+const PAPER_LEG_NARROW = 0.95;
+function paperNarrowX(x) { return 0.5 + (x - 0.5) * PAPER_LEG_NARROW; }
+
+const PAPER_LEG_L = [[143.971, 426], [240, 426], [179.029, 595], [83, 595]]
+  .map(([x, y]) => mPoint(paperNarrowX(x / 718), y / 718));
+const PAPER_LEG_R = [[596.029, 426], [500, 426], [560.971, 595], [657, 595]]
+  .map(([x, y]) => mPoint(paperNarrowX(x / 718), y / 718));
+
+const PAPER_ANCHOR_L = PAPER_LEG_L[1];
+const PAPER_ANCHOR_R = PAPER_LEG_R[1];
+
+const PAPER_TARGET_COUNT = 5;
+const PAPER_TARGET_R = 0.045;
+
+/* Мишени не садятся друг на друга: перебрасываем точку, пока не найдём
+   свободное место (с запасом), а не просто ставим как попало. */
+/* Мишень всегда входит из-за верхнего края кадра, никогда не проявляется
+   уже внутри — иначе появление читается как нечестное. */
+function spawnPaperTarget(others, r = PAPER_TARGET_R) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const x = 0.1 + Math.random() * 0.8;
+    const y = -r - Math.random() * 0.2;
+    const clear = others.every((t) => Math.hypot(t.x - x, t.y - y) > t.r + r + 0.02);
+    if (clear) return { x, y, r };
+  }
+  return { x: 0.1 + Math.random() * 0.8, y: -r - Math.random() * 0.2, r };
+}
+
+function makePaperTargets() {
+  const targets = [];
+  for (let i = 0; i < PAPER_TARGET_COUNT; i += 1) targets.push(spawnPaperTarget(targets));
+  return targets;
+}
+
+const PAPER_PILE = [
+  [369.5, 426.5, 26.5], [226.5, 688.5, 26.5], [32.5, 653.5, 26.5], [133.5, 659.5, 26.5],
+  [85.5, 688.5, 26.5], [297.5, 679.5, 26.5], [329.5, 463.5, 26.5], [541.5, 659.5, 26.5],
+  [591.5, 691.5, 26.5], [488.5, 688.5, 26.5],
+  [396.5, 463.5, 17.5], [641.5, 700.5, 17.5], [585.5, 642.5, 17.5], [635.5, 670.5, 17.5],
+  [465.5, 650.5, 17.5], [257.5, 653.5, 17.5], [187.5, 653.5, 17.5], [700.5, 700.5, 17.5],
+  [37.5, 700.5, 17.5], [500.5, 642.5, 17.5], [663.5, 638.5, 17.5],
+  [366.5, 486.5, 14.5], [337.5, 703.5, 14.5], [265.5, 703.5, 14.5], [184.5, 705.5, 14.5],
+  [91.5, 645.5, 14.5], [442.5, 674.5, 14.5], [427.5, 703.5, 14.5], [667.5, 682.5, 14.5],
+  [696.5, 664.5, 14.5], [130.5, 703.5, 14.5], [535.5, 703.5, 14.5], [167.5, 679.5, 14.5],
+].map(([x, y, r]) => ({ x: x / 718, y: y / 718, r: r / 718 }));
+
+const PAPER_FLOOR_Y = 0.99;
+const PAPER_FLOOR_X0 = 0.02;
+const PAPER_FLOOR_X1 = 0.98;
+const PAPER_ROLL_FRICTION = 0.7;
+const PAPER_ROLL_ACCEL = 6;
+const PAPER_DANGER_Y = 0.52;
+const PAPER_FALL_BASE = 0.012;
+
+/* Общий решатель «шарики не влезают друг в друга»: раздвигает пересекающиеся
+   круги по линии их центров. Несколько проходов подряд дают устойчивую горку. */
+function resolveCircleCollisions(balls, iterations) {
+  for (let iter = 0; iter < iterations; iter += 1) {
+    for (let i = 0; i < balls.length; i += 1) {
+      for (let j = i + 1; j < balls.length; j += 1) {
+        const a = balls[i];
+        const b = balls[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.hypot(dx, dy) || 0.0001;
+        const minDist = a.r + b.r;
+        if (dist < minDist) {
+          const overlap = (minDist - dist) / 2;
+          const nx = dx / dist;
+          const ny = dy / dist;
+          a.x -= nx * overlap;
+          a.y -= ny * overlap;
+          b.x += nx * overlap;
+          b.y += ny * overlap;
+        }
+      }
+    }
+  }
+}
+
+const PILE_DAMPING = 0.9;
+
+/* Verlet, а не явная скорость: та же схема, что у каната. Коррекция
+   столкновений двигает только x/y, а «скорость» здесь — просто разница
+   с прошлым кадром, поэтому сдвиг от соседа сам гасится, и куча реально
+   успокаивается, а не дрожит бесконечно. */
+function stepPileBalls() {
+  const balls = modeState.pileBalls;
+  const g = SLING_GRAVITY * STEP * STEP;
+  for (const ball of balls) {
+    const vx = (ball.x - ball.px) * PILE_DAMPING;
+    const vy = (ball.y - ball.py) * PILE_DAMPING;
+    ball.px = ball.x;
+    ball.py = ball.y;
+    ball.x += vx;
+    ball.y += vy + g;
+  }
+  resolveCircleCollisions(balls, 6);
+  for (const ball of balls) {
+    if (ball.y + ball.r > PAPER_FLOOR_Y) { ball.y = PAPER_FLOOR_Y - ball.r; ball.py = ball.y; }
+    if (ball.x - ball.r < PAPER_FLOOR_X0) { ball.x = PAPER_FLOOR_X0 + ball.r; ball.px = ball.x; }
+    if (ball.x + ball.r > PAPER_FLOOR_X1) { ball.x = PAPER_FLOOR_X1 - ball.r; ball.px = ball.x; }
+  }
+}
+
+function drawPaperLeg(points) {
+  ctx.beginPath();
+  ctx.moveTo(points[0].x * S, points[0].y * S);
+  for (let i = 1; i < points.length; i += 1) ctx.lineTo(points[i].x * S, points[i].y * S);
+  ctx.closePath();
+  ctx.fillStyle = PAPER_INK;
+  ctx.fill();
+}
+
+
+function drawPaperProp(prop) {
+  const color = prop.state === 'dragging' ? PAPER_RED : PAPER_BLUE;
+  const r = prop.r || 0.026;
+  if (prop.kind === 'letter') {
+    ctx.fillStyle = color;
+    ctx.font = `${Math.round(r * 2.4 * S)}px 'DM Mono', ui-monospace, monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(prop.glyph, prop.x * S, prop.y * S);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    return;
+  }
+  ctx.beginPath();
+  ctx.arc(prop.x * S, prop.y * S, r * S, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function drawPaperTarget(target) {
+  ctx.beginPath();
+  ctx.arc(target.x * S, target.y * S, target.r * S, 0, Math.PI * 2);
+  ctx.strokeStyle = PAPER_INK;
+  ctx.lineWidth = 0.0022 * S;
+  ctx.stroke();
+  ctx.strokeStyle = PAPER_RED;
+  ctx.lineWidth = 0.0013 * S;
+  ctx.beginPath();
+  ctx.moveTo(target.x * S, (target.y - target.r * 1.35) * S);
+  ctx.lineTo(target.x * S, (target.y + target.r * 1.35) * S);
+  ctx.moveTo((target.x - target.r * 1.35) * S, target.y * S);
+  ctx.lineTo((target.x + target.r * 1.35) * S, target.y * S);
+  ctx.stroke();
+}
+
+function drawSlingshotPaper() {
+  ctx.fillStyle = PAPER_BG;
+  ctx.fillRect(0, 0, S, S);
+
+  for (let i = 1; i < modeState.rope.length; i += 1) mLine(modeState.rope[i - 1], modeState.rope[i], PAPER_INK, 0.014);
+  drawPaperLeg(PAPER_LEG_L);
+  drawPaperLeg(PAPER_LEG_R);
+
+  for (const ball of modeState.pileBalls) {
+    ctx.beginPath();
+    ctx.arc(ball.x * S, ball.y * S, ball.r * S, 0, Math.PI * 2);
+    ctx.fillStyle = PAPER_BLUE;
+    ctx.fill();
+  }
+  ctx.setLineDash([0.006 * S, 0.006 * S]);
+  ctx.strokeStyle = modeState.over ? PAPER_RED : 'rgba(0,0,0,0.15)';
+  ctx.lineWidth = 0.0015 * S;
+  ctx.beginPath();
+  ctx.moveTo(0, PAPER_DANGER_Y * S);
+  ctx.lineTo(S, PAPER_DANGER_Y * S);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  for (const target of modeState.targets) drawPaperTarget(target);
+  for (const prop of modeState.props) drawPaperProp(prop);
+
+  if (modeState.ring > 0) {
+    ctx.beginPath();
+    ctx.arc(modeState.hitAt.x * S, modeState.hitAt.y * S, (0.03 + (1 - modeState.ring) * 0.12) * S, 0, Math.PI * 2);
+    ctx.strokeStyle = PAPER_RED;
+    ctx.lineWidth = 0.002 * S;
+    ctx.globalAlpha = modeState.ring;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.fillStyle = modeState.ring > 0.5 ? PAPER_RED : PAPER_INK;
+  ctx.font = `${Math.round(S * 0.022)}px 'DM Mono', ui-monospace, monospace`;
+  ctx.textAlign = 'right';
+  ctx.fillText(`${modeState.score}`, S * 0.96, S * 0.06);
+  ctx.textAlign = 'left';
+
+  if (modeState.over) {
+    ctx.fillStyle = PAPER_RED;
+    ctx.font = `${Math.round(S * 0.026)}px 'DM Mono', ui-monospace, monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('мишень дошла до черты — клик — заново', S * 0.5, PAPER_DANGER_Y * S - S * 0.02);
+    ctx.textAlign = 'left';
+  }
+}
+
+function resetSlingshotPaper() {
+  resetSlingshot(PAPER_ANCHOR_L, PAPER_ANCHOR_R, makePaperTargets());
+  modeState.pileBalls = PAPER_PILE.map((p) => ({ x: p.x, y: p.y, px: p.x, py: p.y, r: p.r }));
+  for (let i = 0; i < 200; i += 1) stepPileBalls();
+  modeState.over = false;
+}
+
+const slingshotPaper = {
+  label: 'рогатка бумажная',
+  note: 'Мишени медленно опускаются — попадание отбрасывает их наверх и ускоряет падение. Дошла до черты — проигрыш. Несколько фигур на канате летят одним залпом.',
+  draw: drawSlingshotPaper,
+  tools: [
+    { type: 'toggle', key: 'letters', label: 'буквами', value: false },
+    { type: 'range', key: 'slack', label: 'провис', min: 0.5, max: 2, step: 0.05, value: 1 },
+    { type: 'range', key: 'power', label: 'упругость', min: 4, max: 12, step: 0.5, value: 8 },
+    { type: 'button', label: 'заново', action: resetSlingshotPaper },
+  ],
+  setup() {
+    resetSlingshotPaper();
+  },
+  step() {
+    if (modeState.heldNodeIndex !== null && modeState.dragProp) {
+      const node = modeState.rope[modeState.heldNodeIndex];
+      node.pinned = true;
+      node.x = modeState.dragProp.x;
+      node.y = modeState.dragProp.y;
+    }
+    stepRope();
+    stepPileBalls();
+
+    if (!modeState.over) {
+      const fall = PAPER_FALL_BASE * (1 + modeState.score * 0.08);
+      for (const target of modeState.targets) {
+        target.y += fall * STEP;
+        if (target.y > PAPER_DANGER_Y) modeState.over = true;
+      }
+    }
+
+    const minX = modeState.rope[0].x + 0.02;
+    const maxX = modeState.rope[modeState.rope.length - 1].x - 0.02;
+
+    for (const prop of modeState.props) {
+      if (prop.state === 'dragging') continue;
+      const r = prop.r || 0.026;
+
+      if (prop.state === 'free') {
+        prop.vy += SLING_GRAVITY * STEP;
+        prop.x += prop.vx * STEP;
+        prop.y += prop.vy * STEP;
+        const ropeY = ropeHeightAt(prop.x) - r;
+        if (prop.y >= ropeY && prop.x > minX && prop.x < maxX) {
+          prop.y = ropeY;
+          prop.rollV = prop.vx * 0.5;
+          prop.vx = 0;
+          prop.vy = 0;
+          prop.state = 'resting';
+        } else if (prop.y + r > PAPER_FLOOR_Y) {
+          const x = clamp(prop.x, PAPER_FLOOR_X0 + r, PAPER_FLOOR_X1 - r);
+          modeState.pileBalls.push({ x, y: PAPER_FLOOR_Y - r, px: x, py: PAPER_FLOOR_Y - r, r });
+          prop.dead = true;
+        } else if (prop.x - r < 0) {
+          prop.x = r;
+          prop.vx = Math.abs(prop.vx);
+        } else if (prop.x + r > 1) {
+          prop.x = 1 - r;
+          prop.vx = -Math.abs(prop.vx);
+        }
+        continue;
+      }
+
+      if (prop.state === 'resting') {
+        if (prop.px === undefined) prop.px = prop.x;
+        const eps = 0.02;
+        const slope = (ropeHeightAt(prop.x + eps) - ropeHeightAt(prop.x - eps)) / (2 * eps);
+        const vx = (prop.x - prop.px) * PAPER_ROLL_FRICTION;
+        prop.px = prop.x;
+        prop.x += vx + slope * PAPER_ROLL_ACCEL * STEP * STEP;
+        if (prop.x < minX) { prop.x = minX; prop.px = prop.x; }
+        if (prop.x > maxX) { prop.x = maxX; prop.px = prop.x; }
+        continue;
+      }
+
+      if (prop.state === 'flying') {
+        prop.vy += SLING_GRAVITY * STEP;
+        prop.x += prop.vx * STEP;
+        prop.y += prop.vy * STEP;
+        if (!prop.scored && !modeState.over) {
+          for (const target of modeState.targets) {
+            if (Math.hypot(prop.x - target.x, prop.y - target.y) < target.r + r) {
+              prop.scored = true;
+              modeState.score += 1;
+              modeState.hitAt = mPoint(target.x, target.y);
+              modeState.ring = 1;
+              const fresh = spawnPaperTarget(modeState.targets.filter((t) => t !== target), target.r);
+              target.x = fresh.x;
+              target.y = fresh.y;
+              break;
+            }
+          }
+        }
+        if (!prop.dead && prop.y + r > PAPER_FLOOR_Y) {
+          const x = clamp(prop.x, PAPER_FLOOR_X0 + r, PAPER_FLOOR_X1 - r);
+          modeState.pileBalls.push({ x, y: PAPER_FLOOR_Y - r, px: x, py: PAPER_FLOOR_Y - r, r });
+          prop.dead = true;
+        } else if (prop.x - r < 0) {
+          prop.x = r;
+          prop.vx = Math.abs(prop.vx);
+        } else if (prop.x + r > 1) {
+          prop.x = 1 - r;
+          prop.vx = -Math.abs(prop.vx);
+        }
+      }
+    }
+
+    /* Несколько фигур на канате не проходят друг сквозь друга: раздвигаем
+       пересекающиеся, потом плавно подтягиваем к жгуту — без своей скорости
+       по высоте это не может раскачаться, только сойтись. */
+    resolveCircleCollisions(modeState.props.filter((prop) => prop.state === 'resting'), 6);
+    for (const prop of modeState.props) {
+      if (prop.state !== 'resting') continue;
+      const floor = ropeHeightAt(prop.x) - (prop.r || 0.026);
+      prop.y += (floor - prop.y) * 0.35;
+      if (prop.y > floor) prop.y = floor;
+      prop.restX = prop.x;
+      prop.restY = prop.y;
+    }
+
+    modeState.props = modeState.props.filter((prop) => !prop.dead);
+    modeState.ring = Math.max(0, modeState.ring - STEP * 1.5);
+  },
+  onDown() {
+    if (modeState.over) { resetSlingshotPaper(); return; }
+    for (const prop of modeState.props) {
+      if (prop.state === 'flying') continue;
+      if (Math.hypot(pointer.x - prop.x, pointer.y - prop.y) < 0.045) {
+        modeState.dragProp = prop;
+        modeState.heldNodeIndex = prop.state === 'resting' ? nearestRopeNode(prop.x) : null;
+        prop.state = 'dragging';
+        return;
+      }
+    }
+    let closest = -1;
+    let closestDist = Infinity;
+    modeState.pileBalls.forEach((ball, i) => {
+      const dist = Math.hypot(pointer.x - ball.x, pointer.y - ball.y);
+      if (dist < ball.r + 0.012 && dist < closestDist) { closestDist = dist; closest = i; }
+    });
+    if (closest !== -1) {
+      const ball = modeState.pileBalls.splice(closest, 1)[0];
+      const useLetters = on('letters');
+      const prop = {
+        x: ball.x, y: ball.y, vx: 0, vy: 0, r: ball.r,
+        kind: useLetters ? 'letter' : 'shape',
+        glyph: useLetters ? AMMO_LETTERS[closest % AMMO_LETTERS.length] : 'circle',
+        state: 'dragging',
+      };
+      modeState.props.push(prop);
+      modeState.dragProp = prop;
+      modeState.heldNodeIndex = null;
+    }
+  },
+  onMove: slingshot.onMove,
+  onUp() {
+    const prop = modeState.dragProp;
+    if (!prop) return;
+
+    if (modeState.heldNodeIndex !== null) {
+      const node = modeState.rope[modeState.heldNodeIndex];
+      node.pinned = false;
+      node.px = node.x;
+      node.py = node.y;
+      const rawDx = prop.restX - prop.x;
+      const rawDy = prop.restY - prop.y;
+      const rawPull = Math.hypot(rawDx, rawDy);
+      if (rawPull > SLING_MIN_PULL) {
+        const pull = Math.min(SLING_MAX_PULL, rawPull);
+        const power = num('power');
+        const vx = (rawDx / rawPull) * pull * power;
+        const vy = (rawDy / rawPull) * pull * power;
+        /* Всё, что лежало на канате, летит одним залпом — жгут швыряет */
+        /* сразу всех, кто на нём был, а не только схваченный шарик. */
+        for (const other of modeState.props) {
+          if (other.state !== 'resting') continue;
+          other.vx = vx;
+          other.vy = vy;
+          other.state = 'flying';
+        }
+        prop.vx = vx;
+        prop.vy = vy;
+        prop.state = 'flying';
+      } else {
+        prop.x = prop.restX;
+        prop.y = prop.restY;
+        prop.rollV = 0;
+        prop.state = 'resting';
+      }
+    } else {
+      prop.vx = 0;
+      prop.vy = 0;
+      prop.state = 'free';
+    }
+
+    modeState.dragProp = null;
+    modeState.heldNodeIndex = null;
+  },
+};
+
+const QUOTE_COLS = 7;
+const QUOTE_ROWS = 4;
+const QUOTE_GRID = [];
+for (let row = 0; row < QUOTE_ROWS; row += 1) {
+  for (let col = 0; col < QUOTE_COLS; col += 1) {
+    QUOTE_GRID.push(mPoint(0.15 + (col / (QUOTE_COLS - 1)) * 0.7, 0.3 + (row / (QUOTE_ROWS - 1)) * 0.5));
+  }
+}
+
+function resetQuote() {
+  modeState.active = new Set();
+  modeState.flashAt = null;
+  modeState.flashT = 0;
+}
+
+function quoteChain() {
+  const left = mPoint(0.22, 0.2);
+  const right = mPoint(0.78, 0.2);
+  const picked = [...modeState.active].map((i) => QUOTE_GRID[i]).sort((a, b) => a.x - b.x);
+  return [left, ...picked, right];
+}
+
+function drawQuote() {
+  const chain = quoteChain();
+  const slack = num('slack');
+
+  for (let i = 1; i < chain.length; i += 1) {
+    const a = chain[i - 1];
+    const b = chain[i];
+    const steps = 6;
+    let prev = a;
+    for (let s = 1; s <= steps; s += 1) {
+      const t = s / steps;
+      const point = s === steps ? b : mPoint(lerp(a.x, b.x, t), lerp(a.y, b.y, t) + Math.sin(t * Math.PI) * 0.03 * slack);
+      mLine(prev, point, INK, 0.008);
+      prev = point;
+    }
+  }
+
+  for (let i = 0; i < QUOTE_GRID.length; i += 1) {
+    const point = QUOTE_GRID[i];
+    mCircle(point, modeState.active.has(i) ? 0.014 : 0.008, modeState.active.has(i) ? INK : FAINT);
+  }
+  mCircle(mPoint(0.22, 0.2), 0.012, INK);
+  mCircle(mPoint(0.78, 0.2), 0.012, INK);
+
+  if (modeState.flashT > 0 && modeState.flashAt) {
+    ctx.beginPath();
+    ctx.arc(modeState.flashAt.x * S, modeState.flashAt.y * S, (0.02 + (1 - modeState.flashT) * 0.1) * S, 0, Math.PI * 2);
+    ctx.strokeStyle = RED;
+    ctx.lineWidth = 0.002 * S;
+    ctx.globalAlpha = modeState.flashT;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  drawStatus(`${modeState.active.size} точек`);
+}
+
+const quote = {
+  label: 'цитата',
+  note: 'Кликай по точкам сетки — канат цепляется за них по порядку слева направо. Своя форма М из wires, без цели.',
+  draw: drawQuote,
+  tools: [
+    { type: 'range', key: 'slack', label: 'провис', min: 0, max: 1, step: 0.05, value: 0.6 },
+    { type: 'button', label: 'заново', action: resetQuote },
+  ],
+  setup() {
+    resetQuote();
+  },
+  step() {
+    modeState.flashT = Math.max(0, modeState.flashT - STEP * 2);
+  },
+  onDown() {
+    let closest = -1;
+    let closestDist = 0.035;
+    for (let i = 0; i < QUOTE_GRID.length; i += 1) {
+      const d = Math.hypot(pointer.x - QUOTE_GRID[i].x, pointer.y - QUOTE_GRID[i].y);
+      if (d < closestDist) { closestDist = d; closest = i; }
+    }
+    if (closest === -1) return;
+    if (modeState.active.has(closest)) modeState.active.delete(closest);
+    else modeState.active.add(closest);
+    modeState.flashAt = QUOTE_GRID[closest];
+    modeState.flashT = 1;
+  },
+  onMove() {},
+  onUp() {},
+};
+
+const MODES = { metronome, membrane, bridge, rhythm, rally, slingshot, slingshotPaper, quote };
 
 startLab({
-  title: 'М · три способа держать впадину',
+  title: 'М · восемь механик впадины',
   modes: MODES,
   start: 'metronome',
   ground: 'ink',
