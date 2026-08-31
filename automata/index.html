@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Клеточные автоматы · лаборатория</title>
+<link rel="stylesheet" href="automata.css">
+</head>
+<body>
+<header>
+  <h1>Клеточные автоматы</h1>
+  <p id="status">кликни по холсту, чтобы поставить точку</p>
+</header>
+
+<main>
+  <div class="stage">
+    <canvas id="grid"></canvas>
+  </div>
+
+  <aside class="controls">
+    <section>
+      <h2>Правило</h2>
+      <div class="rule-row">
+        <span class="rule-label">B</span>
+        <div class="rule-checks" id="birth-checks"></div>
+      </div>
+      <div class="rule-row">
+        <span class="rule-label">S</span>
+        <div class="rule-checks" id="survival-checks"></div>
+      </div>
+      <button id="randomize" type="button">случайное правило</button>
+    </section>
+
+    <section>
+      <h2>Сетка</h2>
+      <label>окрестность
+        <select id="neighborhood">
+          <option value="moore">Мур (8)</option>
+          <option value="vonneumann">фон Нейман (4)</option>
+        </select>
+      </label>
+      <label>граница
+        <select id="boundary">
+          <option value="clamp">обрезать</option>
+          <option value="wrap">завернуть в тор</option>
+        </select>
+      </label>
+      <label>размер <span id="size-value">91</span>
+        <input id="size" type="range" min="21" max="151" step="2" value="91">
+      </label>
+    </section>
+
+    <section>
+      <h2>Ход</h2>
+      <label>скорость <span id="speed-value">10</span>/с
+        <input id="speed" type="range" min="1" max="30" step="1" value="10">
+      </label>
+      <div class="buttons">
+        <button id="play" type="button">пуск</button>
+        <button id="step" type="button">шаг</button>
+        <button id="reset" type="button">заново</button>
+      </div>
+    </section>
+  </aside>
+</main>
+</body>
+</html>

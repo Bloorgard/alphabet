@@ -1,0 +1,133 @@
+:root {
+  color-scheme: light dark;
+  --ink: #161616;
+  --paper: #f1ede5;
+  --alive: #161616;
+  --dead: #f1ede5;
+  --line: rgba(22,22,22,.16);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.4 ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  padding: 16px;
+}
+
+header h1 { margin: 0 0 4px; font-size: 18px; }
+header p { margin: 0 0 16px; color: rgba(22,22,22,.6); }
+
+main {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.stage {
+  flex: 1 1 480px;
+  min-width: 0;
+  aspect-ratio: 1 / 1;
+  border: 1px solid var(--line);
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.controls {
+  flex: 0 0 260px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.controls section {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.controls h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: rgba(22,22,22,.6);
+}
+
+.controls label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.controls select,
+.controls input[type="range"] {
+  flex: 1;
+}
+
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.rule-label {
+  width: 14px;
+  font-weight: 600;
+}
+
+.rule-checks {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.rule-checks label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  margin: 0;
+}
+
+.buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+button {
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f1ede5;
+    --paper: #161616;
+    --alive: #f1ede5;
+    --dead: #161616;
+    --line: rgba(241,237,229,.16);
+  }
+}
