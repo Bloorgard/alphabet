@@ -78,7 +78,7 @@
 
   function resizeCanvas() {
     const box = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(box.width * dpr);
     canvas.height = Math.round(box.height * dpr);
   }
@@ -152,7 +152,7 @@
   let lastTime = performance.now();
 
   function frame(time) {
-    const delta = (time - lastTime) / 1000;
+    const delta = Math.min((time - lastTime) / 1000, 0.25);
     lastTime = time;
     if (state.playing) {
       state.accumulator += delta;
@@ -171,6 +171,7 @@
 
   randomizeButton.addEventListener('click', () => {
     state.rule = engine.randomRule(0.4);
+    state.rule.birth[0] = false;
     syncRuleChecks();
     updateStatus();
   });

@@ -5,6 +5,7 @@
   --alive: #161616;
   --dead: #f1ede5;
   --line: rgba(22,22,22,.16);
+  --muted: rgba(22,22,22,.6);
 }
 
 * { box-sizing: border-box; }
@@ -19,7 +20,7 @@ body {
 }
 
 header h1 { margin: 0 0 4px; font-size: 18px; }
-header p { margin: 0 0 16px; color: rgba(22,22,22,.6); }
+header p { margin: 0 0 16px; color: var(--muted); }
 
 main {
   display: flex;
@@ -59,7 +60,7 @@ canvas {
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: .04em;
-  color: rgba(22,22,22,.6);
+  color: var(--muted);
 }
 
 .controls label {
@@ -129,5 +130,6 @@ button[aria-pressed="true"] {
     --alive: #f1ede5;
     --dead: #161616;
     --line: rgba(241,237,229,.16);
+    --muted: rgba(241,237,229,.6);
   }
 }
