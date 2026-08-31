@@ -78,6 +78,10 @@ const LABS = [
     mechanics: ['кузнечик'],
   },
   {
+    slug: 'o', letter: 'О', title: 'контур, окно, рост', tile: true,
+    mechanics: ['лассо', 'линза', 'смесь', 'кристалл', 'волна', 'кольца 90', 'жизнь'],
+  },
+  {
     slug: 'ya', letter: 'Я', title: 'холст из чужих я', tile: true,
     mechanics: ['холст', 'рост', 'касса'],
   },
