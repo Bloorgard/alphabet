@@ -22,8 +22,11 @@
   const randomizeButton = document.getElementById('randomize');
   const saveRuleButton = document.getElementById('save-rule');
   const savedRulesEl = document.getElementById('saved-rules');
+  const saveTemplateButton = document.getElementById('save-template');
+  const savedTemplatesEl = document.getElementById('saved-templates');
 
   const SAVED_RULES_KEY = 'automata-saved-rules';
+  const SAVED_TEMPLATES_KEY = 'automata-saved-templates';
 
   const state = {
     size: Number(sizeEl.value),
@@ -36,6 +39,7 @@
     playing: false,
     stepsPerSecond: Number(speedEl.value),
     accumulator: 0,
+    pendingTemplate: null,
   };
 
   function resetGrid() {
@@ -43,14 +47,19 @@
     state.generation = 0;
     state.seeded = false;
     state.playing = false;
+    state.pendingTemplate = null;
     playButton.textContent = 'пуск';
     playButton.setAttribute('aria-pressed', 'false');
   }
 
   function updateStatus() {
     const ruleText = engine.ruleToString(state.rule);
+    if (state.pendingTemplate) {
+      statusEl.textContent = `клик поставит шаблон (${state.pendingTemplate.length} точ.) · правило ${ruleText}`;
+      return;
+    }
     if (!state.seeded) {
-      statusEl.textContent = `кликни по холсту, чтобы поставить точку · правило ${ruleText}`;
+      statusEl.textContent = `кликни по холсту, чтобы поставить точки · правило ${ruleText}`;
       return;
     }
     statusEl.textContent = `поколение ${state.generation} · правило ${ruleText}`;
@@ -152,15 +161,94 @@
     };
   }
 
-  function seedAt(x, y) {
+  function pauseForEditing() {
+    state.playing = false;
+    playButton.textContent = 'пуск';
+    playButton.setAttribute('aria-pressed', 'false');
+  }
+
+  function toggleCell(x, y) {
     if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
-    resetGrid();
-    state.grid[engine.gridIndex(x, y, state.size)] = 1;
+    const index = engine.gridIndex(x, y, state.size);
+    state.grid[index] = state.grid[index] ? 0 : 1;
     state.seeded = true;
-    state.playing = true;
-    playButton.textContent = 'пауза';
-    playButton.setAttribute('aria-pressed', 'true');
+    pauseForEditing();
     updateStatus();
+  }
+
+  function placeTemplate(offsets, cx, cy) {
+    offsets.forEach(([dx, dy]) => {
+      const x = cx + dx;
+      const y = cy + dy;
+      if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
+      state.grid[engine.gridIndex(x, y, state.size)] = 1;
+    });
+    state.seeded = true;
+    state.pendingTemplate = null;
+    pauseForEditing();
+    updateStatus();
+  }
+
+  function captureTemplate() {
+    const points = [];
+    for (let y = 0; y < state.size; y += 1) {
+      for (let x = 0; x < state.size; x += 1) {
+        if (state.grid[engine.gridIndex(x, y, state.size)]) points.push([x, y]);
+      }
+    }
+    if (!points.length) return null;
+    const cx = Math.round(points.reduce((sum, [x]) => sum + x, 0) / points.length);
+    const cy = Math.round(points.reduce((sum, [, y]) => sum + y, 0) / points.length);
+    return points.map(([x, y]) => [x - cx, y - cy]);
+  }
+
+  function loadSavedTemplates() {
+    try {
+      const raw = localStorage.getItem(SAVED_TEMPLATES_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function persistSavedTemplates(templates) {
+    try {
+      localStorage.setItem(SAVED_TEMPLATES_KEY, JSON.stringify(templates));
+    } catch (error) {
+      // localStorage недоступен — просто не сохраняем
+    }
+  }
+
+  function renderSavedTemplates() {
+    const templates = loadSavedTemplates();
+    savedTemplatesEl.innerHTML = '';
+    templates.forEach((template, index) => {
+      const chip = document.createElement('div');
+      chip.className = 'rule-chip';
+
+      const loadButton = document.createElement('button');
+      loadButton.type = 'button';
+      loadButton.textContent = `${template.offsets.length} точ.`;
+      loadButton.addEventListener('click', () => {
+        state.pendingTemplate = template.offsets;
+        updateStatus();
+      });
+
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'rule-chip-remove';
+      removeButton.textContent = '×';
+      removeButton.setAttribute('aria-label', 'удалить сохранённый шаблон');
+      removeButton.addEventListener('click', () => {
+        const remaining = loadSavedTemplates();
+        remaining.splice(index, 1);
+        persistSavedTemplates(remaining);
+        renderSavedTemplates();
+      });
+
+      chip.append(loadButton, removeButton);
+      savedTemplatesEl.append(chip);
+    });
   }
 
   function stepOnce() {
@@ -172,7 +260,11 @@
 
   canvas.addEventListener('click', (event) => {
     const { x, y } = cellFromEvent(event);
-    seedAt(x, y);
+    if (state.pendingTemplate) {
+      placeTemplate(state.pendingTemplate, x, y);
+      return;
+    }
+    toggleCell(x, y);
   });
 
   playButton.addEventListener('click', () => {
@@ -183,9 +275,7 @@
   });
 
   stepButton.addEventListener('click', () => {
-    state.playing = false;
-    playButton.textContent = 'пуск';
-    playButton.setAttribute('aria-pressed', 'false');
+    pauseForEditing();
     stepOnce();
   });
 
@@ -244,6 +334,15 @@
     renderSavedRules();
   });
 
+  saveTemplateButton.addEventListener('click', () => {
+    const offsets = captureTemplate();
+    if (!offsets) return;
+    const templates = loadSavedTemplates();
+    templates.push({ offsets });
+    persistSavedTemplates(templates);
+    renderSavedTemplates();
+  });
+
   neighborhoodEl.addEventListener('change', () => {
     state.neighborhood = neighborhoodEl.value;
   });
@@ -269,5 +368,6 @@
   resizeCanvas();
   updateStatus();
   renderSavedRules();
+  renderSavedTemplates();
   requestAnimationFrame(frame);
 })();

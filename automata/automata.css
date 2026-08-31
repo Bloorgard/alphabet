@@ -112,6 +112,12 @@ canvas {
   flex-wrap: wrap;
 }
 
+.hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .rule-chips {
   display: flex;
   flex-wrap: wrap;
