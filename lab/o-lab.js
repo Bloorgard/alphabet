@@ -910,7 +910,9 @@ function clearLifePoints() {
   modeState.started = modeState.wall.size > 0;
 }
 
-function buildWallRing() {
+/* Радиус можно крутить на ходу: пересобирает только множество стены и
+   доживляет новые её клетки, старые точки и поколение не трогает. */
+function resizeWall() {
   const size = automatonSize();
   const radius = Math.round(num('radius'));
   const center = Math.floor(size / 2);
@@ -920,13 +922,18 @@ function buildWallRing() {
     wall.add(`${x},${y}`);
   });
   modeState.wall = wall;
-  clearLifePoints();
+  if (!modeState.cells) return;
+  wall.forEach((key) => {
+    const [x, y] = key.split(',').map(Number);
+    modeState.cells[automatonIndex(x, y, size)] = 1;
+  });
+  modeState.started = modeState.started || wall.size > 0;
 }
 
 function resetLife() {
-  modeState.wall = modeState.wall || new Set();
   modeState.rule = modeState.rule || LIFE_RULES.life;
   modeState.clock = 0;
+  resizeWall();
   clearLifePoints();
   markLifeRule();
 }
@@ -944,14 +951,13 @@ function toggleLifeCell() {
 function stepLife() {
   if (!modeState.started || !automatonDue()) return;
   const size = automatonSize();
-  const counter = on('vonneumann') ? orthogonalCount : mooreCount;
   const next = new Uint8Array(size * size);
   const front = new Uint8Array(size * size);
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
       const index = automatonIndex(x, y, size);
       const alive = modeState.cells[index] === 1;
-      const count = counter(modeState.cells, x, y, size);
+      const count = mooreCount(modeState.cells, x, y, size);
       const allowed = alive ? modeState.rule.survival : modeState.rule.birth;
       const value = allowed.includes(count) ? 1 : 0;
       next[index] = value;
@@ -970,7 +976,7 @@ function stepLife() {
 
 function drawLife() {
   const size = automatonSize();
-  drawAutomatonGrid(size);
+  if (on('showGrid')) drawAutomatonGrid(size);
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
       const index = automatonIndex(x, y, size);
@@ -982,7 +988,7 @@ function drawLife() {
     modeState.wall.forEach((key) => {
       const [x, y] = key.split(',').map(Number);
       if (x < 0 || y < 0 || x >= size || y >= size) return;
-      fillAutomatonCell(x, y, size, ink(0.3));
+      fillAutomatonCell(x, y, size, INK);
     });
   }
   const label = modeState.rule.label;
@@ -1132,7 +1138,7 @@ const MODES = {
   },
   life: {
     label: 'жизнь',
-    note: 'Кольцо-стена не подчиняется правилу и никогда не гаснет, но считается соседом для остальных клеток — рядом с ним рождение идёт иначе, чем в пустоте. Точки внутри играют по выбранному B/S; подбери правило и радиус, чтобы узор держался в форме, а не расползался.',
+    note: 'Кольцо всегда по центру, но не подчиняется правилу и никогда не гаснет — оно лишь считается соседом для остальных клеток, и рядом с ним рождение идёт иначе, чем в пустоте. Точки внутри играют по выбранному B/S; подбери правило и радиус, чтобы узор держался в форме, а не расползался.',
     cursor: 'crosshair',
     tools: [
       { type: 'button', label: LIFE_RULES.life.label, action: () => selectLifeRule('life') },
@@ -1142,16 +1148,18 @@ const MODES = {
       { type: 'range', key: 'grid', label: 'сетка', min: 41, max: 111, step: 2, value: 91 },
       { type: 'range', key: 'rate', label: 'скорость', min: 1, max: 30, step: 1, value: 10 },
       { type: 'range', key: 'radius', label: 'радиус кольца', min: 4, max: 50, step: 1, value: 28 },
-      { type: 'button', label: 'кольцо по центру', action: buildWallRing },
       { type: 'toggle', key: 'hideWall', label: 'скрыть кольцо', value: false },
-      { type: 'toggle', key: 'vonneumann', label: 'фон Нейман', value: false },
+      { type: 'toggle', key: 'showGrid', label: 'линии сетки', value: true },
       { type: 'button', label: 'очистить точки', action: clearLifePoints },
     ],
     setup() { resetLife(); },
     step() { stepLife(); },
     draw() { drawLife(); },
     onDown() { toggleLifeCell(); },
-    onTool(key) { if (key === 'grid') resetLife(); },
+    onTool(key) {
+      if (key === 'grid') resetLife();
+      if (key === 'radius') resizeWall();
+    },
   },
 };
 
