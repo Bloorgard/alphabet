@@ -872,13 +872,31 @@ const LIFE_RULES = {
   coral: { label: 'коралл B3/S45678', birth: [3], survival: [4, 5, 6, 7, 8] },
 };
 
+/* Брезенхэм для окружности: считает одну восьмушку и зеркалит её в семь
+   остальных, поэтому симметрия точная при любом радиусе — не зависит от
+   округления тригонометрии, которое на разных радиусах даёт разный сдвиг. */
 function ringCells(cx, cy, radius) {
   if (radius <= 0) return [[cx, cy]];
-  const steps = Math.max(16, Math.ceil(radius * 8));
   const points = [];
-  for (let index = 0; index <= steps; index += 1) {
-    const angle = (index / steps) * Math.PI * 2;
-    points.push([cx + Math.round(radius * Math.cos(angle)), cy + Math.round(radius * Math.sin(angle))]);
+  let x = radius;
+  let y = 0;
+  let err = 1 - radius;
+  const plot = (px, py) => {
+    points.push(
+      [cx + px, cy + py], [cx - px, cy + py], [cx + px, cy - py], [cx - px, cy - py],
+      [cx + py, cy + px], [cx - py, cy + px], [cx + py, cy - px], [cx - py, cy - px],
+    );
+  };
+  plot(x, y);
+  while (x > y) {
+    y += 1;
+    if (err < 0) {
+      err += 2 * y + 1;
+    } else {
+      x -= 1;
+      err += 2 * (y - x) + 1;
+    }
+    plot(x, y);
   }
   return points;
 }
@@ -916,6 +934,7 @@ function resizeWall() {
   const size = automatonSize();
   const radius = Math.round(num('radius'));
   const center = Math.floor(size / 2);
+  const previous = modeState.wall || new Set();
   const wall = new Set();
   ringCells(center, center, radius).forEach(([x, y]) => {
     if (x < 0 || y < 0 || x >= size || y >= size) return;
@@ -923,6 +942,11 @@ function resizeWall() {
   });
   modeState.wall = wall;
   if (!modeState.cells) return;
+  previous.forEach((key) => {
+    if (wall.has(key)) return;
+    const [x, y] = key.split(',').map(Number);
+    modeState.cells[automatonIndex(x, y, size)] = 0;
+  });
   wall.forEach((key) => {
     const [x, y] = key.split(',').map(Number);
     modeState.cells[automatonIndex(x, y, size)] = 1;
