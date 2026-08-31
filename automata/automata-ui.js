@@ -24,6 +24,12 @@
   const savedRulesEl = document.getElementById('saved-rules');
   const saveTemplateButton = document.getElementById('save-template');
   const savedTemplatesEl = document.getElementById('saved-templates');
+  const toolButtons = {
+    point: document.getElementById('tool-point'),
+    line: document.getElementById('tool-line'),
+    rect: document.getElementById('tool-rect'),
+    circle: document.getElementById('tool-circle'),
+  };
 
   const SAVED_RULES_KEY = 'automata-saved-rules';
   const SAVED_TEMPLATES_KEY = 'automata-saved-templates';
@@ -40,6 +46,9 @@
     stepsPerSecond: Number(speedEl.value),
     accumulator: 0,
     pendingTemplate: null,
+    tool: 'point',
+    drawAnchor: null,
+    previewCells: null,
   };
 
   function resetGrid() {
@@ -48,6 +57,8 @@
     state.seeded = false;
     state.playing = false;
     state.pendingTemplate = null;
+    state.drawAnchor = null;
+    state.previewCells = null;
     playButton.textContent = 'пуск';
     playButton.setAttribute('aria-pressed', 'false');
   }
@@ -161,6 +172,74 @@
     };
   }
 
+  function linePoints(x0, y0, x1, y1) {
+    const points = [];
+    const dx = Math.abs(x1 - x0);
+    const sx = x0 < x1 ? 1 : -1;
+    const dy = -Math.abs(y1 - y0);
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    let x = x0;
+    let y = y0;
+    for (;;) {
+      points.push([x, y]);
+      if (x === x1 && y === y1) break;
+      const e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x += sx; }
+      if (e2 <= dx) { err += dx; y += sy; }
+    }
+    return points;
+  }
+
+  function rectPoints(x0, y0, x1, y1) {
+    const left = Math.min(x0, x1);
+    const right = Math.max(x0, x1);
+    const top = Math.min(y0, y1);
+    const bottom = Math.max(y0, y1);
+    const points = [];
+    for (let x = left; x <= right; x += 1) { points.push([x, top], [x, bottom]); }
+    for (let y = top; y <= bottom; y += 1) { points.push([left, y], [right, y]); }
+    return points;
+  }
+
+  function ellipsePoints(cx, cy, rx, ry) {
+    if (rx === 0 && ry === 0) return [[cx, cy]];
+    const steps = Math.max(16, Math.ceil((rx + ry) * 4));
+    const points = [];
+    let prev = null;
+    for (let i = 0; i <= steps; i += 1) {
+      const angle = (i / steps) * Math.PI * 2;
+      const x = cx + Math.round(rx * Math.cos(angle));
+      const y = cy + Math.round(ry * Math.sin(angle));
+      if (prev) points.push(...linePoints(prev[0], prev[1], x, y));
+      else points.push([x, y]);
+      prev = [x, y];
+    }
+    return points;
+  }
+
+  function shapePoints(tool, anchor, current, square) {
+    const dx = current.x - anchor.x;
+    const dy = current.y - anchor.y;
+    if (tool === 'line') return linePoints(anchor.x, anchor.y, current.x, current.y);
+    const side = square ? Math.max(Math.abs(dx), Math.abs(dy)) : null;
+    const ex = square ? anchor.x + Math.sign(dx || 1) * side : current.x;
+    const ey = square ? anchor.y + Math.sign(dy || 1) * side : current.y;
+    if (tool === 'rect') return rectPoints(anchor.x, anchor.y, ex, ey);
+    const cx = Math.round((anchor.x + ex) / 2);
+    const cy = Math.round((anchor.y + ey) / 2);
+    const rx = Math.round(Math.abs(ex - anchor.x) / 2);
+    const ry = Math.round(Math.abs(ey - anchor.y) / 2);
+    return ellipsePoints(cx, cy, rx, ry);
+  }
+
+  function setTool(tool) {
+    state.tool = tool;
+    Object.entries(toolButtons).forEach(([name, button]) => {
+      button.setAttribute('aria-pressed', String(name === tool));
+    });
+  }
+
   function pauseForEditing() {
     state.playing = false;
     playButton.textContent = 'пуск';
@@ -258,13 +337,47 @@
     updateStatus();
   }
 
-  canvas.addEventListener('click', (event) => {
-    const { x, y } = cellFromEvent(event);
+  function commitPreview() {
+    if (!state.previewCells) return;
+    state.previewCells.forEach((key) => {
+      const [x, y] = key.split(',').map(Number);
+      if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
+      state.grid[engine.gridIndex(x, y, state.size)] = 1;
+    });
+    state.previewCells = null;
+    state.seeded = true;
+    pauseForEditing();
+    updateStatus();
+  }
+
+  function updatePreview(anchor, current, shiftKey) {
+    const points = shapePoints(state.tool, anchor, current, shiftKey);
+    state.previewCells = new Set(points.map(([x, y]) => `${x},${y}`));
+  }
+
+  canvas.addEventListener('mousedown', (event) => {
+    const point = cellFromEvent(event);
     if (state.pendingTemplate) {
-      placeTemplate(state.pendingTemplate, x, y);
+      placeTemplate(state.pendingTemplate, point.x, point.y);
       return;
     }
-    toggleCell(x, y);
+    if (state.tool === 'point') {
+      toggleCell(point.x, point.y);
+      return;
+    }
+    state.drawAnchor = point;
+    updatePreview(point, point, event.shiftKey);
+  });
+
+  window.addEventListener('mousemove', (event) => {
+    if (!state.drawAnchor) return;
+    updatePreview(state.drawAnchor, cellFromEvent(event), event.shiftKey);
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!state.drawAnchor) return;
+    state.drawAnchor = null;
+    commitPreview();
   });
 
   playButton.addEventListener('click', () => {
@@ -295,6 +408,13 @@
           ctx.fillRect(x * cell, y * cell, Math.ceil(cell), Math.ceil(cell));
         }
       }
+    }
+    if (state.previewCells) {
+      state.previewCells.forEach((key) => {
+        const [x, y] = key.split(',').map(Number);
+        if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
+        ctx.fillRect(x * cell, y * cell, Math.ceil(cell), Math.ceil(cell));
+      });
     }
   }
 
@@ -332,6 +452,10 @@
     rules.push({ birth: state.rule.birth, survival: state.rule.survival });
     persistSavedRules(rules);
     renderSavedRules();
+  });
+
+  Object.entries(toolButtons).forEach(([name, button]) => {
+    button.addEventListener('click', () => setTool(name));
   });
 
   saveTemplateButton.addEventListener('click', () => {

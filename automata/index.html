@@ -37,7 +37,13 @@
 
     <section>
       <h2>Точки</h2>
-      <p class="hint">клик по холсту ставит или снимает точку — можно сколько угодно</p>
+      <p class="hint">клик — точка. на линии/прямоугольнике/окружности — нажать и тянуть; Shift держит квадрат/круг ровным</p>
+      <div class="buttons">
+        <button id="tool-point" type="button" aria-pressed="true">точка</button>
+        <button id="tool-line" type="button" aria-pressed="false">линия</button>
+        <button id="tool-rect" type="button" aria-pressed="false">прямоугольник</button>
+        <button id="tool-circle" type="button" aria-pressed="false">окружность</button>
+      </div>
       <div class="buttons">
         <button id="save-template" type="button">сохранить как шаблон</button>
       </div>
