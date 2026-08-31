@@ -12,17 +12,25 @@
   const playButton = document.getElementById('play');
   const stepButton = document.getElementById('step');
   const resetButton = document.getElementById('reset');
+  const birthChecksEl = document.getElementById('birth-checks');
+  const survivalChecksEl = document.getElementById('survival-checks');
+  const neighborhoodEl = document.getElementById('neighborhood');
+  const boundaryEl = document.getElementById('boundary');
+  const sizeValueEl = document.getElementById('size-value');
+  const speedEl = document.getElementById('speed');
+  const speedValueEl = document.getElementById('speed-value');
+  const randomizeButton = document.getElementById('randomize');
 
   const state = {
     size: Number(sizeEl.value),
     grid: null,
     rule: engine.createRule([3], [2, 3]),
-    neighborhood: 'moore',
-    boundary: 'clamp',
+    neighborhood: neighborhoodEl.value,
+    boundary: boundaryEl.value,
     generation: 0,
     seeded: false,
     playing: false,
-    stepsPerSecond: 10,
+    stepsPerSecond: Number(speedEl.value),
     accumulator: 0,
   };
 
@@ -42,6 +50,30 @@
       return;
     }
     statusEl.textContent = `поколение ${state.generation} · правило ${ruleText}`;
+  }
+
+  function buildRuleChecks(container, kind) {
+    container.innerHTML = '';
+    for (let count = 0; count <= 8; count += 1) {
+      const label = document.createElement('label');
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.id = `${kind}-${count}`;
+      input.checked = state.rule[kind][count];
+      input.addEventListener('change', () => {
+        state.rule[kind][count] = input.checked;
+        updateStatus();
+      });
+      label.append(input, String(count));
+      container.append(label);
+    }
+  }
+
+  function syncRuleChecks() {
+    for (let count = 0; count <= 8; count += 1) {
+      document.getElementById(`birth-${count}`).checked = state.rule.birth[count];
+      document.getElementById(`survival-${count}`).checked = state.rule.survival[count];
+    }
   }
 
   function resizeCanvas() {
@@ -133,6 +165,35 @@
     draw();
     requestAnimationFrame(frame);
   }
+
+  buildRuleChecks(birthChecksEl, 'birth');
+  buildRuleChecks(survivalChecksEl, 'survival');
+
+  randomizeButton.addEventListener('click', () => {
+    state.rule = engine.randomRule(0.4);
+    syncRuleChecks();
+    updateStatus();
+  });
+
+  neighborhoodEl.addEventListener('change', () => {
+    state.neighborhood = neighborhoodEl.value;
+  });
+
+  boundaryEl.addEventListener('change', () => {
+    state.boundary = boundaryEl.value;
+  });
+
+  sizeEl.addEventListener('input', () => {
+    state.size = Number(sizeEl.value);
+    sizeValueEl.textContent = String(state.size);
+    resetGrid();
+    updateStatus();
+  });
+
+  speedEl.addEventListener('input', () => {
+    state.stepsPerSecond = Number(speedEl.value);
+    speedValueEl.textContent = String(state.stepsPerSecond);
+  });
 
   window.addEventListener('resize', resizeCanvas);
   resetGrid();
