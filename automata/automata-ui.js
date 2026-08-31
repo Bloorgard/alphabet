@@ -32,6 +32,10 @@
   };
   const permanentButton = document.getElementById('tool-permanent');
   const clearPermanentButton = document.getElementById('clear-permanent');
+  const ringRadiusEl = document.getElementById('ring-radius');
+  const ringRadiusValueEl = document.getElementById('ring-radius-value');
+  const addRingButton = document.getElementById('add-ring');
+  const hideWallsButton = document.getElementById('hide-walls');
 
   const SAVED_RULES_KEY = 'automata-saved-rules';
   const SAVED_TEMPLATES_KEY = 'automata-saved-templates';
@@ -53,7 +57,15 @@
     previewCells: null,
     permanentMode: false,
     permanent: new Set(),
+    hideWalls: false,
   };
+
+  function updateRingRadiusMax() {
+    const max = Math.max(1, Math.floor(state.size / 2) - 1);
+    ringRadiusEl.max = String(max);
+    if (Number(ringRadiusEl.value) > max) ringRadiusEl.value = String(max);
+    ringRadiusValueEl.textContent = ringRadiusEl.value;
+  }
 
   function applyPermanent(grid) {
     state.permanent.forEach((key) => {
@@ -436,7 +448,7 @@
         }
       }
     }
-    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--wall');
+    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue(state.hideWalls ? '--dead' : '--wall');
     state.permanent.forEach((key) => {
       const [x, y] = key.split(',').map(Number);
       if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
@@ -508,6 +520,27 @@
     updateStatus();
   });
 
+  ringRadiusEl.addEventListener('input', () => {
+    ringRadiusValueEl.textContent = ringRadiusEl.value;
+  });
+
+  addRingButton.addEventListener('click', () => {
+    const radius = Number(ringRadiusEl.value);
+    const center = Math.floor(state.size / 2);
+    ellipsePoints(center, center, radius, radius).forEach(([x, y]) => {
+      if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
+      state.permanent.add(`${x},${y}`);
+      state.grid[engine.gridIndex(x, y, state.size)] = 1;
+    });
+    state.seeded = true;
+    updateStatus();
+  });
+
+  hideWallsButton.addEventListener('click', () => {
+    state.hideWalls = !state.hideWalls;
+    hideWallsButton.setAttribute('aria-pressed', String(state.hideWalls));
+  });
+
   saveTemplateButton.addEventListener('click', () => {
     const offsets = captureTemplate();
     if (!offsets) return;
@@ -529,6 +562,7 @@
     state.size = Number(sizeEl.value);
     sizeValueEl.textContent = String(state.size);
     state.permanent.clear();
+    updateRingRadiusMax();
     resetGrid();
     updateStatus();
   });
@@ -539,6 +573,7 @@
   });
 
   window.addEventListener('resize', resizeCanvas);
+  updateRingRadiusMax();
   resetGrid();
   resizeCanvas();
   updateStatus();
