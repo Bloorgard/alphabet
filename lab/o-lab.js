@@ -926,6 +926,7 @@ function buildWallRing() {
 function resetLife() {
   modeState.wall = modeState.wall || new Set();
   modeState.rule = modeState.rule || LIFE_RULES.life;
+  modeState.clock = 0;
   clearLifePoints();
   markLifeRule();
 }
