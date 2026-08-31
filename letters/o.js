@@ -34,6 +34,8 @@ const SWITCHES = [
   { key: 'paper', label: 'бумага', onToggle: (value, ctx) => ctx.applyGround(value) },
 ];
 
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
 function gridIndex(x, y) { return y * GRID + x; }
 
 /* Брезенхэм для окружности: одна восьмушка зеркалится в семь остальных,
@@ -97,6 +99,8 @@ export function mountO(workspace) {
   let frameId = 0;
   let ruleButtons = [];
   let ruleNote = null;
+  let radiusInput = null;
+  let drag = null;
 
   function resize() {
     const bounds = workspace.getBoundingClientRect();
@@ -249,10 +253,47 @@ export function mountO(workspace) {
     return { x, y };
   }
 
+  /* Расстояние от пальца до центра сетки, в клетках — палец сам становится
+     краем кольца, тянуть от центра наружу увеличивает радиус. */
+  function radiusFromEvent(event) {
+    const rect = canvas.getBoundingClientRect();
+    const cell = S / GRID;
+    const px = event.clientX - rect.left - ox;
+    const py = event.clientY - rect.top - oy;
+    const center = (GRID / 2) * cell;
+    return Math.hypot(px - center, py - center) / cell;
+  }
+
+  const DRAG_THRESHOLD = 6; // px: меньше — тап (точка), больше — протяжка (радиус)
+
   function onDown(event) {
-    const { x, y } = cellFromEvent(event);
-    if (x < 0 || y < 0 || x >= GRID || y >= GRID) return;
-    toggleCell(x, y);
+    drag = { x: event.clientX, y: event.clientY, moved: false };
+    try { canvas.setPointerCapture(event.pointerId); } catch (error) { /* Safari может отказать */ }
+  }
+
+  function onMove(event) {
+    if (!drag) return;
+    if (!drag.moved) {
+      const dx = event.clientX - drag.x;
+      const dy = event.clientY - drag.y;
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+      drag.moved = true;
+    }
+    const radiusControl = CONTROLS.find((control) => control.key === 'radius');
+    const value = Math.round(clamp(radiusFromEvent(event), radiusControl.min, radiusControl.max));
+    if (value === params.radius) return;
+    params.radius = value;
+    if (radiusInput) radiusInput.value = value;
+    resizeWall();
+  }
+
+  function onUp(event) {
+    if (!drag) return;
+    if (!drag.moved) {
+      const { x, y } = cellFromEvent(event);
+      if (x >= 0 && y >= 0 && x < GRID && y < GRID) toggleCell(x, y);
+    }
+    drag = null;
   }
 
   function buildPanel() {
@@ -291,6 +332,7 @@ export function mountO(workspace) {
         params[control.key] = Number(input.value);
         if (control.key === 'radius') resizeWall();
       });
+      if (control.key === 'radius') radiusInput = input;
       label.append(input);
       panel.append(label);
     }
@@ -350,6 +392,9 @@ export function mountO(workspace) {
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(workspace);
   canvas.addEventListener('pointerdown', onDown);
+  canvas.addEventListener('pointermove', onMove);
+  canvas.addEventListener('pointerup', onUp);
+  canvas.addEventListener('pointercancel', onUp);
   document.addEventListener('keydown', onKeyDown);
 
   resize();
@@ -360,6 +405,9 @@ export function mountO(workspace) {
     cancelAnimationFrame(frameId);
     resizeObserver.disconnect();
     canvas.removeEventListener('pointerdown', onDown);
+    canvas.removeEventListener('pointermove', onMove);
+    canvas.removeEventListener('pointerup', onUp);
+    canvas.removeEventListener('pointercancel', onUp);
     document.removeEventListener('keydown', onKeyDown);
     panel.remove();
     toggle.remove();
