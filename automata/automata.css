@@ -77,21 +77,20 @@ canvas {
 }
 
 .rule-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 14px;
 }
 
 .rule-label {
-  width: 14px;
+  margin: 0 0 6px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .rule-checks {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 4px;
-  flex-wrap: wrap;
+  max-width: 132px;
 }
 
 .rule-checks label {
