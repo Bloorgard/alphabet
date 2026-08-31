@@ -6,6 +6,7 @@
   --dead: #f1ede5;
   --line: rgba(22,22,22,.16);
   --muted: rgba(22,22,22,.6);
+  --wall: #2f6fed;
 }
 
 * { box-sizing: border-box; }

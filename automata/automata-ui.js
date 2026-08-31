@@ -30,6 +30,8 @@
     rect: document.getElementById('tool-rect'),
     circle: document.getElementById('tool-circle'),
   };
+  const permanentButton = document.getElementById('tool-permanent');
+  const clearPermanentButton = document.getElementById('clear-permanent');
 
   const SAVED_RULES_KEY = 'automata-saved-rules';
   const SAVED_TEMPLATES_KEY = 'automata-saved-templates';
@@ -49,12 +51,23 @@
     tool: 'point',
     drawAnchor: null,
     previewCells: null,
+    permanentMode: false,
+    permanent: new Set(),
   };
+
+  function applyPermanent(grid) {
+    state.permanent.forEach((key) => {
+      const [x, y] = key.split(',').map(Number);
+      if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
+      grid[engine.gridIndex(x, y, state.size)] = 1;
+    });
+  }
 
   function resetGrid() {
     state.grid = engine.createGrid(state.size);
+    applyPermanent(state.grid);
     state.generation = 0;
-    state.seeded = false;
+    state.seeded = state.permanent.size > 0;
     state.playing = false;
     state.pendingTemplate = null;
     state.drawAnchor = null;
@@ -249,7 +262,18 @@
   function toggleCell(x, y) {
     if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
     const index = engine.gridIndex(x, y, state.size);
-    state.grid[index] = state.grid[index] ? 0 : 1;
+    const key = `${x},${y}`;
+    if (state.permanentMode) {
+      if (state.permanent.has(key)) {
+        state.permanent.delete(key);
+        state.grid[index] = 0;
+      } else {
+        state.permanent.add(key);
+        state.grid[index] = 1;
+      }
+    } else {
+      state.grid[index] = state.grid[index] ? 0 : 1;
+    }
     state.seeded = true;
     pauseForEditing();
     updateStatus();
@@ -332,7 +356,9 @@
 
   function stepOnce() {
     if (!state.seeded) return;
-    state.grid = engine.stepGrid(state.grid, state.size, state.rule, state.neighborhood, state.boundary);
+    const next = engine.stepGrid(state.grid, state.size, state.rule, state.neighborhood, state.boundary);
+    applyPermanent(next);
+    state.grid = next;
     state.generation += 1;
     updateStatus();
   }
@@ -343,6 +369,7 @@
       const [x, y] = key.split(',').map(Number);
       if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
       state.grid[engine.gridIndex(x, y, state.size)] = 1;
+      if (state.permanentMode) state.permanent.add(key);
     });
     state.previewCells = null;
     state.seeded = true;
@@ -409,7 +436,15 @@
         }
       }
     }
+    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--wall');
+    state.permanent.forEach((key) => {
+      const [x, y] = key.split(',').map(Number);
+      if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
+      ctx.fillRect(x * cell, y * cell, Math.ceil(cell), Math.ceil(cell));
+    });
     if (state.previewCells) {
+      ctx.fillStyle = getComputedStyle(document.body)
+        .getPropertyValue(state.permanentMode ? '--wall' : '--alive');
       state.previewCells.forEach((key) => {
         const [x, y] = key.split(',').map(Number);
         if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
@@ -458,6 +493,21 @@
     button.addEventListener('click', () => setTool(name));
   });
 
+  permanentButton.addEventListener('click', () => {
+    state.permanentMode = !state.permanentMode;
+    permanentButton.setAttribute('aria-pressed', String(state.permanentMode));
+  });
+
+  clearPermanentButton.addEventListener('click', () => {
+    state.permanent.forEach((key) => {
+      const [x, y] = key.split(',').map(Number);
+      if (x < 0 || y < 0 || x >= state.size || y >= state.size) return;
+      state.grid[engine.gridIndex(x, y, state.size)] = 0;
+    });
+    state.permanent.clear();
+    updateStatus();
+  });
+
   saveTemplateButton.addEventListener('click', () => {
     const offsets = captureTemplate();
     if (!offsets) return;
@@ -478,6 +528,7 @@
   sizeEl.addEventListener('input', () => {
     state.size = Number(sizeEl.value);
     sizeValueEl.textContent = String(state.size);
+    state.permanent.clear();
     resetGrid();
     updateStatus();
   });
