@@ -1,7 +1,9 @@
 // О — кольцо всегда по центру. Оно не подчиняется правилу и никогда не
 // гаснет, но считается соседом для остальных клеток — рядом с ним рождение
-// идёт иначе, чем в пустоте. Клик ставит точку внутри, точки играют по
-// выбранному правилу B/S: одни держатся в форме кольца, другие расползаются.
+// идёт иначе, чем в пустоте, и этого достаточно, чтобы вокруг само пошло
+// движение по выбранному правилу B/S: одни держатся в форме кольца, другие
+// расползаются. Одиночная точка почти при любом правиле гаснет за один шаг,
+// поэтому её не ставят руками — кольцо само себе затравка.
 
 const MARK = { paper: '#161616', ink: '#f1ede5' };
 const GRID_LINE = { paper: 'rgba(22, 22, 22, .07)', ink: 'rgba(241, 237, 229, .06)' };
@@ -87,6 +89,7 @@ export function mountO(workspace) {
     front: new Uint8Array(GRID * GRID),
     generation: 0,
     started: false,
+    paused: false,
     clock: 0,
   };
 
@@ -162,14 +165,6 @@ export function mountO(workspace) {
     if (ruleNote) ruleNote.textContent = state.rule.rule;
   }
 
-  function toggleCell(x, y) {
-    const key = `${x},${y}`;
-    if (state.wall.has(key)) return;
-    const index = gridIndex(x, y);
-    state.cells[index] = state.cells[index] ? 0 : 1;
-    state.started = true;
-  }
-
   function step() {
     if (!state.started) return;
     const next = new Uint8Array(GRID * GRID);
@@ -234,7 +229,7 @@ export function mountO(workspace) {
   function loop(now) {
     const delta = Math.min((now - last) / 1000, 0.25);
     last = now;
-    if (state.started) {
+    if (state.started && !state.paused) {
       state.clock += delta;
       const interval = 1 / params.rate;
       while (state.clock >= interval) {
@@ -244,13 +239,6 @@ export function mountO(workspace) {
     }
     draw();
     frameId = requestAnimationFrame(loop);
-  }
-
-  function cellFromEvent(event) {
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor(((event.clientX - rect.left - ox) / S) * GRID);
-    const y = Math.floor(((event.clientY - rect.top - oy) / S) * GRID);
-    return { x, y };
   }
 
   /* Расстояние от пальца до центра сетки, в клетках — палец сам становится
@@ -264,11 +252,21 @@ export function mountO(workspace) {
     return Math.hypot(px - center, py - center) / cell;
   }
 
-  const DRAG_THRESHOLD = 6; // px: меньше — тап (точка), больше — протяжка (радиус)
+  const DRAG_THRESHOLD = 6; // px: короткий тап игнорируется, дальше — протяжка меняет радиус
 
   function onDown(event) {
     drag = { x: event.clientX, y: event.clientY, moved: false };
     try { canvas.setPointerCapture(event.pointerId); } catch (error) { /* Safari может отказать */ }
+  }
+
+  const RADIUS_CONTROL = CONTROLS.find((control) => control.key === 'radius');
+
+  function setRadius(value) {
+    const next = Math.round(clamp(value, RADIUS_CONTROL.min, RADIUS_CONTROL.max));
+    if (next === params.radius) return;
+    params.radius = next;
+    if (radiusInput) radiusInput.value = next;
+    resizeWall();
   }
 
   function onMove(event) {
@@ -279,20 +277,10 @@ export function mountO(workspace) {
       if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
       drag.moved = true;
     }
-    const radiusControl = CONTROLS.find((control) => control.key === 'radius');
-    const value = Math.round(clamp(radiusFromEvent(event), radiusControl.min, radiusControl.max));
-    if (value === params.radius) return;
-    params.radius = value;
-    if (radiusInput) radiusInput.value = value;
-    resizeWall();
+    setRadius(radiusFromEvent(event));
   }
 
-  function onUp(event) {
-    if (!drag) return;
-    if (!drag.moved) {
-      const { x, y } = cellFromEvent(event);
-      if (x >= 0 && y >= 0 && x < GRID && y < GRID) toggleCell(x, y);
-    }
+  function onUp() {
     drag = null;
   }
 
@@ -373,16 +361,43 @@ export function mountO(workspace) {
     return { panel, toggle };
   }
 
+  const RULE_NAMES = Object.keys(RULES);
+
   function onKeyDown(event) {
-    if (event.key !== 'Tab' || event.target.closest('input, textarea')) return;
-    event.preventDefault();
-    toggle.click();
+    if (event.target.closest('input, textarea')) return;
+
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      toggle.click();
+      return;
+    }
+    if (event.key === ' ' || event.code === 'Space') {
+      event.preventDefault();
+      state.paused = !state.paused;
+      return;
+    }
+    if (event.code === 'KeyC') {
+      reset();
+      return;
+    }
+    if (event.key === '+' || event.key === '=') {
+      setRadius(params.radius + RADIUS_CONTROL.step);
+      return;
+    }
+    if (event.key === '-') {
+      setRadius(params.radius - RADIUS_CONTROL.step);
+      return;
+    }
+    const ruleIndex = ['1', '2', '3', '4'].indexOf(event.key);
+    if (ruleIndex !== -1 && RULE_NAMES[ruleIndex]) {
+      selectRule(RULE_NAMES[ruleIndex]);
+    }
   }
 
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = 'клик ставит точку · кольцо держит форму';
+  hint.textContent = 'тяни — радиус · c очистить · 1–4 правило · пробел пауза';
   workspace.append(hint);
 
   const { panel, toggle } = buildPanel();
