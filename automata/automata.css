@@ -112,6 +112,30 @@ canvas {
   flex-wrap: wrap;
 }
 
+.rule-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.rule-chip {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+}
+
+.rule-chip button {
+  border: none;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.rule-chip-remove {
+  border-left: 1px solid var(--line) !important;
+  color: var(--muted);
+}
+
 button {
   font: inherit;
   padding: 6px 10px;

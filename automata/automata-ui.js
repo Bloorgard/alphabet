@@ -20,6 +20,10 @@
   const speedEl = document.getElementById('speed');
   const speedValueEl = document.getElementById('speed-value');
   const randomizeButton = document.getElementById('randomize');
+  const saveRuleButton = document.getElementById('save-rule');
+  const savedRulesEl = document.getElementById('saved-rules');
+
+  const SAVED_RULES_KEY = 'automata-saved-rules';
 
   const state = {
     size: Number(sizeEl.value),
@@ -67,6 +71,61 @@
       label.append(input, String(count));
       container.append(label);
     }
+  }
+
+  function loadSavedRules() {
+    try {
+      const raw = localStorage.getItem(SAVED_RULES_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function persistSavedRules(rules) {
+    try {
+      localStorage.setItem(SAVED_RULES_KEY, JSON.stringify(rules));
+    } catch (error) {
+      // localStorage недоступен (приватный режим и т.п.) — просто не сохраняем
+    }
+  }
+
+  function applyRule(rule) {
+    state.rule = rule;
+    syncRuleChecks();
+    updateStatus();
+  }
+
+  function renderSavedRules() {
+    const rules = loadSavedRules();
+    savedRulesEl.innerHTML = '';
+    rules.forEach((rule, index) => {
+      const chip = document.createElement('div');
+      chip.className = 'rule-chip';
+
+      const loadButton = document.createElement('button');
+      loadButton.type = 'button';
+      loadButton.textContent = engine.ruleToString(rule);
+      loadButton.addEventListener('click', () => applyRule(engine.createRule(
+        rule.birth.map((on, count) => (on ? count : null)).filter((count) => count !== null),
+        rule.survival.map((on, count) => (on ? count : null)).filter((count) => count !== null),
+      )));
+
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'rule-chip-remove';
+      removeButton.textContent = '×';
+      removeButton.setAttribute('aria-label', 'удалить сохранённое правило');
+      removeButton.addEventListener('click', () => {
+        const remaining = loadSavedRules();
+        remaining.splice(index, 1);
+        persistSavedRules(remaining);
+        renderSavedRules();
+      });
+
+      chip.append(loadButton, removeButton);
+      savedRulesEl.append(chip);
+    });
   }
 
   function syncRuleChecks() {
@@ -170,10 +229,19 @@
   buildRuleChecks(survivalChecksEl, 'survival');
 
   randomizeButton.addEventListener('click', () => {
-    state.rule = engine.randomRule(0.4);
-    state.rule.birth[0] = false;
-    syncRuleChecks();
-    updateStatus();
+    const rule = engine.randomRule(0.4);
+    rule.birth[0] = false;
+    applyRule(rule);
+  });
+
+  saveRuleButton.addEventListener('click', () => {
+    const ruleText = engine.ruleToString(state.rule);
+    const rules = loadSavedRules();
+    const isDuplicate = rules.some((rule) => engine.ruleToString(rule) === ruleText);
+    if (isDuplicate) return;
+    rules.push({ birth: state.rule.birth, survival: state.rule.survival });
+    persistSavedRules(rules);
+    renderSavedRules();
   });
 
   neighborhoodEl.addEventListener('change', () => {
@@ -200,5 +268,6 @@
   resetGrid();
   resizeCanvas();
   updateStatus();
+  renderSavedRules();
   requestAnimationFrame(frame);
 })();
