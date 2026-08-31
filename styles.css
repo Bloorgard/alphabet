@@ -108,7 +108,7 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 /* Режим партии возглавляет панель: игра или песочница, и сразу видно, идёт ли
    результат в общий счёт. Активное состояние — инверсия, как у выбранной
    механики на полигоне; краска тут не годится, она занята событиями. */
-.sketch-modes { display: flex; gap: 6px; }
+.sketch-modes { display: flex; flex-wrap: wrap; gap: 6px; }
 .sketch-mode { border: 1px solid rgba(241, 237, 229, .25); padding: 4px 8px; background: none; color: rgba(241, 237, 229, .55); font: inherit; text-transform: uppercase; letter-spacing: .08em; }
 .sketch-mode:hover { border-color: rgba(241, 237, 229, .5); color: rgba(241, 237, 229, .8); }
 .sketch-mode[aria-pressed="true"] { border-color: rgba(241, 237, 229, .9); background: rgba(241, 237, 229, .9); color: #161616; }

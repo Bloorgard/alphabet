@@ -3,7 +3,8 @@
 // идёт иначе, чем в пустоте. Клик ставит точку внутри, точки играют по
 // выбранному правилу B/S: одни держатся в форме кольца, другие расползаются.
 
-const INK = '#f1ede5';
+const MARK = { paper: '#161616', ink: '#f1ede5' };
+const GRID_LINE = { paper: 'rgba(22, 22, 22, .07)', ink: 'rgba(241, 237, 229, .06)' };
 const RED = '#e0210f';
 const GRID = 91;
 
@@ -19,6 +20,7 @@ const DEFAULTS = {
   radius: 28,
   hideWall: false,
   showGrid: true,
+  paper: true,
 };
 
 const CONTROLS = [
@@ -29,6 +31,7 @@ const CONTROLS = [
 const SWITCHES = [
   { key: 'hideWall', label: 'скрыть кольцо' },
   { key: 'showGrid', label: 'линии сетки' },
+  { key: 'paper', label: 'бумага', onToggle: (value, ctx) => ctx.applyGround(value) },
 ];
 
 function gridIndex(x, y) { return y * GRID + x; }
@@ -144,6 +147,11 @@ export function mountO(workspace) {
     resizeWall();
   }
 
+  function applyGround(paper) {
+    if (paper) workspace.dataset.ground = 'paper';
+    else delete workspace.dataset.ground;
+  }
+
   function selectRule(name) {
     state.rule = RULES[name];
     for (const [key, button] of ruleButtons) button.setAttribute('aria-pressed', String(key === name));
@@ -185,9 +193,10 @@ export function mountO(workspace) {
   function draw() {
     ctx.clearRect(0, 0, W, H);
     const cell = S / GRID;
+    const mark = params.paper ? MARK.paper : MARK.ink;
 
     if (params.showGrid) {
-      ctx.strokeStyle = 'rgba(241, 237, 229, .06)';
+      ctx.strokeStyle = params.paper ? GRID_LINE.paper : GRID_LINE.ink;
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (let i = 1; i < GRID; i += 1) {
@@ -205,12 +214,12 @@ export function mountO(workspace) {
       for (let x = 0; x < GRID; x += 1) {
         const index = gridIndex(x, y);
         if (!state.cells[index] || state.wall.has(`${x},${y}`)) continue;
-        ctx.fillStyle = state.front[index] ? RED : INK;
+        ctx.fillStyle = state.front[index] ? RED : mark;
         ctx.fillRect(ox + x * cell, oy + y * cell, cell + 0.5, cell + 0.5);
       }
     }
     if (!params.hideWall) {
-      ctx.fillStyle = INK;
+      ctx.fillStyle = mark;
       state.wall.forEach((key) => {
         const [x, y] = key.split(',').map(Number);
         ctx.fillRect(ox + x * cell, oy + y * cell, cell + 0.5, cell + 0.5);
@@ -295,6 +304,7 @@ export function mountO(workspace) {
       button.addEventListener('click', () => {
         params[item.key] = !params[item.key];
         button.setAttribute('aria-pressed', String(params[item.key]));
+        item.onToggle?.(params[item.key], { applyGround });
       });
       panel.append(button);
     }
@@ -335,6 +345,7 @@ export function mountO(workspace) {
 
   const { panel, toggle } = buildPanel();
   selectRule('life');
+  applyGround(params.paper);
 
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(workspace);
@@ -354,5 +365,6 @@ export function mountO(workspace) {
     toggle.remove();
     hint.remove();
     ctx.clearRect(0, 0, W, H);
+    delete workspace.dataset.ground;
   };
 }
