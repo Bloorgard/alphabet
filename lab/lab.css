@@ -162,6 +162,10 @@ body.lab footer {
   color: var(--muted);
 }
 
+/* Свёрнутое примечание не должно застолблять свою колонку впустую — без
+   текста управлению отдаётся вся ширина, а не 38% пустоты рядом с ним. */
+body.lab[data-quiet] footer { grid-template-columns: minmax(0, 1fr); }
+
 .tools {
   flex-wrap: wrap;
   gap: 8px 14px;
