@@ -24,6 +24,7 @@ const DEFAULTS = {
   spring: 0.25,
   volume: true,
   move: false,
+  gravity: false,
 };
 
 // Настроены в полигоне (lab/p-lab.js) и здесь не крутятся — панель сайта
@@ -40,6 +41,12 @@ const RAW_STEP = 0.006;
 const ANCHOR_MARK = 0.008;
 const HISTORY_LIMIT = 20;
 
+// Доля холста в секунду при полном наклоне (40°) — резинка тянет обратно к
+// кривой, поэтому шарики не убегают насовсем, а лишь оседают в сторону
+// наклона, как шарики в лабиринте-игрушке, пока телефон не выпрямят.
+const GRAVITY_STRENGTH = 8;
+const TILT_RANGE = 40;
+
 const CONTROLS = [
   { key: 'radius', label: 'радиус', min: 0.012, max: 0.05, step: 0.002 },
   { key: 'contrast', label: 'контраст', min: 0, max: 0.6, step: 0.02 },
@@ -50,6 +57,11 @@ const SWITCHES = [
   { key: 'volume', label: 'объём' },
   { key: 'move', label: 'двигать контур' },
 ];
+
+// Тумблер наклона имеет смысл только на устройстве с датчиком и грубым
+// (пальцевым) указателем — на десктопе он бы просто ничего не делал.
+const SUPPORTS_TILT = typeof window !== 'undefined' && 'DeviceOrientationEvent' in window
+  && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
 
 /* ---- вектор и кривые Безье (без ушей руками — только через подгонку) ---- */
 
@@ -268,6 +280,43 @@ export function mountP(workspace) {
 
   const pointer = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, down: false, seen: false };
 
+  let tiltX = 0, tiltY = 0;
+  let orientationAttached = false;
+
+  function onOrientation(event) {
+    const gamma = event.gamma || 0; // лево-право: положительный — телефон наклонён вправо
+    const beta = event.beta || 0; // перёд-зад, 90° — обычное вертикальное положение в руке
+    tiltX = clamp(gamma / TILT_RANGE, -1, 1);
+    tiltY = clamp((beta - 90) / TILT_RANGE, -1, 1);
+  }
+
+  function attachOrientation() {
+    if (orientationAttached) return;
+    orientationAttached = true;
+    window.addEventListener('deviceorientation', onOrientation);
+  }
+
+  function detachOrientation() {
+    if (!orientationAttached) return;
+    orientationAttached = false;
+    window.removeEventListener('deviceorientation', onOrientation);
+    tiltX = 0; tiltY = 0;
+  }
+
+  /* iOS отдаёт наклон только после явного разрешения — и спросить можно
+     только из настоящего пользовательского жеста (клик по тумблеру). Другие
+     браузеры такого метода не знают, там слушатель просто вешается сразу. */
+  function requestTilt() {
+    const DOE = window.DeviceOrientationEvent;
+    if (DOE && typeof DOE.requestPermission === 'function') {
+      DOE.requestPermission().then((state) => {
+        if (state === 'granted') attachOrientation();
+      }).catch(() => {});
+    } else {
+      attachOrientation();
+    }
+  }
+
   function resize() {
     const bounds = workspace.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -421,6 +470,11 @@ export function mountP(workspace) {
       const t = clamp((now - b.birth - DELAY) / GROWTH, 0, 1);
       const ease = t * t * (3 - 2 * t);
       b.r = maxR * b.scale * ease;
+    }
+
+    if (params.gravity && (tiltX || tiltY)) {
+      const push = GRAVITY_STRENGTH * STEP;
+      for (const b of balloons) { b.x += tiltX * push; b.y += tiltY * push; }
     }
 
     const n = balloons.length;
@@ -671,7 +725,10 @@ export function mountP(workspace) {
       panel.append(label);
     }
 
-    for (const item of SWITCHES) {
+    const switches = SUPPORTS_TILT
+      ? [...SWITCHES, { key: 'gravity', label: 'гравитация', onToggle: (value) => (value ? requestTilt() : detachOrientation()) }]
+      : SWITCHES;
+    for (const item of switches) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'sketch-switch';
@@ -680,6 +737,7 @@ export function mountP(workspace) {
       button.addEventListener('click', () => {
         params[item.key] = !params[item.key];
         button.setAttribute('aria-pressed', String(params[item.key]));
+        item.onToggle?.(params[item.key]);
       });
       panel.append(button);
     }
@@ -741,6 +799,7 @@ export function mountP(workspace) {
     canvas.removeEventListener('pointerup', onUp);
     canvas.removeEventListener('pointercancel', onUp);
     document.removeEventListener('keydown', onKeyDown);
+    detachOrientation();
     panel.remove();
     toggle.remove();
     hint.remove();
