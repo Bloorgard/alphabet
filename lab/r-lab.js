@@ -740,7 +740,7 @@ function springPoints() {
   for (let i = 0; i <= steps; i++) {
     const a = (i / steps) * sweep;
     const r = growth * a;
-    pts.push({ x: SPRING_CENTER.x + Math.cos(a) * r, y: SPRING_CENTER.y + Math.sin(a) * r });
+    pts.push({ x: SPRING_CENTER.x - Math.cos(a) * r, y: SPRING_CENTER.y + Math.sin(a) * r });
   }
   return pts;
 }
