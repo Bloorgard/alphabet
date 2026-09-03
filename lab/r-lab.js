@@ -706,7 +706,10 @@ function springSetup() {
   modeState.dragAngle = 0;
 }
 
-function springAngleAt(x, y) { return Math.atan2(y - SPRING_CENTER.y, x - SPRING_CENTER.x); }
+/* Угол считается в той же зеркальной системе, что и отрисовка (springPoints
+   отражает x): иначе жест руки расходится с тем, что видно на экране —
+   крутишь по часовой, а спираль на глазах заводится против. */
+function springAngleAt(x, y) { return Math.atan2(y - SPRING_CENTER.y, -(x - SPRING_CENTER.x)); }
 
 function springAngleDiff(a, b) {
   let d = a - b;
@@ -786,12 +789,12 @@ function bellBeep(strength) {
 
 const BELL_BASE_X = 0.42;
 const BELL_BASE_Y = 0.86;
-const BELL_TOP_Y = 0.2;
+const BELL_TOP_Y = 0.32;
 const BELL_MAX_BEND = 0.22;
 const BELL_K = 60;
 const BELL_C = 2.2;
 const BELL_BALL_OFFSET = 0.09;
-const BELL_BALL_RADIUS = 0.03;
+const BELL_BALL_RADIUS = 0.046;
 const BELL_HIT_COOLDOWN = 0.18;
 
 function bellSetup() {
