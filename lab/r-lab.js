@@ -1102,6 +1102,12 @@ function bellDraw() {
   ctx.stroke();
 
   const ballR = BELL_BALL_RADIUS * (1 + modeState.wobble * 0.06);
+  /* Подложка чуть шире самого узора — обводка палки толще математической
+     линии и без запаса вылезала бы культёй из-под края сферы. */
+  ctx.beginPath();
+  ctx.arc(BELL_BALL_X * S, BELL_BALL_Y * S, ballR * S * 1.08, 0, Math.PI * 2);
+  ctx.fillStyle = paper(1);
+  ctx.fill();
   const tex = BELL_TEXTURES[modeState.texIndex];
   if (tex.type === 'field') sphRenderField(BELL_BALL_X, BELL_BALL_Y, ballR, modeState.sphM, tex.fn);
   else if (tex.type === 'wire') sphRenderWireframe(BELL_BALL_X, BELL_BALL_Y, ballR, modeState.sphM);
