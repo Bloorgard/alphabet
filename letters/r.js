@@ -2,6 +2,7 @@ const STEP = 1 / 60;
 const INK = '#161616';
 const BG = '#f1ede5';
 const RED = '#e0210f';
+const TAU = Math.PI * 2;
 
 const BASE = { x: 215 / 718, y: 610 / 718 };
 const BALL = { x: 359.24 / 718, y: 261 / 718, r: 134 / 718 };
@@ -16,6 +17,49 @@ const DEFAULTS = {
 };
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+function matMul(a, b) {
+  const result = new Array(9);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    result[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+  }
+  return result;
+}
+
+function rotX(angle) {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  return [1, 0, 0, 0, c, -s, 0, s, c];
+}
+
+function rotY(angle) {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  return [c, 0, s, 0, 1, 0, -s, 0, c];
+}
+
+function applyMatT(matrix, vector) {
+  return [
+    matrix[0] * vector[0] + matrix[3] * vector[1] + matrix[6] * vector[2],
+    matrix[1] * vector[0] + matrix[4] * vector[1] + matrix[7] * vector[2],
+    matrix[2] * vector[0] + matrix[5] * vector[1] + matrix[8] * vector[2],
+  ];
+}
+
+const TEXTURES = [
+  (point) => Math.floor(((point[1] + 1) / 2) * 8) % 2 === 0,
+  (point) => Math.floor(((Math.atan2(point[2], point[0]) + Math.PI) / TAU) * 12) % 2 === 0,
+  (point) => {
+    const latitude = Math.acos(clamp(point[1], -1, 1)) / Math.PI;
+    const longitude = (Math.atan2(point[2], point[0]) + Math.PI) / TAU;
+    return Math.floor((longitude * 6 + latitude * 4) * 2) % 2 === 0;
+  },
+  (point) => {
+    const latitude = Math.floor((Math.acos(clamp(point[1], -1, 1)) / Math.PI) * 8);
+    const longitude = Math.floor(((Math.atan2(point[2], point[0]) + Math.PI) / TAU) * 14);
+    return (latitude + longitude) % 2 === 0;
+  },
+];
 
 export function mountR(workspace) {
   workspace.dataset.ground = 'paper';
@@ -34,6 +78,8 @@ export function mountR(workspace) {
   let debt = 0;
   let frameId = 0;
   let audio = null;
+  const fieldCanvas = document.createElement('canvas');
+  const fieldCtx = fieldCanvas.getContext('2d');
 
   function reset() {
     state.angle = REST_ANGLE;
@@ -42,8 +88,7 @@ export function mountR(workspace) {
     state.ballDragging = false;
     state.prevX = 0;
     state.prevY = 0;
-    state.yaw = 0;
-    state.pitch = 0;
+    state.sphereMatrix = [1, 0, 0, 0, 1, 0, 0, 0, 1];
     state.yawVel = 0.004;
     state.pitchVel = 0;
     state.wobble = 0;
@@ -126,13 +171,16 @@ export function mountR(workspace) {
       const dy = pointer.y - state.prevY;
       state.prevX = pointer.x;
       state.prevY = pointer.y;
-      state.yaw += dx * 5;
-      state.pitch += dy * 5;
-      state.yawVel = dx * 3;
-      state.pitchVel = dy * 3;
+      const yaw = dx * 3.2;
+      const pitch = -dy * 3.2;
+      state.sphereMatrix = matMul(rotX(pitch), matMul(rotY(yaw), state.sphereMatrix));
+      state.yawVel = yaw;
+      state.pitchVel = pitch;
     } else {
-      state.yaw += state.yawVel;
-      state.pitch += state.pitchVel;
+      state.sphereMatrix = matMul(
+        rotX(state.pitchVel),
+        matMul(rotY(state.yawVel), state.sphereMatrix),
+      );
       state.yawVel *= 0.96;
       state.pitchVel *= 0.96;
       if (Math.abs(state.yawVel) < 0.004) state.yawVel += (0.004 - state.yawVel) * 0.02;
@@ -163,48 +211,34 @@ export function mountR(workspace) {
     const x = BALL.x * S;
     const y = BALL.y * S;
     const r = radius * S;
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.fillStyle = INK;
-    ctx.fillRect(x - r, y - r, r * 2, r * 2);
-    ctx.translate(x, y);
-
-    if (state.texture === 0) {
-      const band = r * 0.22;
-      const shift = ((state.pitch * r * 0.7) % (band * 2) + band * 2) % (band * 2);
-      ctx.fillStyle = BG;
-      for (let py = -r * 1.5 + shift; py < r * 1.5; py += band * 2) ctx.fillRect(-r, py, r * 2, band);
-    } else if (state.texture === 1) {
-      ctx.rotate(state.pitch * 0.18);
-      ctx.fillStyle = BG;
-      const phase = state.yaw;
-      for (let i = -3; i <= 3; i += 2) {
-        const center = Math.sin(phase + i * 0.7) * r * 0.22 + i * r * 0.31;
-        ctx.beginPath();
-        ctx.ellipse(center, 0, r * 0.18, r * 1.12, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    } else if (state.texture === 2) {
-      ctx.rotate(state.yaw * 0.12);
-      ctx.strokeStyle = BG;
-      ctx.lineWidth = Math.max(2, r * 0.09);
-      for (let rr = r * 0.08; rr < r * 1.5; rr += r * 0.18) {
-        ctx.beginPath();
-        ctx.arc(0, 0, rr, state.pitch, state.pitch + Math.PI * 1.35);
-        ctx.stroke();
-      }
-    } else {
-      const cell = r * 0.22;
-      const sx = ((state.yaw * r * 0.4) % (cell * 2) + cell * 2) % (cell * 2);
-      const sy = ((state.pitch * r * 0.4) % (cell * 2) + cell * 2) % (cell * 2);
-      ctx.fillStyle = BG;
-      for (let gy = -6; gy <= 6; gy++) for (let gx = -6; gx <= 6; gx++) {
-        if ((gx + gy) % 2 === 0) ctx.fillRect(gx * cell + sx, gy * cell + sy, cell, cell);
+    const rPx = Math.max(1, Math.round(r * dpr));
+    const size = rPx * 2;
+    if (fieldCanvas.width !== size || fieldCanvas.height !== size) {
+      fieldCanvas.width = size;
+      fieldCanvas.height = size;
+    }
+    const image = fieldCtx.createImageData(size, size);
+    const pixels = image.data;
+    const texture = TEXTURES[state.texture];
+    for (let py = 0; py < size; py++) {
+      for (let px = 0; px < size; px++) {
+        const index = (py * size + px) * 4;
+        const dx = px - rPx;
+        const dy = py - rPx;
+        const distance2 = dx * dx + dy * dy;
+        if (distance2 > rPx * rPx) continue;
+        const dz = Math.sqrt(rPx * rPx - distance2);
+        const surface = applyMatT(state.sphereMatrix, [dx / rPx, dy / rPx, dz / rPx]);
+        const color = texture(surface) ? INK : BG;
+        const value = color === INK ? 22 : 241;
+        pixels[index] = value;
+        pixels[index + 1] = color === INK ? 22 : 237;
+        pixels[index + 2] = color === INK ? 22 : 229;
+        pixels[index + 3] = 255;
       }
     }
-    ctx.restore();
+    fieldCtx.putImageData(image, 0, 0);
+    ctx.drawImage(fieldCanvas, x - r, y - r, r * 2, r * 2);
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.strokeStyle = INK;
