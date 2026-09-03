@@ -1056,6 +1056,17 @@ function bellTip() {
   };
 }
 
+/* Расстояние от точки до всего отрезка палки (не только до кончика) —
+   схватить прут можно за любое место по длине, не только у самого края. */
+function bellDistToRod(px, py) {
+  const tip = bellTip();
+  const dx = tip.x - BELL_BASE_X, dy = tip.y - BELL_BASE_Y;
+  const len2 = dx * dx + dy * dy || 1e-9;
+  const t = clamp(((px - BELL_BASE_X) * dx + (py - BELL_BASE_Y) * dy) / len2, 0, 1);
+  const cx = BELL_BASE_X + dx * t, cy = BELL_BASE_Y + dy * t;
+  return Math.hypot(px - cx, py - cy);
+}
+
 function bellStepSphere() {
   if (modeState.sphDragging) {
     const dx = pointer.x - modeState.sphPrevX, dy = pointer.y - modeState.sphPrevY;
@@ -1439,7 +1450,7 @@ const MODES = {
   },
   bell: {
     label: 'звонок',
-    note: 'Шарик — настоящая вращаемая сфера (перенесена с полигона lab/r-spheres.html): схватите его и покрутите в любую сторону, ничего не сбросится. Ствол — жёсткий прут на пружинной заделке: не гнётся, а поворачивается вокруг основания, всегда прямой и одной длины. Оттяните его верхушку в сторону от шарика и отпустите — прут поворачивается назад и на всём ходу залетает в шарик: тот вздрагивает, пускает кольца, звенит (нужен звук в браузере) и переключается на следующую текстуру из перенесённого набора: широты, дольки, спираль, шахматка, сетка, гранёный кристалл, полутон точками, веснушки, Р-марка.',
+    note: 'Шарик — настоящая вращаемая сфера (перенесена с полигона lab/r-spheres.html): схватите его и покрутите в любую сторону, ничего не сбросится. Ствол — жёсткий прут на пружинной заделке: не гнётся, а поворачивается вокруг основания, всегда прямой и одной длины. Схватить его можно за любое место по длине, не только у самого конца. Оттяните его в сторону от шарика и отпустите — прут поворачивается назад и на всём ходу залетает в шарик: тот вздрагивает, пускает кольца, звенит (нужен звук в браузере) и переключается на следующую текстуру из перенесённого набора: широты, дольки, спираль, шахматка, сетка, гранёный кристалл, полутон точками, веснушки, Р-марка.',
     cursor: 'grab',
     tools: [],
     setup() { bellSetup(); },
@@ -1451,8 +1462,7 @@ const MODES = {
         modeState.sphPrevX = pointer.x; modeState.sphPrevY = pointer.y;
         return;
       }
-      const tip = bellTip();
-      if (Math.hypot(pointer.x - tip.x, pointer.y - tip.y) < 0.09) modeState.dragging = true;
+      if (bellDistToRod(pointer.x, pointer.y) < 0.05) modeState.dragging = true;
     },
     onUp() { modeState.dragging = false; modeState.sphDragging = false; },
   },
