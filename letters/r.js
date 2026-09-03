@@ -1,6 +1,6 @@
 const STEP = 1 / 60;
-const INK = '#f1ede5';
-const BG = '#161616';
+const INK = '#161616';
+const BG = '#f1ede5';
 const RED = '#e0210f';
 
 const BASE = { x: 215 / 718, y: 610 / 718 };
@@ -18,6 +18,7 @@ const DEFAULTS = {
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 export function mountR(workspace) {
+  workspace.dataset.ground = 'paper';
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const params = { ...DEFAULTS };
@@ -359,6 +360,7 @@ export function mountR(workspace) {
     hint.remove();
     panel.remove();
     toggle.remove();
+    delete workspace.dataset.ground;
     canvas.style.cursor = '';
     ctx.clearRect(0, 0, W, H);
   };
