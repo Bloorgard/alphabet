@@ -847,11 +847,20 @@ function sphPatCheckerboard(po) {
    буфера (dpr), а не в единицы холста, как обычные пути ctx, поэтому центр
    и радиус переводятся в пиксели отдельно. Снаружи круга — прозрачно, чтобы
    не закрашивать сцену вокруг шарика прямоугольником. */
+/* putImageData не смешивает альфу — она в упор заменяет пиксели буфера,
+   включая прозрачные по краю квадрата картинки. Всё, что уже нарисовано
+   под ней (подложка под шариком, палка рядом), в этих местах стирается
+   начисто, и виден край квадрата вместо круга. Поэтому узор сперва
+   собирается на отдельном холсте, а на основной попадает через drawImage
+   — та уже честно смешивает альфу, как обычная кисть. */
+let sphFieldCanvas = null;
+let sphFieldCtx = null;
 function sphRenderField(cxN, cyN, rN, M, fn) {
-  const cxPx = Math.round(cxN * S * dpr), cyPx = Math.round(cyN * S * dpr);
   const rPx = Math.max(1, Math.round(rN * S * dpr));
   const size = rPx * 2;
-  const img = ctx.createImageData(size, size);
+  if (!sphFieldCanvas) { sphFieldCanvas = document.createElement('canvas'); sphFieldCtx = sphFieldCanvas.getContext('2d'); }
+  if (sphFieldCanvas.width !== size) { sphFieldCanvas.width = size; sphFieldCanvas.height = size; }
+  const img = sphFieldCtx.createImageData(size, size);
   const data = img.data;
   const mark = labGrounds[ground].mark, field = labGrounds[ground].field;
   for (let py = 0; py < size; py++) {
@@ -867,7 +876,8 @@ function sphRenderField(cxN, cyN, rN, M, fn) {
       data[idx] = rgb[0]; data[idx + 1] = rgb[1]; data[idx + 2] = rgb[2]; data[idx + 3] = 255;
     }
   }
-  ctx.putImageData(img, cxPx - rPx, cyPx - rPx);
+  sphFieldCtx.putImageData(img, 0, 0);
+  ctx.drawImage(sphFieldCanvas, (cxN - rN) * S, (cyN - rN) * S, rN * 2 * S, rN * 2 * S);
 }
 
 function sphRenderWireframe(cxN, cyN, rN, M) {
@@ -992,29 +1002,38 @@ function bellBeep(strength) {
 
 /* Пропорции — координаты присланного SVG (718×718: ствол x=215 от y=120
    до y=610, петля центр 359.24×261, радиус 134) взяты один в один, без
-   подгонки на глаз. Раньше палка гнулась только по горизонтали при общей
-   с шариком высоте — на этих координатах шарик стоит заметно ниже
-   верхушки ствола, и по прямой горизонтали до него физически не долететь
-   ни при каких числах. Правилось не число, а само сгибание: теперь оно
-   двухосевое, как у настоящего гибкого прута, и бьёт по-настоящему —
-   оттягиваешь верхушку в сторону от шарика (вверх-влево), отпускаешь,
-   она пружинит через состояние покоя и залетает в шарик по прямой. */
+   подгонки на глаз.
+
+   Гибкая кривая (сгибание по двум независимым осям с контрольной точкой)
+   выглядела резиновой — с ростом амплитуды форма закручивалась
+   непредсказуемо, а не просто отклонялась. Настоящий металлический прут
+   так не гнётся: он поворачивается вокруг заделки в основании, оставаясь
+   прямым и сохраняя длину. Поэтому теперь одна степень свободы — угол;
+   палка всегда рисуется прямой линией фиксированной длины (расстояние
+   от основания до точки покоя), в шарик она попадает поворотом, а не
+   изгибом. */
 const BELL_BASE_X = 215 / 718;
 const BELL_BASE_Y = 610 / 718;
 const BELL_TOP_Y = 120 / 718;
 const BELL_BALL_X = 359.24 / 718;
 const BELL_BALL_Y = 261 / 718;
 const BELL_BALL_RADIUS = 134 / 718;
-const BELL_MAX_BEND = 0.32;
-const BELL_K = 60;
+const BELL_ROD_LEN = BELL_BASE_Y - BELL_TOP_Y;
+const BELL_REST_ANGLE = -Math.PI / 2;
+const BELL_K = 40;
 const BELL_C = 2.2;
 const BELL_HIT_COOLDOWN = 0.18;
 
+function bellAngleDiff(a, b) {
+  let d = a - b;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
 function bellSetup() {
-  modeState.bendX = 0;
-  modeState.bendY = 0;
-  modeState.bendVelX = 0;
-  modeState.bendVelY = 0;
+  modeState.angle = BELL_REST_ANGLE;
+  modeState.angleVel = 0;
   modeState.dragging = false;
   modeState.wobble = 0;
   modeState.rings = [];
@@ -1028,6 +1047,13 @@ function bellSetup() {
   modeState.sphDragging = false;
   modeState.sphPrevX = 0;
   modeState.sphPrevY = 0;
+}
+
+function bellTip() {
+  return {
+    x: BELL_BASE_X + Math.cos(modeState.angle) * BELL_ROD_LEN,
+    y: BELL_BASE_Y + Math.sin(modeState.angle) * BELL_ROD_LEN,
+  };
 }
 
 function bellStepSphere() {
@@ -1047,40 +1073,28 @@ function bellStepSphere() {
 
 function bellStep() {
   if (modeState.dragging) {
-    const dx = pointer.x - BELL_BASE_X, dy = pointer.y - BELL_TOP_Y;
-    const dist = Math.hypot(dx, dy);
-    const scale = dist > BELL_MAX_BEND ? BELL_MAX_BEND / dist : 1;
-    modeState.bendX = dx * scale;
-    modeState.bendY = dy * scale;
-    modeState.bendVelX = 0;
-    modeState.bendVelY = 0;
+    modeState.angle = Math.atan2(pointer.y - BELL_BASE_Y, pointer.x - BELL_BASE_X);
+    modeState.angleVel = 0;
   } else {
-    const fx = -BELL_K * modeState.bendX - BELL_C * modeState.bendVelX;
-    const fy = -BELL_K * modeState.bendY - BELL_C * modeState.bendVelY;
-    modeState.bendVelX += fx * STEP;
-    modeState.bendVelY += fy * STEP;
-    modeState.bendX += modeState.bendVelX * STEP;
-    modeState.bendY += modeState.bendVelY * STEP;
+    const diff = bellAngleDiff(modeState.angle, BELL_REST_ANGLE);
+    const force = -BELL_K * diff - BELL_C * modeState.angleVel;
+    modeState.angleVel += force * STEP;
+    modeState.angle += modeState.angleVel * STEP;
   }
   modeState.cooldown = Math.max(0, modeState.cooldown - STEP);
 
-  const tipX = BELL_BASE_X + modeState.bendX, tipY = BELL_TOP_Y + modeState.bendY;
-  const distToBall = Math.hypot(tipX - BELL_BALL_X, tipY - BELL_BALL_Y);
-  const speed = Math.hypot(modeState.bendVelX, modeState.bendVelY);
+  const tip = bellTip();
+  const distToBall = Math.hypot(tip.x - BELL_BALL_X, tip.y - BELL_BALL_Y);
+  const tipSpeed = Math.abs(modeState.angleVel) * BELL_ROD_LEN;
   if (!modeState.dragging && modeState.cooldown <= 0
-      && modeState.prevDistToBall >= BELL_BALL_RADIUS && distToBall < BELL_BALL_RADIUS && speed > 0.3) {
-    const strength = clamp(speed * 0.6, 0.2, 1);
+      && modeState.prevDistToBall >= BELL_BALL_RADIUS && distToBall < BELL_BALL_RADIUS && tipSpeed > 0.3) {
+    const strength = clamp(tipSpeed * 0.6, 0.2, 1);
     modeState.wobble = Math.min(1.4, modeState.wobble + strength);
     modeState.rings.push({ born: modeState.elapsed, strength });
     modeState.texIndex = (modeState.texIndex + 1) % BELL_TEXTURES.length;
     bellBeep(strength);
     modeState.cooldown = BELL_HIT_COOLDOWN;
-    /* Отскок от настоящего края: гасим и разворачиваем только составляющую
-       скорости вдоль нормали к шарику, а не всю скорость целиком. */
-    const nx = (tipX - BELL_BALL_X) / (distToBall || 1), ny = (tipY - BELL_BALL_Y) / (distToBall || 1);
-    const vn = modeState.bendVelX * nx + modeState.bendVelY * ny;
-    modeState.bendVelX += -1.35 * vn * nx;
-    modeState.bendVelY += -1.35 * vn * ny;
+    modeState.angleVel *= -0.35;
   }
   modeState.prevDistToBall = distToBall;
   modeState.wobble *= 0.9;
@@ -1090,20 +1104,13 @@ function bellStep() {
 }
 
 function bellDraw() {
-  const tipX = BELL_BASE_X + modeState.bendX, tipY = BELL_TOP_Y + modeState.bendY;
+  const tip = bellTip();
   ctx.strokeStyle = ink(0.9);
   ctx.lineWidth = Math.max(2, 0.014 * S);
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(BELL_BASE_X * S, BELL_BASE_Y * S);
-  /* Контрольная точка ровно на середине хорды даёт математически прямую
-     линию — квадратичная кривая так вырождается, никакого изгиба не видно.
-     Настоящий гибкий стержень заделан в основании: у низа он держит
-     исходное (недеформированное) направление, гнётся только верх. Поэтому
-     контрольная точка — не середина текущего пути, а сама точка покоя
-     (BELL_BASE_X, BELL_TOP_Y): от неё кривая у основания идёт как
-     недеформированный ствол, а к смещённой верхушке подходит уже изогнутой. */
-  ctx.quadraticCurveTo(BELL_BASE_X * S, BELL_TOP_Y * S, tipX * S, tipY * S);
+  ctx.lineTo(tip.x * S, tip.y * S);
   ctx.stroke();
 
   const ballR = BELL_BALL_RADIUS * (1 + modeState.wobble * 0.06);
@@ -1425,7 +1432,7 @@ const MODES = {
   },
   bell: {
     label: 'звонок',
-    note: 'Шарик — настоящая вращаемая сфера (перенесена с полигона lab/r-spheres.html): схватите его и покрутите в любую сторону, ничего не сбросится. Ствол — не жёсткий, а гнущийся хлыст, гнётся в любую сторону, не только вбок: оттяните его верхушку от шарика и отпустите, она пружинит назад и на всём ходу залетает в шарик — тот вздрагивает, пускает кольца, звенит (нужен звук в браузере) и переключается на следующую текстуру из перенесённого набора: широты, дольки, спираль, шахматка, сетка, гранёный кристалл, полутон точками, веснушки, Р-марка.',
+    note: 'Шарик — настоящая вращаемая сфера (перенесена с полигона lab/r-spheres.html): схватите его и покрутите в любую сторону, ничего не сбросится. Ствол — жёсткий прут на пружинной заделке: не гнётся, а поворачивается вокруг основания, всегда прямой и одной длины. Оттяните его верхушку в сторону от шарика и отпустите — прут поворачивается назад и на всём ходу залетает в шарик: тот вздрагивает, пускает кольца, звенит (нужен звук в браузере) и переключается на следующую текстуру из перенесённого набора: широты, дольки, спираль, шахматка, сетка, гранёный кристалл, полутон точками, веснушки, Р-марка.',
     cursor: 'grab',
     tools: [],
     setup() { bellSetup(); },
@@ -1437,8 +1444,8 @@ const MODES = {
         modeState.sphPrevX = pointer.x; modeState.sphPrevY = pointer.y;
         return;
       }
-      const tipX = BELL_BASE_X + modeState.bendX, tipY = BELL_TOP_Y + modeState.bendY;
-      if (Math.hypot(pointer.x - tipX, pointer.y - tipY) < 0.09) modeState.dragging = true;
+      const tip = bellTip();
+      if (Math.hypot(pointer.x - tip.x, pointer.y - tip.y) < 0.09) modeState.dragging = true;
     },
     onUp() { modeState.dragging = false; modeState.sphDragging = false; },
   },
