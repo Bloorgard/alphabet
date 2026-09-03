@@ -1019,6 +1019,7 @@ const BELL_BALL_X = 359.24 / 718;
 const BELL_BALL_Y = 261 / 718;
 const BELL_BALL_RADIUS = 134 / 718;
 const BELL_ROD_LEN = BELL_BASE_Y - BELL_TOP_Y;
+const BELL_ROD_RADIUS = 0.007;
 const BELL_REST_ANGLE = -Math.PI / 2;
 const BELL_K = 40;
 const BELL_C = 2.2;
@@ -1039,7 +1040,7 @@ function bellSetup() {
   modeState.rings = [];
   modeState.cooldown = 0;
   modeState.elapsed = 0;
-  modeState.prevDistToBall = 999;
+  modeState.prevRodDistToBall = 999;
   modeState.texIndex = 0;
   modeState.sphM = [1, 0, 0, 0, 1, 0, 0, 0, 1];
   modeState.sphYawVel = 0.004;
@@ -1094,8 +1095,7 @@ function bellStep() {
   }
   modeState.cooldown = Math.max(0, modeState.cooldown - STEP);
 
-  const tip = bellTip();
-  const distToBall = Math.hypot(tip.x - BELL_BALL_X, tip.y - BELL_BALL_Y);
+  const rodDistToBall = bellDistToRod(BELL_BALL_X, BELL_BALL_Y);
   const tipSpeed = Math.abs(modeState.angleVel) * BELL_ROD_LEN;
   /* Раньше отскок и «удар» (звук, кольца, смена текстуры) были одним
      условием со threshold по скорости — при слабом взмахе ни то ни
@@ -1104,7 +1104,8 @@ function bellStep() {
      Шарик должен быть твёрдым всегда, независимо от того, насколько
      сильно его задели: отскок — при любом пересечении границы, «удар»
      (со звуком) — только если скорости хватает. */
-  if (!modeState.dragging && modeState.prevDistToBall >= BELL_BALL_RADIUS && distToBall < BELL_BALL_RADIUS) {
+  const contactRadius = BELL_BALL_RADIUS + BELL_ROD_RADIUS;
+  if (!modeState.dragging && modeState.prevRodDistToBall >= contactRadius && rodDistToBall < contactRadius) {
     modeState.angleVel *= -0.35;
     if (modeState.cooldown <= 0 && tipSpeed > 0.3) {
       const strength = clamp(tipSpeed * 0.6, 0.2, 1);
@@ -1115,7 +1116,7 @@ function bellStep() {
       modeState.cooldown = BELL_HIT_COOLDOWN;
     }
   }
-  modeState.prevDistToBall = distToBall;
+  modeState.prevRodDistToBall = rodDistToBall;
   modeState.wobble *= 0.9;
   modeState.elapsed += STEP;
   modeState.rings = modeState.rings.filter((r) => modeState.elapsed - r.born < 0.6);
@@ -1140,7 +1141,7 @@ function bellDraw() {
   ctx.arc(BELL_BALL_X * S, BELL_BALL_Y * S, ballR * S, 0, Math.PI * 2);
   ctx.clip('evenodd');
   ctx.strokeStyle = ink(0.9);
-  ctx.lineWidth = Math.max(2, 0.014 * S);
+  ctx.lineWidth = Math.max(2, BELL_ROD_RADIUS * 2 * S);
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(BELL_BASE_X * S, BELL_BASE_Y * S);
@@ -1167,18 +1168,6 @@ function bellDraw() {
     ctx.arc(BELL_BALL_X * S, BELL_BALL_Y * S, (BELL_BALL_RADIUS + t * 0.09) * S, 0, Math.PI * 2);
     ctx.stroke();
   }
-
-  /* Диагностика по прямому требованию автора: настоящая граница удара,
-     теми же числами, что в bellStep (BELL_BALL_X/Y/RADIUS, без вобла) —
-     красным, поверх всего, всегда видна. Сравнить на глаз с нарисованной
-     сферой, а не верить на слово. */
-  ctx.beginPath();
-  ctx.arc(BELL_BALL_X * S, BELL_BALL_Y * S, BELL_BALL_RADIUS * S, 0, Math.PI * 2);
-  ctx.strokeStyle = RED;
-  ctx.lineWidth = Math.max(1, 0.0026 * S);
-  ctx.setLineDash([S * 0.012, S * 0.008]);
-  ctx.stroke();
-  ctx.setLineDash([]);
 
   drawStatus(`${BELL_TEXTURES[modeState.texIndex].label} · крутите шарик или качните палку`);
 }
