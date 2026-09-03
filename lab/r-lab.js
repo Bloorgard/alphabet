@@ -1,10 +1,10 @@
-/* Р · шесть механик, две волны штурма.
+/* Р · десять механик, три волны штурма.
 
    Первые три (насос, радар, отвес) строились на схематичном контуре —
    ствол и дуга петли, нарисованные от руки по памяти формы. Автор указал
    на слабое место: схема не использует настоящую форму буквы, тест на
    замену («убери Р — ничего не изменится, кроме чистоты картинки») они не
-   проходят. Рычаг, окружность развёртки, линия отвеса — geometрия общая для
+   проходят. Рычаг, окружность развёртки, линия отвеса — геометрия общая для
    любой буквы, Р тут просто фон.
 
    Вторые три (противовес, наполнение петли, шарик в петле) держатся на
@@ -17,7 +17,17 @@
    напрямую: центр масс всей буквы (противовес), площадь именно этого
    просвета по высоте (наполнение петли), столкновение с настоящим краем
    контура (шарик в петле). Подставь другую букву — другая масса, другая
-   площадь, другая форма стенок: тест на замену эти три проходят. */
+   площадь, другая форма стенок: тест на замену эти три проходят.
+
+   Третьи четыре (пружина, звонок, флаг-старт, парус) выросли не из
+   контура, а из ряда набросков автора, где ствол с петлёй перерисован
+   как разные предметы — спираль, колокольчик с молоточком, флаг на
+   древке, парус с рифом. Тест на замену тут другой: не геометрия буквы,
+   а физика конкретного предмета, который эта деталь правдоподобно
+   изображает (пружина копит и отдаёт закрутку, колокол звенит от удара,
+   флаг падает и подаёт сигнал старта, парус ловит ветер под углом и не
+   может идти прямо против него). Черновые прототипы без очков и правил
+   победы — сначала просто должно быть физически убедительно. */
 
 const R_STEM_X = 0.36;
 const R_STEM_TOP = 0.14;
@@ -678,6 +688,373 @@ function marbleDraw() {
   else drawStatus(`очков ${modeState.score} · ${left}с · курсор задаёт наклон`);
 }
 
+/* ---------- пружина: физическая закрутка, чистый прототип без цели ---------- */
+
+const SPRING_CENTER = { x: 0.42, y: 0.36 };
+const SPRING_MAX_R = 0.16;
+const SPRING_BASE_SWEEP = 4 * Math.PI;
+const SPRING_MIN_SWEEP = 2 * Math.PI;
+const SPRING_MAX_SWEEP = 10 * Math.PI;
+const SPRING_K = 14;
+const SPRING_C = 3.2;
+const SPRING_TAIL_Y = 0.82;
+
+function springSetup() {
+  modeState.twist = 0;
+  modeState.twistVel = 0;
+  modeState.dragging = false;
+  modeState.dragAngle = 0;
+}
+
+function springAngleAt(x, y) { return Math.atan2(y - SPRING_CENTER.y, x - SPRING_CENTER.x); }
+
+function springAngleDiff(a, b) {
+  let d = a - b;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+function springStep() {
+  if (modeState.dragging) {
+    const a = springAngleAt(pointer.x, pointer.y);
+    const delta = springAngleDiff(a, modeState.dragAngle);
+    modeState.twist = clamp(modeState.twist + delta, SPRING_MIN_SWEEP - SPRING_BASE_SWEEP, SPRING_MAX_SWEEP - SPRING_BASE_SWEEP);
+    modeState.twistVel = delta / STEP;
+    modeState.dragAngle = a;
+  } else {
+    modeState.twistVel += (-SPRING_K * modeState.twist - SPRING_C * modeState.twistVel) * STEP;
+    modeState.twist += modeState.twistVel * STEP;
+  }
+}
+
+/* Внешний конец спирали всегда упирается в одну и ту же точку — как
+   реальная пружина, закреплённая снаружи: крутишь туже, витков больше,
+   но габарит не растёт. Радиус на каждом обороте подбирается так, чтобы
+   при текущем числе витков спираль всё равно доходила ровно до SPRING_MAX_R. */
+function springPoints() {
+  const sweep = clamp(SPRING_BASE_SWEEP + modeState.twist, SPRING_MIN_SWEEP, SPRING_MAX_SWEEP);
+  const growth = SPRING_MAX_R / sweep;
+  const steps = Math.max(40, Math.round(sweep * 12));
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * sweep;
+    const r = growth * a;
+    pts.push({ x: SPRING_CENTER.x + Math.cos(a) * r, y: SPRING_CENTER.y + Math.sin(a) * r });
+  }
+  return pts;
+}
+
+function springDraw() {
+  const pts = springPoints();
+  ctx.strokeStyle = ink(0.9);
+  ctx.lineWidth = Math.max(1.5, 0.007 * S);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x * S, pts[0].y * S);
+  for (const p of pts) ctx.lineTo(p.x * S, p.y * S);
+  const tail = pts[pts.length - 1];
+  ctx.lineTo(tail.x * S, SPRING_TAIL_Y * S);
+  ctx.stroke();
+  dot(SPRING_CENTER.x, SPRING_CENTER.y, ink(0.9), 0.006);
+
+  const turns = (clamp(SPRING_BASE_SWEEP + modeState.twist, SPRING_MIN_SWEEP, SPRING_MAX_SWEEP) / (Math.PI * 2)).toFixed(1);
+  drawStatus(`${turns} витков · крутите вокруг центра и отпустите`);
+}
+
+/* ---------- звонок: ствол-хлыст отскакивает и бьёт по шарику ---------- */
+
+let bellAudioCtx = null;
+
+function bellBeep(strength) {
+  try {
+    if (!bellAudioCtx) bellAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ac = bellAudioCtx;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 650 + strength * 400;
+    gain.gain.setValueAtTime(Math.min(0.3, 0.06 + strength * 0.22), ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.4);
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start();
+    osc.stop(ac.currentTime + 0.42);
+  } catch (error) { /* звук недоступен (нет разрешения, старый браузер) — удар всё равно виден */ }
+}
+
+const BELL_BASE_X = 0.42;
+const BELL_BASE_Y = 0.86;
+const BELL_TOP_Y = 0.2;
+const BELL_MAX_BEND = 0.22;
+const BELL_K = 60;
+const BELL_C = 2.2;
+const BELL_BALL_OFFSET = 0.09;
+const BELL_BALL_RADIUS = 0.03;
+const BELL_HIT_COOLDOWN = 0.18;
+
+function bellSetup() {
+  modeState.bendX = 0;
+  modeState.bendVel = 0;
+  modeState.dragging = false;
+  modeState.wobble = 0;
+  modeState.rings = [];
+  modeState.cooldown = 0;
+  modeState.elapsed = 0;
+  modeState.prevTipX = BELL_BASE_X;
+}
+
+function bellStep() {
+  if (modeState.dragging) {
+    modeState.bendX = clamp(pointer.x - BELL_BASE_X, -BELL_MAX_BEND, BELL_MAX_BEND);
+    modeState.bendVel = 0;
+  } else {
+    const force = -BELL_K * modeState.bendX - BELL_C * modeState.bendVel;
+    modeState.bendVel += force * STEP;
+    modeState.bendX += modeState.bendVel * STEP;
+  }
+  modeState.cooldown = Math.max(0, modeState.cooldown - STEP);
+
+  const tipX = BELL_BASE_X + modeState.bendX;
+  const hitX = BELL_BASE_X + BELL_BALL_OFFSET - BELL_BALL_RADIUS;
+  if (!modeState.dragging && modeState.cooldown <= 0
+      && modeState.prevTipX < hitX && tipX >= hitX && modeState.bendVel > 0.3) {
+    const strength = clamp(modeState.bendVel * 0.6, 0.2, 1);
+    modeState.wobble = Math.min(1.4, modeState.wobble + strength);
+    modeState.rings.push({ born: modeState.elapsed, strength });
+    bellBeep(strength);
+    modeState.cooldown = BELL_HIT_COOLDOWN;
+    modeState.bendVel *= -0.35;
+  }
+  modeState.prevTipX = tipX;
+  modeState.wobble *= 0.9;
+  modeState.elapsed += STEP;
+  modeState.rings = modeState.rings.filter((r) => modeState.elapsed - r.born < 0.6);
+}
+
+function bellDraw() {
+  const tipX = BELL_BASE_X + modeState.bendX;
+  ctx.strokeStyle = ink(0.9);
+  ctx.lineWidth = Math.max(2, 0.014 * S);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(BELL_BASE_X * S, BELL_BASE_Y * S);
+  const midX = BELL_BASE_X + modeState.bendX * 0.35;
+  const midY = (BELL_BASE_Y + BELL_TOP_Y) / 2;
+  ctx.quadraticCurveTo(midX * S, midY * S, tipX * S, BELL_TOP_Y * S);
+  ctx.stroke();
+
+  const ballX = BELL_BASE_X + BELL_BALL_OFFSET;
+  const ballR = BELL_BALL_RADIUS * (1 + modeState.wobble * 0.25);
+  ctx.beginPath();
+  ctx.arc(ballX * S, BELL_TOP_Y * S, ballR * S, 0, Math.PI * 2);
+  ctx.fillStyle = ink(0.92);
+  ctx.fill();
+
+  for (const r of modeState.rings) {
+    const t = (modeState.elapsed - r.born) / 0.6;
+    ctx.strokeStyle = ink((1 - t) * 0.5);
+    ctx.lineWidth = Math.max(1, 0.004 * S);
+    ctx.beginPath();
+    ctx.arc(ballX * S, BELL_TOP_Y * S, (BELL_BALL_RADIUS + t * 0.09) * S, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  drawStatus('оттяните верхушку в сторону и отпустите — она бьёт по шарику');
+}
+
+/* ---------- флаг-старт: падение флага запускает реакцию, ранний клик — фальстарт ---------- */
+
+const FLAG_BASE = { x: 0.32, y: 0.82 };
+const FLAG_TOP = { x: 0.6, y: 0.18 };
+const FLAG_ATTACH_T = 0.72;
+const FLAG_LEN = 0.22;
+const FLAG_HEIGHT = 0.1;
+const FLAG_MIN_DELAY = 1.2;
+const FLAG_MAX_DELAY = 4;
+
+function flagNewRound() {
+  modeState.state = 'waiting';
+  modeState.dropDelay = FLAG_MIN_DELAY + Math.random() * (FLAG_MAX_DELAY - FLAG_MIN_DELAY);
+  modeState.dropAt = 0;
+  modeState.raise = modeState.raise ?? 1;
+}
+
+function flagSetup() {
+  modeState.elapsed = 0;
+  modeState.best = null;
+  modeState.resultText = '';
+  modeState.resultAt = 0;
+  flagNewRound();
+}
+
+function flagStep() {
+  modeState.elapsed += STEP;
+  if (modeState.state === 'waiting' && modeState.elapsed >= modeState.dropDelay) {
+    modeState.state = 'dropped';
+    modeState.dropAt = modeState.elapsed;
+  }
+  const targetRaise = modeState.state === 'waiting' ? 1 : 0;
+  modeState.raise = lerp(modeState.raise, targetRaise, 0.25);
+  if (modeState.state === 'result' && modeState.elapsed - modeState.resultAt > 1.1) flagNewRound();
+}
+
+function flagDraw() {
+  ctx.strokeStyle = ink(0.9);
+  ctx.lineWidth = Math.max(2, 0.012 * S);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(FLAG_BASE.x * S, FLAG_BASE.y * S);
+  ctx.lineTo(FLAG_TOP.x * S, FLAG_TOP.y * S);
+  ctx.stroke();
+
+  const attach = { x: lerp(FLAG_BASE.x, FLAG_TOP.x, FLAG_ATTACH_T), y: lerp(FLAG_BASE.y, FLAG_TOP.y, FLAG_ATTACH_T) };
+  const alongX = FLAG_TOP.x - FLAG_BASE.x, alongY = FLAG_TOP.y - FLAG_BASE.y;
+  const len = Math.hypot(alongX, alongY);
+  const ux = alongX / len, uy = alongY / len;
+  const poleAngle = Math.atan2(alongY, alongX);
+  const dir = lerp(Math.PI / 2, poleAngle + Math.PI / 2, modeState.raise);
+  const tip = { x: attach.x + Math.cos(dir) * FLAG_LEN, y: attach.y + Math.sin(dir) * FLAG_LEN };
+  const back = { x: attach.x - ux * FLAG_HEIGHT, y: attach.y - uy * FLAG_HEIGHT };
+
+  ctx.beginPath();
+  ctx.moveTo(attach.x * S, attach.y * S);
+  ctx.lineTo(tip.x * S, tip.y * S);
+  ctx.lineTo(back.x * S, back.y * S);
+  ctx.closePath();
+  ctx.fillStyle = modeState.state === 'dropped' ? RED : ink(0.85);
+  ctx.fill();
+
+  const bestTxt = modeState.best !== null ? ` · рекорд ${Math.round(modeState.best * 1000)} мс` : '';
+  let msg;
+  if (modeState.state === 'waiting') msg = 'ждите падения флага…';
+  else if (modeState.state === 'dropped') msg = 'сейчас! жмите';
+  else msg = modeState.resultText;
+  drawStatus(`${msg}${bestTxt}`, modeState.state === 'dropped' || modeState.resultText === 'рано!');
+}
+
+/* ---------- парус: угол к ветру решает скорость, порыв без рифа — оверкиль ---------- */
+
+const SAIL_MAST_Y = 0.5;
+const SAIL_START_X = 0.12;
+const SAIL_FINISH_X = 0.88;
+const SAIL_TIME_LIMIT = 40;
+const SAIL_SPEED_SCALE = 0.09;
+const SAIL_GUST_THRESHOLD = 1.25;
+const SAIL_CATCH_DANGER = 0.75;
+const SAIL_CAPSIZE_HOLD = 0.5;
+
+function sailSetup() {
+  modeState.boatX = SAIL_START_X;
+  modeState.sailAngle = 0;
+  modeState.windAngle = 0;
+  modeState.windStrength = 0.6;
+  modeState.gustTimer = 2 + Math.random() * 2;
+  modeState.gustPhase = 0;
+  modeState.dangerTime = 0;
+  modeState.capsizes = 0;
+  modeState.elapsed = 0;
+  modeState.finished = false;
+  modeState.reachedGoal = false;
+  modeState.finishAt = 0;
+}
+
+function sailStep() {
+  modeState.elapsed += STEP;
+  if (modeState.finished) return;
+
+  modeState.windAngle = Math.sin(modeState.elapsed * 0.15) * 0.9;
+  modeState.gustTimer -= STEP;
+  if (modeState.gustTimer <= 0 && modeState.gustPhase <= 0) {
+    modeState.gustPhase = 1;
+    modeState.gustTimer = 3 + Math.random() * 3;
+  }
+  if (modeState.gustPhase > 0) modeState.gustPhase = Math.max(0, modeState.gustPhase - STEP / 1.4);
+  modeState.windStrength = 0.55 + modeState.gustPhase * 0.85;
+
+  if (pointer.down) modeState.sailAngle = Math.atan2(pointer.y - SAIL_MAST_Y, pointer.x - modeState.boatX);
+
+  const reefed = on('reef');
+  const catchAmt = clamp(Math.cos(modeState.sailAngle - modeState.windAngle), 0, 1);
+  const effCatch = reefed ? catchAmt * 0.55 : catchAmt;
+  const thrust = effCatch * modeState.windStrength;
+  modeState.boatX = clamp(modeState.boatX + thrust * SAIL_SPEED_SCALE * STEP, SAIL_START_X - 0.02, SAIL_FINISH_X + 0.05);
+
+  const danger = !reefed && modeState.windStrength > SAIL_GUST_THRESHOLD && catchAmt > SAIL_CATCH_DANGER;
+  modeState.dangerTime = danger ? modeState.dangerTime + STEP : 0;
+  if (modeState.dangerTime > SAIL_CAPSIZE_HOLD) {
+    modeState.capsizes += 1;
+    modeState.boatX = SAIL_START_X;
+    modeState.dangerTime = 0;
+  }
+
+  if (modeState.boatX >= SAIL_FINISH_X) {
+    modeState.finished = true;
+    modeState.reachedGoal = true;
+    modeState.finishAt = modeState.elapsed;
+  } else if (modeState.elapsed >= SAIL_TIME_LIMIT) {
+    modeState.finished = true;
+  }
+}
+
+function sailDraw() {
+  ctx.strokeStyle = FAINT;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, SAIL_MAST_Y * S);
+  ctx.lineTo(S, SAIL_MAST_Y * S);
+  ctx.stroke();
+  dot(SAIL_FINISH_X, SAIL_MAST_Y, ink(0.6), 0.012);
+
+  const wx = 0.5, wy = 0.08, wlen = 0.05 + modeState.windStrength * 0.05;
+  ctx.strokeStyle = modeState.windStrength > SAIL_GUST_THRESHOLD ? RED : ink(0.6);
+  ctx.lineWidth = Math.max(1.5, 0.006 * S);
+  ctx.beginPath();
+  ctx.moveTo((wx - Math.cos(modeState.windAngle) * wlen) * S, (wy - Math.sin(modeState.windAngle) * wlen) * S);
+  ctx.lineTo((wx + Math.cos(modeState.windAngle) * wlen) * S, (wy + Math.sin(modeState.windAngle) * wlen) * S);
+  ctx.stroke();
+
+  const mastTopY = SAIL_MAST_Y - 0.22;
+  ctx.strokeStyle = ink(0.9);
+  ctx.lineWidth = Math.max(2, 0.01 * S);
+  ctx.beginPath();
+  ctx.moveTo(modeState.boatX * S, SAIL_MAST_Y * S);
+  ctx.lineTo(modeState.boatX * S, mastTopY * S);
+  ctx.stroke();
+
+  const reefed = on('reef');
+  const sailLen = reefed ? 0.11 : 0.18;
+  const sx = modeState.boatX + Math.cos(modeState.sailAngle) * sailLen;
+  const sy = mastTopY + 0.06 + Math.sin(modeState.sailAngle) * sailLen;
+  ctx.beginPath();
+  ctx.moveTo(modeState.boatX * S, mastTopY * S);
+  ctx.quadraticCurveTo(
+    lerp(modeState.boatX, sx, 0.5) * S, lerp(mastTopY + 0.06, sy, 0.5) * S - 0.02 * S,
+    sx * S, sy * S,
+  );
+  ctx.lineTo(modeState.boatX * S, (SAIL_MAST_Y - 0.02) * S);
+  ctx.closePath();
+  ctx.fillStyle = modeState.dangerTime > 0 ? RED : ink(0.75);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo((modeState.boatX - 0.05) * S, (SAIL_MAST_Y + 0.02) * S);
+  ctx.lineTo((modeState.boatX + 0.05) * S, (SAIL_MAST_Y + 0.02) * S);
+  ctx.lineTo(modeState.boatX * S, (SAIL_MAST_Y + 0.055) * S);
+  ctx.closePath();
+  ctx.fillStyle = ink(0.9);
+  ctx.fill();
+
+  const pct = Math.round(clamp((modeState.boatX - SAIL_START_X) / (SAIL_FINISH_X - SAIL_START_X), 0, 1) * 100);
+  if (modeState.finished) {
+    const msg = modeState.reachedGoal ? `буй взят за ${modeState.finishAt.toFixed(1)}с` : 'время вышло';
+    drawStatus(`${msg} · оверкилей ${modeState.capsizes} · R заново`, true);
+  } else {
+    drawStatus(`${pct}% · оверкилей ${modeState.capsizes} · тяните мышь — угол паруса к ветру`);
+  }
+}
+
 /* ---------- сборка ---------- */
 
 const MODES = {
@@ -755,10 +1132,76 @@ const MODES = {
     step() { marbleStep(); },
     draw() { marbleDraw(); },
   },
+  spring: {
+    label: 'пружина',
+    note: 'Хвост спирали закреплён в одной и той же точке — как настоящая пружина, у которой снаружи закреплён конец. Схватите спираль мышью рядом с центром и покрутите: витков становится больше или меньше, но габарит не меняется. Отпустите — пружина сама раскручивается обратно, пружиня и подрагивая. Без цели, просто физика.',
+    cursor: 'grab',
+    tools: [],
+    setup() { springSetup(); },
+    step() { springStep(); },
+    draw() { springDraw(); },
+    onDown() {
+      const d = Math.hypot(pointer.x - SPRING_CENTER.x, pointer.y - SPRING_CENTER.y);
+      if (d < SPRING_MAX_R * 1.6 && d > 0.01) {
+        modeState.dragging = true;
+        modeState.dragAngle = springAngleAt(pointer.x, pointer.y);
+      }
+    },
+    onUp() { modeState.dragging = false; },
+  },
+  bell: {
+    label: 'звонок',
+    note: 'Ствол — не жёсткий, а гнущийся хлыст. Оттяните верхушку в сторону мышью и отпустите: она пружинит назад, проскакивает через состояние покоя и на всём ходу бьёт по шарику — тот вздрагивает, пускает кольца и звенит (нужен звук в браузере). Чем сильнее оттянуть, тем звонче удар.',
+    cursor: 'grab',
+    tools: [],
+    setup() { bellSetup(); },
+    step() { bellStep(); },
+    draw() { bellDraw(); },
+    onDown() {
+      const tipX = BELL_BASE_X + modeState.bendX;
+      if (Math.hypot(pointer.x - tipX, pointer.y - BELL_TOP_Y) < 0.09) modeState.dragging = true;
+    },
+    onUp() { modeState.dragging = false; },
+  },
+  flag: {
+    label: 'флаг-старт',
+    note: 'Флаг стоит поднятым случайное время, потом падает без предупреждения. Ваше дело — среагировать кликом ровно после падения, не раньше. Клик до падения — фальстарт («рано!»), раунд сгорает и начинается заново. Успешная реакция меряется в миллисекундах, лучшее время держится, пока открыт этот режим.',
+    cursor: 'crosshair',
+    tools: [],
+    setup() { flagSetup(); },
+    step() { flagStep(); },
+    draw() { flagDraw(); },
+    onDown() {
+      if (modeState.state === 'waiting') {
+        modeState.resultText = 'рано!';
+        modeState.state = 'result';
+        modeState.resultAt = modeState.elapsed;
+        return;
+      }
+      if (modeState.state === 'dropped') {
+        const reaction = modeState.elapsed - modeState.dropAt;
+        if (modeState.best === null || reaction < modeState.best) modeState.best = reaction;
+        modeState.resultText = `${Math.round(reaction * 1000)} мс`;
+        modeState.state = 'result';
+        modeState.resultAt = modeState.elapsed;
+      }
+    },
+  },
+  sail: {
+    label: 'парус',
+    note: 'Лодка идёт вправо к бую только пока парус ловит ветер — направление ветра дрейфует само, зажмите мышь и наведите парус под выгодным углом, прямо против ветра скорости не будет вовсе. Порыв (стрелка ветра краснеет) при полностью раскрытом парусе — риск оверкиля: держите «риф», чтобы пережить порыв ценой скорости. Тридцать секунд, сорок — на весь заезд.',
+    cursor: 'crosshair',
+    tools: [
+      { type: 'toggle', key: 'reef', label: 'риф', value: false },
+    ],
+    setup() { sailSetup(); },
+    step() { sailStep(); },
+    draw() { sailDraw(); },
+  },
 };
 
 startLab({
-  title: 'Р · шесть механик',
+  title: 'Р · десять механик',
   modes: MODES,
-  start: 'weight',
+  start: 'spring',
 });
