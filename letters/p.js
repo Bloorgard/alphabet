@@ -24,7 +24,7 @@ const DEFAULTS = {
   spring: 0.25,
   volume: true,
   move: false,
-  gravity: false,
+  shake: false,
 };
 
 // Настроены в полигоне (lab/p-lab.js) и здесь не крутятся — панель сайта
@@ -41,11 +41,15 @@ const RAW_STEP = 0.006;
 const ANCHOR_MARK = 0.008;
 const HISTORY_LIMIT = 20;
 
-// Доля холста в секунду при полном наклоне (40°) — резинка тянет обратно к
-// кривой, поэтому шарики не убегают насовсем, а лишь оседают в сторону
-// наклона, как шарики в лабиринте-игрушке, пока телефон не выпрямят.
-const GRAVITY_STRENGTH = 8;
-const TILT_RANGE = 40;
+/* Постоянный наклон пробовали первым — физически он и должен смещать всю
+   массу разом, одинаковой силой на каждый шарик: получается ровный сдвиг
+   слоя, как параллакс, а не что-то живое («каменные» шарики). Настоящая
+   тряска работает иначе: у каждого шарика свой случайный толчок в свою
+   сторону — расталкивание и резинка после этого дают настоящий разброс и
+   возврат, а не слитный сдвиг. */
+const SHAKE_THRESHOLD = 16; // м/с² сверх которого движение считаем тряской
+const SHAKE_KICK = 0.006; // доля холста на каждый м/с² превышения порога
+const SHAKE_KICK_MAX = 0.14;
 
 const CONTROLS = [
   { key: 'radius', label: 'радиус', min: 0.012, max: 0.05, step: 0.002 },
@@ -58,9 +62,9 @@ const SWITCHES = [
   { key: 'move', label: 'двигать контур' },
 ];
 
-// Тумблер наклона имеет смысл только на устройстве с датчиком и грубым
+// Тумблер тряски имеет смысл только на устройстве с акселерометром и грубым
 // (пальцевым) указателем — на десктопе он бы просто ничего не делал.
-const SUPPORTS_TILT = typeof window !== 'undefined' && 'DeviceOrientationEvent' in window
+const SUPPORTS_MOTION = typeof window !== 'undefined' && 'DeviceMotionEvent' in window
   && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
 
 /* ---- вектор и кривые Безье (без ушей руками — только через подгонку) ---- */
@@ -280,40 +284,50 @@ export function mountP(workspace) {
 
   const pointer = { x: 0.5, y: 0.5, px: 0.5, py: 0.5, down: false, seen: false };
 
-  let tiltX = 0, tiltY = 0;
-  let orientationAttached = false;
+  let motionAttached = false;
 
-  function onOrientation(event) {
-    const gamma = event.gamma || 0; // лево-право: положительный — телефон наклонён вправо
-    const beta = event.beta || 0; // перёд-зад, 90° — обычное вертикальное положение в руке
-    tiltX = clamp(gamma / TILT_RANGE, -1, 1);
-    tiltY = clamp((beta - 90) / TILT_RANGE, -1, 1);
+  /* Каждый шарик — свой случайный толчок в свою сторону, а не общий вектор
+     на всех: иначе вся масса едет одним куском (см. комментарий у
+     SHAKE_THRESHOLD). Расталкивание и резинка уже умеют разбирать после
+     этого — им просто нужен повод. */
+  function onMotion(event) {
+    const a = event.accelerationIncludingGravity || event.acceleration;
+    if (!a) return;
+    const mag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+    const excess = mag - SHAKE_THRESHOLD;
+    if (excess <= 0) return;
+    const kick = Math.min(excess * SHAKE_KICK, SHAKE_KICK_MAX);
+    for (const b of balloons) {
+      const angle = Math.random() * Math.PI * 2;
+      const k = kick * (0.5 + Math.random() * 0.5);
+      b.x += Math.cos(angle) * k;
+      b.y += Math.sin(angle) * k;
+    }
   }
 
-  function attachOrientation() {
-    if (orientationAttached) return;
-    orientationAttached = true;
-    window.addEventListener('deviceorientation', onOrientation);
+  function attachMotion() {
+    if (motionAttached) return;
+    motionAttached = true;
+    window.addEventListener('devicemotion', onMotion);
   }
 
-  function detachOrientation() {
-    if (!orientationAttached) return;
-    orientationAttached = false;
-    window.removeEventListener('deviceorientation', onOrientation);
-    tiltX = 0; tiltY = 0;
+  function detachMotion() {
+    if (!motionAttached) return;
+    motionAttached = false;
+    window.removeEventListener('devicemotion', onMotion);
   }
 
-  /* iOS отдаёт наклон только после явного разрешения — и спросить можно
-     только из настоящего пользовательского жеста (клик по тумблеру). Другие
-     браузеры такого метода не знают, там слушатель просто вешается сразу. */
-  function requestTilt() {
-    const DOE = window.DeviceOrientationEvent;
-    if (DOE && typeof DOE.requestPermission === 'function') {
-      DOE.requestPermission().then((state) => {
-        if (state === 'granted') attachOrientation();
+  /* iOS отдаёт показания датчика только после явного разрешения — и спросить
+     можно только из настоящего пользовательского жеста (клик по тумблеру).
+     Другие браузеры такого метода не знают, там слушатель вешается сразу. */
+  function requestMotion() {
+    const DME = window.DeviceMotionEvent;
+    if (DME && typeof DME.requestPermission === 'function') {
+      DME.requestPermission().then((state) => {
+        if (state === 'granted') attachMotion();
       }).catch(() => {});
     } else {
-      attachOrientation();
+      attachMotion();
     }
   }
 
@@ -470,11 +484,6 @@ export function mountP(workspace) {
       const t = clamp((now - b.birth - DELAY) / GROWTH, 0, 1);
       const ease = t * t * (3 - 2 * t);
       b.r = maxR * b.scale * ease;
-    }
-
-    if (params.gravity && (tiltX || tiltY)) {
-      const push = GRAVITY_STRENGTH * STEP;
-      for (const b of balloons) { b.x += tiltX * push; b.y += tiltY * push; }
     }
 
     const n = balloons.length;
@@ -725,8 +734,8 @@ export function mountP(workspace) {
       panel.append(label);
     }
 
-    const switches = SUPPORTS_TILT
-      ? [...SWITCHES, { key: 'gravity', label: 'гравитация', onToggle: (value) => (value ? requestTilt() : detachOrientation()) }]
+    const switches = SUPPORTS_MOTION
+      ? [...SWITCHES, { key: 'shake', label: 'тряска', onToggle: (value) => (value ? requestMotion() : detachMotion()) }]
       : SWITCHES;
     for (const item of switches) {
       const button = document.createElement('button');
@@ -799,7 +808,7 @@ export function mountP(workspace) {
     canvas.removeEventListener('pointerup', onUp);
     canvas.removeEventListener('pointercancel', onUp);
     document.removeEventListener('keydown', onKeyDown);
-    detachOrientation();
+    detachMotion();
     panel.remove();
     toggle.remove();
     hint.remove();
