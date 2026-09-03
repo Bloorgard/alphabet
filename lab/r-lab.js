@@ -990,14 +990,20 @@ function bellBeep(strength) {
   } catch (error) { /* звук недоступен (нет разрешения, старый браузер) — удар всё равно виден */ }
 }
 
-const BELL_BASE_X = 0.42;
-const BELL_BASE_Y = 0.86;
-const BELL_TOP_Y = 0.32;
+/* Пропорции — с референса композиции (SVG 718×718: ствол x=215, петля
+   центр 359.24×261, радиус 134): x=215/718, петля-центр смещена от ствола
+   на (359.24-215)/718, радиус 134/718. Высота ствола/шарика (BELL_TOP_Y)
+   своя — на референсе петля центрирована куда ниже верха ствола, но здесь
+   от неё же зависит высота качания палки, поэтому она держит рабочую игру,
+   а не копирует референс дословно. */
+const BELL_BASE_X = 0.30;
+const BELL_BASE_Y = 0.85;
+const BELL_TOP_Y = 0.34;
 const BELL_MAX_BEND = 0.26;
 const BELL_K = 60;
 const BELL_C = 2.2;
-const BELL_BALL_OFFSET = 0.26;
-const BELL_BALL_RADIUS = 0.14;
+const BELL_BALL_OFFSET = 0.2;
+const BELL_BALL_RADIUS = 0.187;
 const BELL_HIT_COOLDOWN = 0.18;
 
 function bellSetup() {
@@ -1047,7 +1053,11 @@ function bellStep() {
   modeState.cooldown = Math.max(0, modeState.cooldown - STEP);
 
   const tipX = BELL_BASE_X + modeState.bendX;
-  const hitX = bellBallX() - BELL_BALL_RADIUS;
+  /* Порог не у самого края шарика — при новых, более крупных пропорциях
+     край и так почти касается ствола в покое, и удар засчитывался бы от
+     любого чиха. Порог берётся заметно внутрь шарика, чтобы взмах
+     по-прежнему требовал настоящего размаха. */
+  const hitX = bellBallX() - BELL_BALL_RADIUS * 0.55;
   if (!modeState.dragging && modeState.cooldown <= 0
       && modeState.prevTipX < hitX && tipX >= hitX && modeState.bendVel > 0.3) {
     const strength = clamp(modeState.bendVel * 0.6, 0.2, 1);
