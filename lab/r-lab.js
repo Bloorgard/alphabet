@@ -1160,6 +1160,18 @@ function bellDraw() {
     ctx.stroke();
   }
 
+  /* Диагностика по прямому требованию автора: настоящая граница удара,
+     теми же числами, что в bellStep (BELL_BALL_X/Y/RADIUS, без вобла) —
+     красным, поверх всего, всегда видна. Сравнить на глаз с нарисованной
+     сферой, а не верить на слово. */
+  ctx.beginPath();
+  ctx.arc(BELL_BALL_X * S, BELL_BALL_Y * S, BELL_BALL_RADIUS * S, 0, Math.PI * 2);
+  ctx.strokeStyle = RED;
+  ctx.lineWidth = Math.max(1, 0.0026 * S);
+  ctx.setLineDash([S * 0.012, S * 0.008]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
   drawStatus(`${BELL_TEXTURES[modeState.texIndex].label} · крутите шарик или качните палку`);
 }
 
