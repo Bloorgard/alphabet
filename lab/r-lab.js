@@ -1105,6 +1105,21 @@ function bellStep() {
 
 function bellDraw() {
   const tip = bellTip();
+  const ballR = BELL_BALL_RADIUS * (1 + modeState.wobble * 0.06);
+
+  /* Палка рисуется в вырезе — область самого шарика исключена через
+     evenodd (прямоугольник всей сцены минус круг шарика), поэтому
+     обводка палки физически не может нарисоваться внутри шарика, каким
+     бы ни было её толщина. Раньше эту область прикрывала отдельная
+     заливка paper(1) поверх — но при тёмной теме («чернила») paper()
+     светлая, и на тёмном фоне запас в 3% вокруг шарика был виден отдельным
+     светлым кольцом — той самой «сферой меньшего размера позади». Выреза
+     вместо заливки такой цветовой рассинхронизации не даёт в принципе. */
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, S, S);
+  ctx.arc(BELL_BALL_X * S, BELL_BALL_Y * S, ballR * S, 0, Math.PI * 2);
+  ctx.clip('evenodd');
   ctx.strokeStyle = ink(0.9);
   ctx.lineWidth = Math.max(2, 0.014 * S);
   ctx.lineCap = 'round';
@@ -1112,16 +1127,8 @@ function bellDraw() {
   ctx.moveTo(BELL_BASE_X * S, BELL_BASE_Y * S);
   ctx.lineTo(tip.x * S, tip.y * S);
   ctx.stroke();
+  ctx.restore();
 
-  const ballR = BELL_BALL_RADIUS * (1 + modeState.wobble * 0.06);
-  /* Подложка чуть шире самого узора — только чтобы спрятать толщину
-     обводки палки, не больше: ствол проходит от края сферы всего в 0.014
-     (по координатам референса), и прошлый запас 1.08 был настолько
-     большим, что откусывал кусок самой палки на этом стыке. */
-  ctx.beginPath();
-  ctx.arc(BELL_BALL_X * S, BELL_BALL_Y * S, ballR * S * 1.03, 0, Math.PI * 2);
-  ctx.fillStyle = paper(1);
-  ctx.fill();
   const tex = BELL_TEXTURES[modeState.texIndex];
   if (tex.type === 'field') sphRenderField(BELL_BALL_X, BELL_BALL_Y, ballR, modeState.sphM, tex.fn);
   else if (tex.type === 'wire') sphRenderWireframe(BELL_BALL_X, BELL_BALL_Y, ballR, modeState.sphM);
