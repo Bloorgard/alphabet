@@ -1102,10 +1102,12 @@ function bellDraw() {
   ctx.stroke();
 
   const ballR = BELL_BALL_RADIUS * (1 + modeState.wobble * 0.06);
-  /* Подложка чуть шире самого узора — обводка палки толще математической
-     линии и без запаса вылезала бы культёй из-под края сферы. */
+  /* Подложка чуть шире самого узора — только чтобы спрятать толщину
+     обводки палки, не больше: ствол проходит от края сферы всего в 0.014
+     (по координатам референса), и прошлый запас 1.08 был настолько
+     большим, что откусывал кусок самой палки на этом стыке. */
   ctx.beginPath();
-  ctx.arc(BELL_BALL_X * S, BELL_BALL_Y * S, ballR * S * 1.08, 0, Math.PI * 2);
+  ctx.arc(BELL_BALL_X * S, BELL_BALL_Y * S, ballR * S * 1.03, 0, Math.PI * 2);
   ctx.fillStyle = paper(1);
   ctx.fill();
   const tex = BELL_TEXTURES[modeState.texIndex];
