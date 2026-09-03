@@ -1097,15 +1097,23 @@ function bellStep() {
   const tip = bellTip();
   const distToBall = Math.hypot(tip.x - BELL_BALL_X, tip.y - BELL_BALL_Y);
   const tipSpeed = Math.abs(modeState.angleVel) * BELL_ROD_LEN;
-  if (!modeState.dragging && modeState.cooldown <= 0
-      && modeState.prevDistToBall >= BELL_BALL_RADIUS && distToBall < BELL_BALL_RADIUS && tipSpeed > 0.3) {
-    const strength = clamp(tipSpeed * 0.6, 0.2, 1);
-    modeState.wobble = Math.min(1.4, modeState.wobble + strength);
-    modeState.rings.push({ born: modeState.elapsed, strength });
-    modeState.texIndex = (modeState.texIndex + 1) % BELL_TEXTURES.length;
-    bellBeep(strength);
-    modeState.cooldown = BELL_HIT_COOLDOWN;
+  /* Раньше отскок и «удар» (звук, кольца, смена текстуры) были одним
+     условием со threshold по скорости — при слабом взмахе ни то ни
+     другое не срабатывало, и палка беспрепятственно проходила сквозь
+     шарик насквозь и выходила с другой стороны, без звука и без отскока.
+     Шарик должен быть твёрдым всегда, независимо от того, насколько
+     сильно его задели: отскок — при любом пересечении границы, «удар»
+     (со звуком) — только если скорости хватает. */
+  if (!modeState.dragging && modeState.prevDistToBall >= BELL_BALL_RADIUS && distToBall < BELL_BALL_RADIUS) {
     modeState.angleVel *= -0.35;
+    if (modeState.cooldown <= 0 && tipSpeed > 0.3) {
+      const strength = clamp(tipSpeed * 0.6, 0.2, 1);
+      modeState.wobble = Math.min(1.4, modeState.wobble + strength);
+      modeState.rings.push({ born: modeState.elapsed, strength });
+      modeState.texIndex = (modeState.texIndex + 1) % BELL_TEXTURES.length;
+      bellBeep(strength);
+      modeState.cooldown = BELL_HIT_COOLDOWN;
+    }
   }
   modeState.prevDistToBall = distToBall;
   modeState.wobble *= 0.9;
