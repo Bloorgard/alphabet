@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ударь по шарику</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 28px;
+    background: #f1ede5;
+    color: #161616;
+    font: 13px/1.4 'DM Mono', ui-monospace, monospace;
+  }
+  h1 { font-size: 14px; font-weight: 500; margin: 0 0 4px; letter-spacing: .02em; }
+  p.sub { margin: 0 0 20px; color: #8b877f; max-width: 600px; }
+  .stage { display: flex; align-items: flex-start; gap: 24px; flex-wrap: wrap; }
+  canvas { display: block; touch-action: none; cursor: pointer; }
+  canvas.dragging { cursor: grabbing; }
+  .side { max-width: 280px; }
+  .side .label { color: #8b877f; }
+  .side b { color: #161616; font-weight: 500; }
+  .recipe { margin-top: 4px; font-size: 15px; }
+  .tools { margin-top: 14px; }
+  .tools button {
+    font: 12px 'DM Mono', monospace;
+    padding: 5px 10px;
+    border: 1px solid #cfc8b6;
+    background: transparent;
+    color: #8b877f;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<h1>Ударь по шарику</h1>
+<p class="sub">Тяните мышью — крутится сам шар, обычный поворот. Короткий клик — удар: собирается новая случайная комбинация из геометрических примитивов, без единого ползунка.</p>
+<div class="stage">
+  <canvas id="sphere" width="380" height="380"></canvas>
+  <div class="side">
+    <div class="label">рецепт</div>
+    <div class="recipe" id="recipe">—</div>
+    <div class="tools">
+      <button id="resetBtn">сбросить поворот</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const W = 380;
+const R = 168;
+const TAU = Math.PI * 2;
+const INK = '#161616';
+const PAPER = '#f1ede5';
+const INK_RGB = [22, 22, 22];
+const PAPER_RGB = [241, 237, 229];
+const LIGHT = normalize([-0.45, -0.62, 0.64]);
+
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+function normalize(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+
+/* ---------- вращение: полный трекбол ---------- */
+function matMul(a, b) {
+  const r = new Array(9);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    r[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+  }
+  return r;
+}
+function rotX(a) { const c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, c, -s, 0, s, c]; }
+function rotY(a) { const c = Math.cos(a), s = Math.sin(a); return [c, 0, s, 0, 1, 0, -s, 0, c]; }
+function applyMat(m, v) {
+  return [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]];
+}
+function applyMatT(m, v) {
+  return [m[0] * v[0] + m[3] * v[1] + m[6] * v[2], m[1] * v[0] + m[4] * v[1] + m[7] * v[2], m[2] * v[0] + m[5] * v[1] + m[8] * v[2]];
+}
+
+const sphereState = { M: [1, 0, 0, 0, 1, 0, 0, 0, 1], yawVel: 0.006, pitchVel: 0, dragging: false, lastX: 0, lastY: 0, downX: 0, downY: 0, moved: false };
+
+function stepRotation() {
+  if (sphereState.dragging) return;
+  sphereState.M = matMul(rotX(sphereState.pitchVel), matMul(rotY(sphereState.yawVel), sphereState.M));
+  sphereState.yawVel *= 0.96;
+  sphereState.pitchVel *= 0.96;
+  if (Math.abs(sphereState.yawVel) < 0.006) sphereState.yawVel += (0.006 - sphereState.yawVel) * 0.02;
+}
+
+/* ---------- точки на шаре — сетка Фибоначчи для марок ---------- */
+function fibonacciSphere(n) {
+  const pts = [];
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < n; i++) {
+    const y = 1 - (i / (n - 1)) * 2;
+    const rad = Math.sqrt(Math.max(0, 1 - y * y));
+    const theta = golden * i;
+    pts.push([Math.cos(theta) * rad, y, Math.sin(theta) * rad, Math.random()]);
+  }
+  return pts;
+}
+const DOTS_DENSE = fibonacciSphere(1100);
+const DOTS_SPARSE = fibonacciSphere(300);
+const DOTS_STIPPLE = fibonacciSphere(2600);
+
+/* ---------- примитивы поля: каждый — булева функция точки поверхности ---------- */
+function randAxis() {
+  const z = Math.random() * 2 - 1, phi = Math.random() * TAU;
+  const rr = Math.sqrt(1 - z * z);
+  return [rr * Math.cos(phi), z, rr * Math.sin(phi)];
+}
+/* Полосы по случайной оси — одна и та же формула даёт и «широты», и «дольки»,
+   и всё промежуточное: ось решает, где у полос полюс. */
+function makeBandingLayer() {
+  const axis = randAxis();
+  const count = 2 + Math.floor(Math.random() * 9);
+  const phase = Math.random();
+  return (po) => {
+    const d = (dot(po, axis) + 1) / 2;
+    return Math.floor(d * count + phase * count) % 2 === 0;
+  };
+}
+/* Спираль вокруг случайной оси: локальный базис (e1,e2) в плоскости,
+   перпендикулярной оси, даёт «широту» и «долготу» вокруг неё. */
+function makeSpiralLayer() {
+  const axis = randAxis();
+  const up = Math.abs(axis[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+  const e1 = normalize(cross(up, axis));
+  const e2 = cross(axis, e1);
+  const turns = 2 + Math.floor(Math.random() * 4);
+  const bands = 2 + Math.floor(Math.random() * 3);
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  return (po) => {
+    const z = clamp(dot(po, axis), -1, 1);
+    const x = dot(po, e1), y = dot(po, e2);
+    const lon = Math.atan2(y, x);
+    const latN = Math.acos(z) / Math.PI;
+    const band = Math.floor((lon / TAU * dir * turns + latN * bands) * 2);
+    return ((band % 2) + 2) % 2 === 0;
+  };
+}
+const COMBOS = {
+  'искл. ИЛИ': (a, b) => a !== b,
+  'И': (a, b) => a && b,
+  'ИЛИ': (a, b) => a || b,
+};
+function composeLayers(layers, ops) {
+  return (po) => {
+    let v = layers[0](po);
+    for (let i = 1; i < layers.length; i++) v = ops[i - 1](v, layers[i](po));
+    return v ? INK_RGB : PAPER_RGB;
+  };
+}
+
+function renderField(ctx, fn) {
+  const img = ctx.createImageData(W, W);
+  const data = img.data;
+  const cx = W / 2, cy = W / 2;
+  const M = sphereState.M;
+  for (let py = 0; py < W; py++) {
+    for (let px = 0; px < W; px++) {
+      const idx = (py * W + px) * 4;
+      const x = px - cx, y = py - cy;
+      const d2 = x * x + y * y;
+      let rgb = PAPER_RGB;
+      if (d2 <= R * R) {
+        const z = Math.sqrt(R * R - d2);
+        const pv = [x / R, y / R, z / R];
+        const po = applyMatT(M, pv);
+        rgb = fn(po);
+      }
+      data[idx] = rgb[0]; data[idx + 1] = rgb[1]; data[idx + 2] = rgb[2]; data[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  strokeOutline(ctx);
+}
+
+function strokeOutline(ctx) {
+  ctx.beginPath(); ctx.arc(W / 2, W / 2, R, 0, TAU);
+  ctx.strokeStyle = INK; ctx.lineWidth = 1.6; ctx.stroke();
+}
+
+/* ---------- марки: метка в каждой точке облака, если она смотрит на зрителя ---------- */
+function renderMarks(ctx, points, markFn, light) {
+  ctx.clearRect(0, 0, W, W);
+  ctx.fillStyle = PAPER;
+  ctx.beginPath(); ctx.arc(W / 2, W / 2, R, 0, TAU); ctx.fill();
+  const cx = W / 2, cy = W / 2, M = sphereState.M;
+  for (const p of points) {
+    const v = applyMat(M, p);
+    if (v[2] <= 0.02) continue;
+    const s = clamp(dot(v, light) * 0.5 + 0.5, 0, 1);
+    markFn(ctx, cx + v[0] * R, cy + v[1] * R, s, p[3]);
+  }
+  strokeOutline(ctx);
+}
+function markDot(ctx, x, y, s) {
+  const rad = 0.6 + Math.pow(s, 0.55) * 4.2;
+  ctx.beginPath(); ctx.arc(x, y, rad, 0, TAU); ctx.fillStyle = INK; ctx.fill();
+}
+function markLetter(ctx, x, y, s, rand) {
+  const prob = Math.pow(1 - s, 1.1) * 0.95 + 0.03;
+  if (rand > prob) return;
+  ctx.fillStyle = INK;
+  ctx.fillText('Р', x, y);
+}
+function markFreckle(ctx, x, y, s, rand) {
+  const prob = Math.pow(1 - s, 0.85) * 0.85 + 0.04;
+  if (rand > prob) return;
+  ctx.beginPath(); ctx.arc(x, y, 0.5 + rand * 1.3, 0, TAU); ctx.fillStyle = INK; ctx.fill();
+}
+
+/* ---------- гранёный кристалл: настоящий икосаэдр ---------- */
+const ICO_T = (1 + Math.sqrt(5)) / 2;
+const ICO_VERTS = [
+  [-1, ICO_T, 0], [1, ICO_T, 0], [-1, -ICO_T, 0], [1, -ICO_T, 0],
+  [0, -1, ICO_T], [0, 1, ICO_T], [0, -1, -ICO_T], [0, 1, -ICO_T],
+  [ICO_T, 0, -1], [ICO_T, 0, 1], [-ICO_T, 0, -1], [-ICO_T, 0, 1],
+].map(normalize);
+const ICO_FACES = [
+  [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+  [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+  [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+  [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+];
+const POSTER_TONES = [[241, 237, 229], [205, 200, 190], [150, 146, 137], [90, 87, 80], [22, 22, 22]];
+function renderFacets(ctx) {
+  ctx.clearRect(0, 0, W, W);
+  const cx = W / 2, cy = W / 2, M = sphereState.M;
+  const faces = ICO_FACES.map((f) => {
+    const verts = f.map((i) => applyMat(M, ICO_VERTS[i]));
+    const normal = normalize([
+      verts[0][0] + verts[1][0] + verts[2][0],
+      verts[0][1] + verts[1][1] + verts[2][1],
+      verts[0][2] + verts[1][2] + verts[2][2],
+    ]);
+    return { verts, normal, avgZ: (verts[0][2] + verts[1][2] + verts[2][2]) / 3 };
+  }).sort((a, b) => a.avgZ - b.avgZ);
+  for (const f of faces) {
+    const s = clamp(dot(f.normal, LIGHT) * 0.5 + 0.5, 0, 1);
+    const band = clamp(Math.floor((1 - s) * POSTER_TONES.length), 0, POSTER_TONES.length - 1);
+    const [r, g, b] = POSTER_TONES[band];
+    ctx.beginPath();
+    ctx.moveTo(cx + f.verts[0][0] * R, cy + f.verts[0][1] * R);
+    ctx.lineTo(cx + f.verts[1][0] * R, cy + f.verts[1][1] * R);
+    ctx.lineTo(cx + f.verts[2][0] * R, cy + f.verts[2][1] * R);
+    ctx.closePath();
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fill();
+    ctx.strokeStyle = INK; ctx.lineWidth = 0.8; ctx.stroke();
+  }
+  strokeOutline(ctx);
+}
+
+/* ---------- сетка: настоящие меридианы и параллели ---------- */
+function renderWireframe(ctx) {
+  ctx.clearRect(0, 0, W, W);
+  ctx.fillStyle = PAPER;
+  ctx.beginPath(); ctx.arc(W / 2, W / 2, R, 0, TAU); ctx.fill();
+  const cx = W / 2, cy = W / 2, M = sphereState.M;
+  ctx.strokeStyle = INK; ctx.lineWidth = 1.2;
+  function drawCircle(genPoint, steps) {
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i <= steps; i++) {
+      const v = applyMat(M, genPoint((i / steps) * TAU));
+      if (v[2] <= 0) { started = false; continue; }
+      const sx = cx + v[0] * R, sy = cy + v[1] * R;
+      if (!started) { ctx.moveTo(sx, sy); started = true; } else ctx.lineTo(sx, sy);
+    }
+    ctx.stroke();
+  }
+  for (let i = 0; i < 9; i++) {
+    const lon = (i / 9) * TAU;
+    drawCircle((t) => [Math.sin(t) * Math.cos(lon), Math.cos(t), Math.sin(t) * Math.sin(lon)], 72);
+  }
+  for (let i = 1; i < 4; i++) {
+    const lat = (i / 4) * Math.PI;
+    drawCircle((t) => [Math.sin(lat) * Math.cos(t), Math.cos(lat), Math.sin(lat) * Math.sin(t)], 72);
+  }
+  strokeOutline(ctx);
+}
+
+/* ---------- генератор: собирает случайный узор из примитивов ---------- */
+let activePattern = null;
+const recipeEl = document.getElementById('recipe');
+
+function rollNewPattern() {
+  const roll = Math.random();
+  let label;
+  if (roll < 0.55) {
+    const layerCount = 1 + Math.floor(Math.random() * 3);
+    const kinds = [];
+    const layers = [];
+    for (let i = 0; i < layerCount; i++) {
+      const isSpiral = Math.random() < 0.3;
+      layers.push(isSpiral ? makeSpiralLayer() : makeBandingLayer());
+      kinds.push(isSpiral ? 'спираль' : 'полосы');
+    }
+    const opNames = [], ops = [];
+    const opKeys = Object.keys(COMBOS);
+    for (let i = 1; i < layerCount; i++) {
+      const key = opKeys[Math.floor(Math.random() * opKeys.length)];
+      ops.push(COMBOS[key]); opNames.push(key);
+    }
+    activePattern = { type: 'field', fn: composeLayers(layers, ops) };
+    label = kinds.join(' + ') + (opNames.length ? ` (${opNames.join(', ')})` : '');
+  } else {
+    const specials = [
+      { type: 'facets', label: 'гранёный кристалл' },
+      { type: 'wire', label: 'проволочная сетка' },
+      { type: 'marks', points: DOTS_DENSE, mark: markDot, light: LIGHT, label: 'полутон точками' },
+      { type: 'marks', points: DOTS_STIPPLE, mark: markFreckle, light: LIGHT, label: 'веснушки' },
+      { type: 'marks', points: DOTS_SPARSE, mark: markLetter, light: LIGHT, font: true, label: 'Р-марка' },
+    ];
+    activePattern = specials[Math.floor(Math.random() * specials.length)];
+    label = activePattern.label;
+  }
+  recipeEl.textContent = label;
+}
+
+/* ---------- удар: звук и всплеск колец в точке клика ---------- */
+let audioCtx = null;
+function beep() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 520;
+    gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + 0.32);
+  } catch (error) { /* звук недоступен — удар всё равно виден */ }
+}
+let impact = null;
+function drawImpact(ctx) {
+  if (!impact) return;
+  const age = (performance.now() - impact.born) / 1000;
+  if (age > 0.35) { impact = null; return; }
+  const t = age / 0.35;
+  ctx.beginPath();
+  ctx.arc(impact.x, impact.y, 6 + t * 46, 0, TAU);
+  ctx.strokeStyle = `rgba(22,22,22,${(1 - t) * 0.8})`;
+  ctx.lineWidth = 3 * (1 - t) + 1;
+  ctx.stroke();
+}
+
+const canvas = document.getElementById('sphere');
+const ctx = canvas.getContext('2d');
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  sphereState.M = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  sphereState.yawVel = 0.006; sphereState.pitchVel = 0;
+});
+
+canvas.addEventListener('pointerdown', (e) => {
+  sphereState.dragging = true;
+  sphereState.moved = false;
+  sphereState.downX = e.clientX; sphereState.downY = e.clientY;
+  sphereState.lastX = e.clientX; sphereState.lastY = e.clientY;
+  canvas.classList.add('dragging');
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!sphereState.dragging) return;
+  if (Math.hypot(e.clientX - sphereState.downX, e.clientY - sphereState.downY) > 6) sphereState.moved = true;
+  const dx = e.clientX - sphereState.lastX, dy = e.clientY - sphereState.lastY;
+  sphereState.lastX = e.clientX; sphereState.lastY = e.clientY;
+  const ky = dx * 0.008, kx = -dy * 0.008;
+  sphereState.M = matMul(rotX(kx), matMul(rotY(ky), sphereState.M));
+  sphereState.yawVel = ky; sphereState.pitchVel = kx;
+});
+window.addEventListener('pointerup', (e) => {
+  sphereState.dragging = false;
+  canvas.classList.remove('dragging');
+  if (sphereState.moved) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  if (Math.hypot(x - W / 2, y - W / 2) > R + 12) return;
+  impact = { x, y, born: performance.now() };
+  rollNewPattern();
+  beep();
+});
+
+rollNewPattern();
+
+function frame() {
+  stepRotation();
+  const p = activePattern;
+  if (p.type === 'field') renderField(ctx, p.fn);
+  else if (p.type === 'wire') renderWireframe(ctx);
+  else if (p.type === 'facets') renderFacets(ctx);
+  else if (p.type === 'marks') {
+    if (p.font) { ctx.font = '10px "DM Mono", ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; }
+    renderMarks(ctx, p.points, p.mark, p.light);
+  }
+  drawImpact(ctx);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

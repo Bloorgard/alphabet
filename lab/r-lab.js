@@ -766,7 +766,210 @@ function springDraw() {
   drawStatus(`${turns} витков · крутите вокруг центра и отпустите`);
 }
 
-/* ---------- звонок: ствол-хлыст отскакивает и бьёт по шарику ---------- */
+/* ---------- геометрия текстурной сферы для звонка ----------
+
+   Перенесено с отдельного полигона lab/r-spheres.html: настоящий поворот
+   в 3D (трекбол, не один угол), узор запрашивает не экранные, а свои
+   координаты на поверхности через обратный поворот матрицы (она
+   ортонормальна, обратная = транспонированная). Часть узоров (широты,
+   дольки, спираль, шахматка) — булево поле на пиксель через ImageData,
+   часть (сетка, кристалл, точки) рисуются обычными путями ctx. */
+
+const SPH_TAU = Math.PI * 2;
+function sphNormalize(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+function sphDot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function sphMatMul(a, b) {
+  const r = new Array(9);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    r[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+  }
+  return r;
+}
+function sphRotX(a) { const c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, c, -s, 0, s, c]; }
+function sphRotY(a) { const c = Math.cos(a), s = Math.sin(a); return [c, 0, s, 0, 1, 0, -s, 0, c]; }
+function sphApplyMat(m, v) {
+  return [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]];
+}
+function sphApplyMatT(m, v) {
+  return [m[0] * v[0] + m[3] * v[1] + m[6] * v[2], m[1] * v[0] + m[4] * v[1] + m[7] * v[2], m[2] * v[0] + m[5] * v[1] + m[8] * v[2]];
+}
+const SPH_LIGHT = sphNormalize([-0.45, -0.62, 0.64]);
+
+function sphFibonacciSphere(n) {
+  const pts = [];
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < n; i++) {
+    const y = 1 - (i / (n - 1)) * 2;
+    const rad = Math.sqrt(Math.max(0, 1 - y * y));
+    const theta = golden * i;
+    pts.push([Math.cos(theta) * rad, y, Math.sin(theta) * rad, Math.random()]);
+  }
+  return pts;
+}
+const SPH_DOTS_DENSE = sphFibonacciSphere(650);
+const SPH_DOTS_SPARSE = sphFibonacciSphere(180);
+const SPH_DOTS_STIPPLE = sphFibonacciSphere(1500);
+
+/* Пять тонов от бумаги до чернил в текущей теме — не своя палитра, а лесенка
+   между paper() и ink(), поэтому переключение фона полигона красит и сферу. */
+function sphTones() {
+  const mark = labGrounds[ground].mark, field = labGrounds[ground].field;
+  const steps = 5, tones = [];
+  for (let i = 0; i < steps; i++) {
+    const t = i / (steps - 1);
+    tones.push([0, 1, 2].map((k) => Math.round(field[k] + (mark[k] - field[k]) * t)));
+  }
+  return tones;
+}
+
+/* ---- узоры-поля: булево значение точки поверхности ---- */
+function sphPatLatitude(po) {
+  return Math.floor(((po[1] + 1) / 2) * 8) % 2 === 0;
+}
+function sphPatGores(po) {
+  const lon = Math.atan2(po[2], po[0]);
+  return Math.floor(((lon + Math.PI) / SPH_TAU) * 12) % 2 === 0;
+}
+function sphPatSpiral(po) {
+  const latN = Math.acos(clamp(po[1], -1, 1)) / Math.PI;
+  const lonN = (Math.atan2(po[2], po[0]) + Math.PI) / SPH_TAU;
+  return Math.floor((lonN * 6 + latN * 4) * 2) % 2 === 0;
+}
+function sphPatCheckerboard(po) {
+  const lat = Math.acos(clamp(po[1], -1, 1));
+  const lon = Math.atan2(po[2], po[0]);
+  const latBand = Math.floor((lat / Math.PI) * 8);
+  const lonBand = Math.floor(((lon + Math.PI) / SPH_TAU) * 14);
+  return (latBand + lonBand) % 2 === 0;
+}
+
+/* Растровое поле рисуется через ImageData — она пишет в настоящие пиксели
+   буфера (dpr), а не в единицы холста, как обычные пути ctx, поэтому центр
+   и радиус переводятся в пиксели отдельно. Снаружи круга — прозрачно, чтобы
+   не закрашивать сцену вокруг шарика прямоугольником. */
+function sphRenderField(cxN, cyN, rN, M, fn) {
+  const cxPx = Math.round(cxN * S * dpr), cyPx = Math.round(cyN * S * dpr);
+  const rPx = Math.max(1, Math.round(rN * S * dpr));
+  const size = rPx * 2;
+  const img = ctx.createImageData(size, size);
+  const data = img.data;
+  const mark = labGrounds[ground].mark, field = labGrounds[ground].field;
+  for (let py = 0; py < size; py++) {
+    for (let px = 0; px < size; px++) {
+      const idx = (py * size + px) * 4;
+      const x = px - rPx, y = py - rPx;
+      const d2 = x * x + y * y;
+      if (d2 > rPx * rPx) { data[idx + 3] = 0; continue; }
+      const z = Math.sqrt(rPx * rPx - d2);
+      const pv = [x / rPx, y / rPx, z / rPx];
+      const po = sphApplyMatT(M, pv);
+      const rgb = fn(po) ? mark : field;
+      data[idx] = rgb[0]; data[idx + 1] = rgb[1]; data[idx + 2] = rgb[2]; data[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, cxPx - rPx, cyPx - rPx);
+}
+
+function sphRenderWireframe(cxN, cyN, rN, M) {
+  ctx.beginPath(); ctx.arc(cxN * S, cyN * S, rN * S, 0, SPH_TAU); ctx.fillStyle = paper(1); ctx.fill();
+  ctx.strokeStyle = ink(0.85); ctx.lineWidth = Math.max(1, 0.0022 * S);
+  function drawCircle(genPoint, steps) {
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i <= steps; i++) {
+      const v = sphApplyMat(M, genPoint((i / steps) * SPH_TAU));
+      if (v[2] <= 0) { started = false; continue; }
+      const sx = (cxN + v[0] * rN) * S, sy = (cyN + v[1] * rN) * S;
+      if (!started) { ctx.moveTo(sx, sy); started = true; } else ctx.lineTo(sx, sy);
+    }
+    ctx.stroke();
+  }
+  for (let i = 0; i < 8; i++) {
+    const lon = (i / 8) * SPH_TAU;
+    drawCircle((t) => [Math.sin(t) * Math.cos(lon), Math.cos(t), Math.sin(t) * Math.sin(lon)], 48);
+  }
+  for (let i = 1; i < 4; i++) {
+    const lat = (i / 4) * Math.PI;
+    drawCircle((t) => [Math.sin(lat) * Math.cos(t), Math.cos(lat), Math.sin(lat) * Math.sin(t)], 48);
+  }
+}
+
+const SPH_ICO_T = (1 + Math.sqrt(5)) / 2;
+const SPH_ICO_VERTS = [
+  [-1, SPH_ICO_T, 0], [1, SPH_ICO_T, 0], [-1, -SPH_ICO_T, 0], [1, -SPH_ICO_T, 0],
+  [0, -1, SPH_ICO_T], [0, 1, SPH_ICO_T], [0, -1, -SPH_ICO_T], [0, 1, -SPH_ICO_T],
+  [SPH_ICO_T, 0, -1], [SPH_ICO_T, 0, 1], [-SPH_ICO_T, 0, -1], [-SPH_ICO_T, 0, 1],
+].map(sphNormalize);
+const SPH_ICO_FACES = [
+  [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+  [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+  [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+  [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+];
+function sphRenderFacets(cxN, cyN, rN, M) {
+  const tones = sphTones();
+  const faces = SPH_ICO_FACES.map((f) => {
+    const verts = f.map((i) => sphApplyMat(M, SPH_ICO_VERTS[i]));
+    const normal = sphNormalize([
+      verts[0][0] + verts[1][0] + verts[2][0],
+      verts[0][1] + verts[1][1] + verts[2][1],
+      verts[0][2] + verts[1][2] + verts[2][2],
+    ]);
+    return { verts, normal, avgZ: (verts[0][2] + verts[1][2] + verts[2][2]) / 3 };
+  }).sort((a, b) => a.avgZ - b.avgZ);
+  for (const f of faces) {
+    const s = clamp(sphDot(f.normal, SPH_LIGHT) * 0.5 + 0.5, 0, 1);
+    const band = clamp(Math.floor((1 - s) * tones.length), 0, tones.length - 1);
+    const [r, g, b] = tones[band];
+    ctx.beginPath();
+    ctx.moveTo((cxN + f.verts[0][0] * rN) * S, (cyN + f.verts[0][1] * rN) * S);
+    ctx.lineTo((cxN + f.verts[1][0] * rN) * S, (cyN + f.verts[1][1] * rN) * S);
+    ctx.lineTo((cxN + f.verts[2][0] * rN) * S, (cyN + f.verts[2][1] * rN) * S);
+    ctx.closePath();
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fill();
+  }
+}
+
+function sphRenderMarks(cxN, cyN, rN, M, points, markFn, isFont) {
+  ctx.beginPath(); ctx.arc(cxN * S, cyN * S, rN * S, 0, SPH_TAU); ctx.fillStyle = paper(1); ctx.fill();
+  if (isFont) { ctx.font = `${Math.max(7, Math.round(rN * S * 0.09))}px 'DM Mono', ui-monospace, monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; }
+  for (const p of points) {
+    const v = sphApplyMat(M, p);
+    if (v[2] <= 0.02) continue;
+    const s = clamp(sphDot(v, SPH_LIGHT) * 0.5 + 0.5, 0, 1);
+    markFn((cxN + v[0] * rN) * S, (cyN + v[1] * rN) * S, s, p[3], rN * S);
+  }
+}
+function sphMarkDot(x, y, s, rand, rPx) {
+  const rad = rPx * (0.0036 + Math.pow(s, 0.55) * 0.026);
+  ctx.beginPath(); ctx.arc(x, y, rad, 0, SPH_TAU); ctx.fillStyle = ink(1); ctx.fill();
+}
+function sphMarkFreckle(x, y, s, rand, rPx) {
+  const prob = Math.pow(1 - s, 0.85) * 0.85 + 0.04;
+  if (rand > prob) return;
+  ctx.beginPath(); ctx.arc(x, y, rPx * (0.003 + rand * 0.006), 0, SPH_TAU); ctx.fillStyle = ink(1); ctx.fill();
+}
+function sphMarkLetter(x, y, s, rand) {
+  const prob = Math.pow(1 - s, 1.1) * 0.95 + 0.03;
+  if (rand > prob) return;
+  ctx.fillStyle = ink(1);
+  ctx.fillText('Р', x, y);
+}
+
+const BELL_TEXTURES = [
+  { type: 'field', fn: sphPatLatitude, label: 'широты' },
+  { type: 'field', fn: sphPatGores, label: 'дольки' },
+  { type: 'field', fn: sphPatSpiral, label: 'спираль' },
+  { type: 'field', fn: sphPatCheckerboard, label: 'шахматка' },
+  { type: 'wire', label: 'сетка' },
+  { type: 'facets', label: 'гранёный кристалл' },
+  { type: 'marks', points: SPH_DOTS_DENSE, mark: sphMarkDot, label: 'полутон точками' },
+  { type: 'marks', points: SPH_DOTS_STIPPLE, mark: sphMarkFreckle, label: 'веснушки' },
+  { type: 'marks', points: SPH_DOTS_SPARSE, mark: sphMarkLetter, font: true, label: 'Р-марка' },
+];
+
+/* ---------- звонок: ствол-хлыст отскакивает и бьёт по шарику — шарик настоящая вращаемая сфера ---------- */
 
 let bellAudioCtx = null;
 
@@ -790,11 +993,11 @@ function bellBeep(strength) {
 const BELL_BASE_X = 0.42;
 const BELL_BASE_Y = 0.86;
 const BELL_TOP_Y = 0.32;
-const BELL_MAX_BEND = 0.22;
+const BELL_MAX_BEND = 0.26;
 const BELL_K = 60;
 const BELL_C = 2.2;
-const BELL_BALL_OFFSET = 0.09;
-const BELL_BALL_RADIUS = 0.046;
+const BELL_BALL_OFFSET = 0.26;
+const BELL_BALL_RADIUS = 0.14;
 const BELL_HIT_COOLDOWN = 0.18;
 
 function bellSetup() {
@@ -806,6 +1009,30 @@ function bellSetup() {
   modeState.cooldown = 0;
   modeState.elapsed = 0;
   modeState.prevTipX = BELL_BASE_X;
+  modeState.texIndex = 0;
+  modeState.sphM = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  modeState.sphYawVel = 0.004;
+  modeState.sphPitchVel = 0;
+  modeState.sphDragging = false;
+  modeState.sphPrevX = 0;
+  modeState.sphPrevY = 0;
+}
+
+function bellBallX() { return BELL_BASE_X + BELL_BALL_OFFSET; }
+
+function bellStepSphere() {
+  if (modeState.sphDragging) {
+    const dx = pointer.x - modeState.sphPrevX, dy = pointer.y - modeState.sphPrevY;
+    modeState.sphPrevX = pointer.x; modeState.sphPrevY = pointer.y;
+    const ky = dx * 3.2, kx = -dy * 3.2;
+    modeState.sphM = sphMatMul(sphRotX(kx), sphMatMul(sphRotY(ky), modeState.sphM));
+    modeState.sphYawVel = ky; modeState.sphPitchVel = kx;
+  } else {
+    modeState.sphM = sphMatMul(sphRotX(modeState.sphPitchVel), sphMatMul(sphRotY(modeState.sphYawVel), modeState.sphM));
+    modeState.sphYawVel *= 0.96;
+    modeState.sphPitchVel *= 0.96;
+    if (Math.abs(modeState.sphYawVel) < 0.004) modeState.sphYawVel += (0.004 - modeState.sphYawVel) * 0.02;
+  }
 }
 
 function bellStep() {
@@ -820,12 +1047,13 @@ function bellStep() {
   modeState.cooldown = Math.max(0, modeState.cooldown - STEP);
 
   const tipX = BELL_BASE_X + modeState.bendX;
-  const hitX = BELL_BASE_X + BELL_BALL_OFFSET - BELL_BALL_RADIUS;
+  const hitX = bellBallX() - BELL_BALL_RADIUS;
   if (!modeState.dragging && modeState.cooldown <= 0
       && modeState.prevTipX < hitX && tipX >= hitX && modeState.bendVel > 0.3) {
     const strength = clamp(modeState.bendVel * 0.6, 0.2, 1);
     modeState.wobble = Math.min(1.4, modeState.wobble + strength);
     modeState.rings.push({ born: modeState.elapsed, strength });
+    modeState.texIndex = (modeState.texIndex + 1) % BELL_TEXTURES.length;
     bellBeep(strength);
     modeState.cooldown = BELL_HIT_COOLDOWN;
     modeState.bendVel *= -0.35;
@@ -834,6 +1062,7 @@ function bellStep() {
   modeState.wobble *= 0.9;
   modeState.elapsed += STEP;
   modeState.rings = modeState.rings.filter((r) => modeState.elapsed - r.born < 0.6);
+  bellStepSphere();
 }
 
 function bellDraw() {
@@ -848,12 +1077,18 @@ function bellDraw() {
   ctx.quadraticCurveTo(midX * S, midY * S, tipX * S, BELL_TOP_Y * S);
   ctx.stroke();
 
-  const ballX = BELL_BASE_X + BELL_BALL_OFFSET;
-  const ballR = BELL_BALL_RADIUS * (1 + modeState.wobble * 0.25);
+  const ballX = bellBallX();
+  const ballR = BELL_BALL_RADIUS * (1 + modeState.wobble * 0.06);
+  const tex = BELL_TEXTURES[modeState.texIndex];
+  if (tex.type === 'field') sphRenderField(ballX, BELL_TOP_Y, ballR, modeState.sphM, tex.fn);
+  else if (tex.type === 'wire') sphRenderWireframe(ballX, BELL_TOP_Y, ballR, modeState.sphM);
+  else if (tex.type === 'facets') sphRenderFacets(ballX, BELL_TOP_Y, ballR, modeState.sphM);
+  else if (tex.type === 'marks') sphRenderMarks(ballX, BELL_TOP_Y, ballR, modeState.sphM, tex.points, tex.mark, tex.font);
   ctx.beginPath();
   ctx.arc(ballX * S, BELL_TOP_Y * S, ballR * S, 0, Math.PI * 2);
-  ctx.fillStyle = ink(0.92);
-  ctx.fill();
+  ctx.strokeStyle = ink(0.85);
+  ctx.lineWidth = Math.max(1, 0.0026 * S);
+  ctx.stroke();
 
   for (const r of modeState.rings) {
     const t = (modeState.elapsed - r.born) / 0.6;
@@ -864,7 +1099,7 @@ function bellDraw() {
     ctx.stroke();
   }
 
-  drawStatus('оттяните верхушку в сторону и отпустите — она бьёт по шарику');
+  drawStatus(`${BELL_TEXTURES[modeState.texIndex].label} · крутите шарик или качните палку`);
 }
 
 /* ---------- флаг-старт: падение флага запускает реакцию, ранний клик — фальстарт ---------- */
@@ -1154,17 +1389,23 @@ const MODES = {
   },
   bell: {
     label: 'звонок',
-    note: 'Ствол — не жёсткий, а гнущийся хлыст. Оттяните верхушку в сторону мышью и отпустите: она пружинит назад, проскакивает через состояние покоя и на всём ходу бьёт по шарику — тот вздрагивает, пускает кольца и звенит (нужен звук в браузере). Чем сильнее оттянуть, тем звонче удар.',
+    note: 'Шарик — настоящая вращаемая сфера (перенесена с полигона lab/r-spheres.html): схватите его и покрутите в любую сторону, ничего не сбросится. Ствол — не жёсткий, а гнущийся хлыст: оттяните его верхушку в сторону и отпустите, она пружинит назад и на всём ходу бьёт по шарику — тот вздрагивает, пускает кольца, звенит (нужен звук в браузере) и переключается на следующую текстуру из перенесённого набора: широты, дольки, спираль, шахматка, сетка, гранёный кристалл, полутон точками, веснушки, Р-марка.',
     cursor: 'grab',
     tools: [],
     setup() { bellSetup(); },
     step() { bellStep(); },
     draw() { bellDraw(); },
     onDown() {
+      const ballX = bellBallX();
+      if (Math.hypot(pointer.x - ballX, pointer.y - BELL_TOP_Y) < BELL_BALL_RADIUS) {
+        modeState.sphDragging = true;
+        modeState.sphPrevX = pointer.x; modeState.sphPrevY = pointer.y;
+        return;
+      }
       const tipX = BELL_BASE_X + modeState.bendX;
       if (Math.hypot(pointer.x - tipX, pointer.y - BELL_TOP_Y) < 0.09) modeState.dragging = true;
     },
-    onUp() { modeState.dragging = false; },
+    onUp() { modeState.dragging = false; modeState.sphDragging = false; },
   },
   flag: {
     label: 'флаг-старт',
