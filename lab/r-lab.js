@@ -1096,9 +1096,14 @@ function bellDraw() {
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(BELL_BASE_X * S, BELL_BASE_Y * S);
-  const midX = (BELL_BASE_X + tipX) / 2 + modeState.bendX * 0.15;
-  const midY = (BELL_BASE_Y + tipY) / 2;
-  ctx.quadraticCurveTo(midX * S, midY * S, tipX * S, tipY * S);
+  /* Контрольная точка ровно на середине хорды даёт математически прямую
+     линию — квадратичная кривая так вырождается, никакого изгиба не видно.
+     Настоящий гибкий стержень заделан в основании: у низа он держит
+     исходное (недеформированное) направление, гнётся только верх. Поэтому
+     контрольная точка — не середина текущего пути, а сама точка покоя
+     (BELL_BASE_X, BELL_TOP_Y): от неё кривая у основания идёт как
+     недеформированный ствол, а к смещённой верхушке подходит уже изогнутой. */
+  ctx.quadraticCurveTo(BELL_BASE_X * S, BELL_TOP_Y * S, tipX * S, tipY * S);
   ctx.stroke();
 
   const ballR = BELL_BALL_RADIUS * (1 + modeState.wobble * 0.06);
