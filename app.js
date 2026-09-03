@@ -15,6 +15,7 @@ import { mountM } from './letters/m.js?v=12';
 import { mountN } from './letters/n.js?v=1';
 import { mountO } from './letters/o.js?v=4';
 import { mountP } from './letters/p.js?v=1';
+import { mountR } from './letters/r.js?v=1';
 import { mountYa } from './letters/ya.js?v=20';
 import { mountCredit } from './wall.js?v=12';
 
@@ -47,6 +48,7 @@ const READY = new Map([
   ['Н', mountN],
   ['О', mountO],
   ['П', mountP],
+  ['Р', mountR],
   ['Я', mountYa]
 ]);
 
