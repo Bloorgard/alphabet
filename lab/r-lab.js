@@ -998,7 +998,7 @@ function bellBeep(strength) {
    а не копирует референс дословно. */
 const BELL_BASE_X = 0.30;
 const BELL_BASE_Y = 0.85;
-const BELL_TOP_Y = 0.34;
+const BELL_TOP_Y = 0.24;
 const BELL_MAX_BEND = 0.26;
 const BELL_K = 60;
 const BELL_C = 2.2;
