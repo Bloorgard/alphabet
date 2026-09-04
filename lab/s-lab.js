@@ -67,6 +67,7 @@ const PORTAL_WARN_ALIVE = PORTAL_MIN_ALIVE + 3;
 const PORTAL_GAP_EASE = 0.1;
 const PORTAL_FLASH_DECAY = 0.45;
 const PORTAL_TIP_SPAN = 15 * Math.PI / 180;
+const PORTAL_RING_MARGIN = 0.006;
 
 function portalSpawnBall() {
   const speed = num('speed');
@@ -178,19 +179,24 @@ function portalDraw() {
      растёт непрерывно, а не щёлкает переключателем. */
   const risk = modeState.over ? 0
     : clamp((PORTAL_WARN_ALIVE - alive) / (PORTAL_WARN_ALIVE - PORTAL_MIN_ALIVE), 0, 1);
+  /* Риск без полупрозрачности: не тускнеет и не ярчает альфой, а мигает —
+     появляется и пропадает целиком, чаще с ростом риска. Оба конца шкалы
+     видны одинаково чётко, меняется только темп. */
   const pulseFreq = 3 + risk * 7;
-  const ringAlpha = risk > 0 ? risk * 0.5 + risk * 0.35 * Math.sin(modeState.pulse * pulseFreq) : 0;
+  const blinkOn = risk > 0.02 && Math.sin(modeState.pulse * pulseFreq) > 0;
 
   for (const b of modeState.balls) {
     if (b.escaping) { dot(b.x, b.y, RED, ballR); continue; }
-    dot(b.x, b.y, ink(0.8), ballR);
+    dot(b.x, b.y, INK, ballR);
     /* Живой, но на грани — не перекрашиваем саму точку (это значило бы
-       «потерян», как у вылетевших), а обводим тонким пульсирующим красным
-       кольцом: тот же акцент, другой рисунок, значение не путается. */
-    if (risk > 0.02) {
+       «потерян», как у вылетевших), а обводим тонким мигающим красным
+       кольцом: тот же акцент, другой рисунок, значение не путается.
+       Отступ кольца от шарика — фиксированный, не пропорция радиуса:
+       у крупного шарика кольцо и так заметно, лишний зазор только мешает. */
+    if (blinkOn) {
       ctx.beginPath();
-      ctx.arc(b.x * S, b.y * S, ballR * 2 * S, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(224,33,15,${ringAlpha})`;
+      ctx.arc(b.x * S, b.y * S, (ballR + PORTAL_RING_MARGIN) * S, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgb(224,33,15)';
       ctx.lineWidth = (0.004 + 0.003 * risk) * S;
       ctx.stroke();
     }
@@ -209,8 +215,8 @@ const portal = {
   note: 'Разрыв буквы — не инструмент игрока, а её изъян: он растёт сам, ровно и еле заметно, но не до конца — кусочек сплошной дуги остаётся навсегда. Держи разрыв в стороне от шариков, что вот-вот долетят до края, — A/D или стрелки крутят его, можно и тащить мышью/пальцем от центра. Настоящая цена ошибки не в фоновом росте: в момент, когда шарик проскочил, разрыв резко скачком расширяется, а оба его конца вспыхивают красным ровно там, где металл подался. Раунд обрывается, как только живых остаётся меньше трёх — с одним шариком защищаться уже не интересно, а вечно; по мере приближения к этому рубежу живые шарики обводит пульсирующее красное кольцо, и оно не мигает одинаково — чем меньше шариков, тем ярче и чаще, риск на четырёх и на трёх на глаз разный. Не спутать со сплошной заливкой у уже выбывших. Очки — не время до конца, а сумма времени, что каждый шарик провёл живым. C или «заново» — начать заново. «Рост» — фоновая скорость раскрытия, «скачок» — насколько резко разрыв расширяется при каждой потере, «шариков» и «скорость» — сколько их и как резво летают.',
   cursor: 'default',
   tools: [
-    { type: 'range', key: 'count', label: 'шариков', min: 5, max: 16, step: 1, value: 9 },
-    { type: 'range', key: 'speed', label: 'скорость', min: 0.15, max: 0.6, step: 0.02, value: 0.3 },
+    { type: 'range', key: 'count', label: 'шариков', min: 5, max: 16, step: 1, value: 12 },
+    { type: 'range', key: 'speed', label: 'скорость', min: 0.15, max: 0.6, step: 0.02, value: 0.5 },
     { type: 'range', key: 'growth', label: 'рост', min: 0.5, max: 6, step: 0.5, value: 1.5 },
     { type: 'range', key: 'jump', label: 'скачок', min: 4, max: 30, step: 1, value: 16 },
     { type: 'range', key: 'ballSize', label: 'шарик', min: 0.006, max: 0.03, step: 0.001, value: 0.013 },
