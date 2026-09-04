@@ -8,8 +8,6 @@ const RED = '#e0210f';
 const CX = 0.5;
 const CY = 0.52;
 const RADIUS = 0.34;
-const BALL_R = 0.013;
-const ARC_WIDTH = 0.02;
 const GAP_START = 24 * Math.PI / 180;
 const GAP_MAX = 350 * Math.PI / 180;
 const MIN_ALIVE = 3;
@@ -17,11 +15,19 @@ const WARN_ALIVE = MIN_ALIVE + 3;
 const GAP_EASE = 0.1;
 const FLASH_DECAY = 0.45;
 const TIP_SPAN = 15 * Math.PI / 180;
-const BALL_COUNT = 12;
-const BALL_SPEED = 0.5;
-const GROWTH_RATE = 1.5;
-const JUMP_DEG = 16;
 const ROT_SPEED = 150 * Math.PI / 180;
+
+/* Честные значения на рекорд — теми же цифрами, что подобраны в полигоне.
+   В песочнице их можно крутить, но тогда счёт никуда не идёт: иначе
+   занизить себе сложность и выбить рекорд не глядя было бы тривиально. */
+const GAME_PARAMS = {
+  count: 12,
+  speed: 0.5,
+  growth: 1.5,
+  jump: 16,
+  ballSize: 0.013,
+  thickness: 0.02,
+};
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -37,7 +43,8 @@ export function mountS(workspace) {
   workspace.dataset.ground = 'paper';
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
-  const state = {};
+  const params = { ...GAME_PARAMS };
+  const state = { play: true };
   const pointer = { x: 0.5, y: 0.5, down: false };
   let W = 1;
   let H = 1;
@@ -74,8 +81,8 @@ export function mountS(workspace) {
     state.balls.push({
       x: CX + Math.cos(angle) * r,
       y: CY + Math.sin(angle) * r,
-      vx: (Math.random() - 0.5) * BALL_SPEED,
-      vy: (Math.random() - 0.5) * BALL_SPEED,
+      vx: (Math.random() - 0.5) * params.speed,
+      vy: (Math.random() - 0.5) * params.speed,
       escaping: false,
     });
   }
@@ -83,6 +90,7 @@ export function mountS(workspace) {
   function alive() { return state.balls.filter((b) => !b.escaping).length; }
 
   function reset() {
+    if (state.play) Object.assign(params, GAME_PARAMS);
     state.rotation = 0;
     state.time = 0;
     state.gap = GAP_START;
@@ -94,7 +102,7 @@ export function mountS(workspace) {
     state.turnLeft = false;
     state.turnRight = false;
     state.balls = [];
-    for (let i = 0; i < BALL_COUNT; i++) spawnBall();
+    for (let i = 0; i < Math.round(params.count); i++) spawnBall();
     sent = false;
   }
 
@@ -110,32 +118,33 @@ export function mountS(workspace) {
 
     if (!state.over) {
       state.time += STEP;
-      state.gapTarget = Math.min(GAP_MAX, state.gapTarget + GROWTH_RATE * Math.PI / 180 * STEP);
+      state.gapTarget = Math.min(GAP_MAX, state.gapTarget + params.growth * Math.PI / 180 * STEP);
       state.score += alive() * STEP;
     }
     /* Видимый разрыв гонится за целью быстро, но не мгновенно — скачок при
        потере получает тело движения, а не телепорт, и читается как рывок. */
     state.gap += (state.gapTarget - state.gap) * Math.min(1, STEP / GAP_EASE);
 
+    const ballR = params.ballSize;
     for (const b of state.balls) {
       b.x += b.vx * STEP;
       b.y += b.vy * STEP;
       if (b.escaping) continue;
       const dx = b.x - CX, dy = b.y - CY;
       const dist = Math.hypot(dx, dy);
-      if (dist + BALL_R < RADIUS) continue;
+      if (dist + ballR < RADIUS) continue;
       const angle = Math.atan2(dy, dx);
       if (angleInGap(angle, state.rotation, state.gap)) {
         b.escaping = true;
         state.flash = 1;
-        state.gapTarget = Math.min(GAP_MAX, state.gapTarget + JUMP_DEG * Math.PI / 180);
+        state.gapTarget = Math.min(GAP_MAX, state.gapTarget + params.jump * Math.PI / 180);
         continue;
       }
       const nx = dx / dist, ny = dy / dist;
       const along = b.vx * nx + b.vy * ny;
       b.vx -= 2 * along * nx;
       b.vy -= 2 * along * ny;
-      const clampDist = RADIUS - BALL_R;
+      const clampDist = RADIUS - ballR;
       b.x = CX + nx * clampDist;
       b.y = CY + ny * clampDist;
     }
@@ -149,7 +158,7 @@ export function mountS(workspace) {
          одним из них. Красим всех разом в момент обрыва, а не ждём, пока
          каждый по очереди случайно наткнётся на разрыв сам. */
       for (const b of state.balls) b.escaping = true;
-      if (!sent) { sent = true; reportScore('С', Math.round(state.score)); }
+      if (state.play && !sent) { sent = true; reportScore('С', Math.round(state.score)); }
     }
   }
 
@@ -172,12 +181,12 @@ export function mountS(workspace) {
 
   /* Не вся дуга — только оба её конца, там, где металл только что подался.
      Красная краска держится за место события, а не расходится по форме. */
-  function drawTips(alpha) {
+  function drawTips(alpha, width) {
     if (alpha <= 0.01) return;
     const tipA = state.rotation + state.gap / 2;
     const tipB = state.rotation - state.gap / 2 + Math.PI * 2;
     ctx.strokeStyle = `rgba(224,33,15,${alpha})`;
-    ctx.lineWidth = (ARC_WIDTH + 0.012 * alpha) * S;
+    ctx.lineWidth = (width + 0.012 * alpha) * S;
     ctx.lineCap = 'butt';
     ctx.beginPath();
     ctx.arc(ox + CX * S, oy + CY * S, RADIUS * S, tipA, tipA + TIP_SPAN);
@@ -193,33 +202,35 @@ export function mountS(workspace) {
     ctx.fillStyle = PAPER;
     ctx.fillRect(ox, oy, S, S);
 
+    const ballR = params.ballSize;
     const aliveNow = alive();
     const risk = state.over ? 0 : clamp((WARN_ALIVE - aliveNow) / (WARN_ALIVE - MIN_ALIVE), 0, 1);
     const pulseFreq = 3 + risk * 7;
     const blinkOn = risk > 0.02 && Math.sin(state.pulse * pulseFreq) > 0;
 
     for (const b of state.balls) {
-      if (b.escaping) { dot(b.x, b.y, RED, BALL_R); continue; }
-      dot(b.x, b.y, INK, BALL_R);
+      if (b.escaping) { dot(b.x, b.y, RED, ballR); continue; }
+      dot(b.x, b.y, INK, ballR);
       /* Живой, но на грани — не перекрашиваем саму точку (значило бы
          «потерян», как у вылетевших), а обводим тонким мигающим красным
          кольцом: тот же акцент, другой рисунок. Зазор равен толщине кольца. */
       if (blinkOn) {
         const ringWidth = 0.004 + 0.003 * risk;
         ctx.beginPath();
-        ctx.arc(ox + b.x * S, oy + b.y * S, (BALL_R + ringWidth * 1.5) * S, 0, Math.PI * 2);
+        ctx.arc(ox + b.x * S, oy + b.y * S, (ballR + ringWidth * 1.5) * S, 0, Math.PI * 2);
         ctx.strokeStyle = 'rgb(224,33,15)';
         ctx.lineWidth = ringWidth * S;
         ctx.stroke();
       }
     }
-    drawArc(ARC_WIDTH, INK, state.gap, 'butt');
-    drawTips(state.flash * state.flash);
+    drawArc(params.thickness, INK, state.gap, 'butt');
+    drawTips(state.flash * state.flash, params.thickness);
 
     ctx.fillStyle = state.over ? RED : INK;
     ctx.font = `${Math.round(S * 0.022)}px 'DM Mono', monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText(String(Math.round(state.score)), ox + S * 0.5, oy + S * 0.06);
+    const score = Math.round(state.score);
+    ctx.fillText(state.play ? String(score) : `песочница · ${score}`, ox + S * 0.5, oy + S * 0.06);
     if (state.over) {
       ctx.font = `${Math.round(S * 0.02)}px 'DM Mono', monospace`;
       ctx.fillText('клик — заново', ox + S * 0.5, oy + S * 0.94);
@@ -246,35 +257,99 @@ export function mountS(workspace) {
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = 'уводи разрыв от шариков · тяни пальцем или A/D';
 
-  const panel = document.createElement('div');
-  panel.className = 'sketch-panel';
-  panel.dataset.letterLayer = '';
-  panel.hidden = true;
-  const again = document.createElement('button');
-  again.type = 'button';
-  again.className = 'sketch-action';
-  again.textContent = 'заново';
-  again.addEventListener('click', reset);
-  panel.append(again);
+  function buildControls() {
+    const panel = document.createElement('div');
+    panel.className = 'sketch-panel';
+    panel.dataset.letterLayer = '';
+    panel.hidden = true;
+    const modes = document.createElement('div');
+    modes.className = 'sketch-modes';
+    const note = document.createElement('p');
+    panel.append(modes, note);
+    const knobs = [];
 
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'sketch-toggle';
-  toggle.dataset.letterLayer = '';
-  toggle.textContent = 'параметры (tab)';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.addEventListener('click', () => {
-    panel.hidden = !panel.hidden;
-    toggle.setAttribute('aria-expanded', String(!panel.hidden));
-  });
+    function modeButton(label, play) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'sketch-mode';
+      button.textContent = label;
+      button.addEventListener('click', () => {
+        if (state.play === play) return;
+        state.play = play;
+        reset();
+        sync();
+      });
+      modes.append(button);
+      return button;
+    }
+
+    const playButton = modeButton('на рекорд', true);
+    const sandboxButton = modeButton('песочница', false);
+    for (const [key, label, min, max, step] of [
+      ['count', 'шариков', 5, 16, 1],
+      ['speed', 'скорость', 0.15, 0.6, 0.02],
+      ['growth', 'рост', 0.5, 6, 0.5],
+      ['jump', 'скачок', 4, 30, 1],
+      ['ballSize', 'шарик', 0.006, 0.03, 0.001],
+      ['thickness', 'толщина', 0.006, 0.045, 0.001],
+    ]) {
+      const field = document.createElement('label');
+      field.textContent = label;
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = min;
+      input.max = max;
+      input.step = step;
+      input.value = params[key];
+      input.addEventListener('input', () => { params[key] = Number(input.value); });
+      field.append(input);
+      panel.append(field);
+      knobs.push({ key, input });
+    }
+    const again = document.createElement('button');
+    again.type = 'button';
+    again.className = 'sketch-action';
+    again.textContent = 'заново';
+    again.addEventListener('click', reset);
+    panel.append(again);
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'sketch-toggle';
+    toggle.dataset.letterLayer = '';
+    toggle.textContent = 'параметры (tab)';
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.addEventListener('click', () => {
+      panel.hidden = !panel.hidden;
+      toggle.setAttribute('aria-expanded', String(!panel.hidden));
+    });
+
+    function sync() {
+      playButton.setAttribute('aria-pressed', String(state.play));
+      sandboxButton.setAttribute('aria-pressed', String(!state.play));
+      note.textContent = state.play
+        ? 'результат идёт в общий счёт'
+        : 'разрыв открыт для правки, результат не в зачёт';
+      hint.textContent = state.play
+        ? 'уводи разрыв от шариков · тяни пальцем или A/D'
+        : 'уводи разрыв от шариков · песочница';
+      for (const knob of knobs) {
+        knob.input.disabled = state.play;
+        knob.input.value = params[knob.key];
+      }
+    }
+
+    return { panel, toggle, sync };
+  }
+
+  const controls = buildControls();
 
   function onKeyDown(event) {
     if (event.target instanceof Element && event.target.closest('input, textarea, select')) return;
     if (event.key === 'Tab') {
       event.preventDefault();
-      toggle.click();
+      controls.toggle.click();
       return;
     }
     if (event.code === 'KeyA' || event.code === 'ArrowLeft') state.turnLeft = true;
@@ -299,7 +374,7 @@ export function mountS(workspace) {
 
   const observer = new ResizeObserver(resize);
   observer.observe(workspace);
-  workspace.append(hint, panel, toggle);
+  workspace.append(hint, controls.panel, controls.toggle);
   canvas.addEventListener('pointerdown', onDown);
   canvas.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
@@ -307,6 +382,7 @@ export function mountS(workspace) {
   document.addEventListener('keyup', onKeyUp);
   resize();
   reset();
+  controls.sync();
   frameId = requestAnimationFrame(frame);
 
   return () => {
@@ -318,8 +394,8 @@ export function mountS(workspace) {
     document.removeEventListener('keydown', onKeyDown);
     document.removeEventListener('keyup', onKeyUp);
     hint.remove();
-    panel.remove();
-    toggle.remove();
+    controls.panel.remove();
+    controls.toggle.remove();
     delete workspace.dataset.ground;
     canvas.style.cursor = '';
     ctx.clearRect(0, 0, W, H);

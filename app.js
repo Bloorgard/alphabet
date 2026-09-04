@@ -16,7 +16,7 @@ import { mountN } from './letters/n.js?v=1';
 import { mountO } from './letters/o.js?v=4';
 import { mountP } from './letters/p.js?v=1';
 import { mountR } from './letters/r.js?v=3';
-import { mountS } from './letters/s.js?v=1';
+import { mountS } from './letters/s.js?v=2';
 import { mountYa } from './letters/ya.js?v=20';
 import { mountCredit } from './wall.js?v=12';
 
