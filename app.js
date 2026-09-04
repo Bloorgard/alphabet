@@ -17,7 +17,7 @@ import { mountO } from './letters/o.js?v=5';
 import { mountP } from './letters/p.js?v=1';
 import { mountR } from './letters/r.js?v=3';
 import { mountS } from './letters/s.js?v=5';
-import { mountYa } from './letters/ya.js?v=20';
+import { mountYa } from './letters/ya.js?v=21';
 import { mountCredit } from './wall.js?v=12';
 
 const LETTERS = [

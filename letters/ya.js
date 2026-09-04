@@ -65,6 +65,7 @@ export function mountYa(workspace) {
   const count = document.createElement('p');
   count.className = 'ya-count';
   count.dataset.letterLayer = '';
+  count.innerHTML = '<span id="ya-count-text"></span> <button type="button" id="ya-guide" aria-pressed="false">(контур)</button>';
 
   const rules = document.createElement('details');
   rules.className = 'ya-rules';
@@ -72,8 +73,9 @@ export function mountYa(workspace) {
   rules.innerHTML = `
     <summary>правила</summary>
     <p>Клетка достаётся за игру: за личный рекорд в букве и за подъём
-    в десятке. В день ставится не больше пяти. Ставить можно куда угодно —
-    контур только подсказывает. 18 сентября Я выйдет такой, какой вы её
+    в десятке. В день ставится не больше пяти. Ставить можно куда угодно:
+    контур намечен и дальше буква растёт по своим правилам, а подсказку
+    можно включить под холстом. 18 сентября Я выйдет такой, какой вы её
     нарисуете.</p>
   `;
 
@@ -91,6 +93,8 @@ export function mountYa(workspace) {
   const me = panel.querySelector('#ya-me');
   const meName = panel.querySelector('#ya-me-name');
   const meChange = panel.querySelector('#ya-me-change');
+  const countText = count.querySelector('#ya-count-text');
+  const guideButton = count.querySelector('#ya-guide');
 
   let state = null;
   let size = 0;
@@ -100,6 +104,9 @@ export function mountYa(workspace) {
   let renaming = false;
   let opened = null;    // буква, чью десятку сейчас смотрят
   let spotlight = null; // имя, чьи клетки подсвечены
+  /* Контур по умолчанию погашен: буква уже намечена людьми и дальше растёт
+     по своим правилам — подсказка нужна тому, кто её сам попросит. */
+  let guide = false;
 
   function grid() {
     return GRID * (2 ** (state?.level || 0));
@@ -152,7 +159,7 @@ export function mountYa(workspace) {
     ctx.strokeRect(left - 8.5, top - 8.5, side + 17, side + 17);
 
     /* Канва — только на нулевом уровне: дальше буква уже набрана людьми. */
-    if (!state.level) {
+    if (guide && !state.level) {
       ctx.fillStyle = 'rgba(22, 22, 22, .16)';
       for (const index of EDGE) {
         ctx.fillRect(left + (index % GRID) * step, top + Math.floor(index / GRID) * step, step - gap, step - gap);
@@ -180,9 +187,11 @@ export function mountYa(workspace) {
       ctx.strokeRect(left + cell.x * step, top + cell.y * step, step, step);
     }
 
-    count.textContent = mine
+    countText.textContent = mine
       ? `${state.marks.length}/${YA_AREA} · ${plural(mine, ['твоя', 'твои', 'твоих'])} ${mine}`
       : `${state.marks.length}/${YA_AREA}`;
+    /* На втором уровне канвы нет вовсе — и кнопке там делать нечего. */
+    guideButton.hidden = Boolean(state.level);
   }
 
   /* Одна фраза про клетку: кто занял и когда, или что она свободна.
@@ -369,6 +378,12 @@ export function mountYa(workspace) {
     render();
   };
 
+  const onGuide = () => {
+    guide = !guide;
+    guideButton.setAttribute('aria-pressed', String(guide));
+    draw();
+  };
+
   const onResize = () => draw();
 
   canvas.addEventListener('pointermove', onMove);
@@ -377,6 +392,7 @@ export function mountYa(workspace) {
   nameForm.addEventListener('submit', onName);
   nameInput.addEventListener('keydown', onKey);
   meChange.addEventListener('click', onRename);
+  guideButton.addEventListener('click', onGuide);
   leaders.addEventListener('click', onLeaders);
   leadersTitle.addEventListener('click', onLeaders);
   leaders.addEventListener('pointerover', onLeaderHover);
@@ -394,6 +410,7 @@ export function mountYa(workspace) {
     nameForm.removeEventListener('submit', onName);
     nameInput.removeEventListener('keydown', onKey);
     meChange.removeEventListener('click', onRename);
+    guideButton.removeEventListener('click', onGuide);
     leaders.removeEventListener('click', onLeaders);
     leadersTitle.removeEventListener('click', onLeaders);
     leaders.removeEventListener('pointerover', onLeaderHover);

@@ -196,6 +196,12 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .letter-workspace[data-ground="paper"] .wall-credit[data-game="true"] { color: rgba(22, 22, 22, .62); }
 
 .ya-count { position: absolute; top: 73%; left: 6%; margin: 0; color: rgba(22, 22, 22, .55); }
+/* Включатель контура: подчёркнуто действие, а не строка. Нажат — идёт
+   чернилами, как всё включённое в проекте. */
+.ya-count button { border: 0; padding: 0; background: none; color: rgba(22, 22, 22, .38); font: inherit; text-transform: uppercase; letter-spacing: .08em; text-decoration: underline; text-underline-offset: 3px; }
+.ya-count button:hover { color: rgba(22, 22, 22, .7); }
+.ya-count button[aria-pressed="true"] { color: var(--ink); }
+.ya-count button[hidden] { display: none; }
 .ya-rules { position: absolute; left: 6%; bottom: 7%; width: 56%; color: rgba(22, 22, 22, .38); }
 .ya-rules summary { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .ya-rules p { margin: 10px 0 0; line-height: 1.5; letter-spacing: .02em; text-transform: none; }
