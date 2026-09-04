@@ -79,6 +79,12 @@ export function mountYa(workspace) {
     нарисуете.</p>
   `;
 
+  /* На широком экране правила открыты сразу: место под холстом всё равно
+     пустует, а прочесть их стоит до первой клетки. На узком сцена листается,
+     и раскрытый текст отодвигал бы всё остальное — там правила ждут нажатия.
+     Граница та же, что у раскладки в styles.css. */
+  rules.open = window.matchMedia('(min-width: 561px)').matches;
+
   workspace.append(panel, count, rules);
 
   const leaders = panel.querySelector('#ya-leaders');
