@@ -28,12 +28,12 @@ function angleDiff(a, b) {
 }
 
 /* Дуга — окружность без сектора gapWidth, отцентрованного на rotation. */
-function drawCShape(cx, cy, r, rotation, width, color, gapWidth = C_GAP) {
+function drawCShape(cx, cy, r, rotation, width, color, gapWidth = C_GAP, cap = 'round') {
   ctx.beginPath();
   ctx.arc(cx * S, cy * S, r * S, rotation + gapWidth / 2, rotation - gapWidth / 2 + Math.PI * 2);
   ctx.strokeStyle = color;
   ctx.lineWidth = width * S;
-  ctx.lineCap = 'round';
+  ctx.lineCap = cap;
   ctx.stroke();
 }
 
@@ -56,7 +56,7 @@ function drawCShape(cx, cy, r, rotation, width, color, gapWidth = C_GAP) {
    копиться. */
 
 const PORTAL_RADIUS = 0.34;
-const PORTAL_BALL_R = 0.013;
+function portalBallR() { return num('ballSize'); }
 const PORTAL_GAP_START = 24 * Math.PI / 180;
 const PORTAL_GAP_MAX = 350 * Math.PI / 180;
 const PORTAL_MIN_ALIVE = 3;
@@ -119,13 +119,14 @@ function portalStep() {
      потере получает тело движения, а не телепорт, и читается как рывок. */
   modeState.gap += (modeState.gapTarget - modeState.gap) * Math.min(1, STEP / PORTAL_GAP_EASE);
 
+  const ballR = portalBallR();
   for (const b of modeState.balls) {
     b.x += b.vx * STEP;
     b.y += b.vy * STEP;
     if (b.escaping) continue;
     const dx = b.x - CX, dy = b.y - CY;
     const dist = Math.hypot(dx, dy);
-    if (dist + PORTAL_BALL_R < PORTAL_RADIUS) continue;
+    if (dist + ballR < PORTAL_RADIUS) continue;
     const angle = Math.atan2(dy, dx);
     if (angleInGap(angle, modeState.rotation, modeState.gap)) {
       b.escaping = true;
@@ -137,7 +138,7 @@ function portalStep() {
     const along = b.vx * nx + b.vy * ny;
     b.vx -= 2 * along * nx;
     b.vy -= 2 * along * ny;
-    const clampDist = PORTAL_RADIUS - PORTAL_BALL_R;
+    const clampDist = PORTAL_RADIUS - ballR;
     b.x = CX + nx * clampDist;
     b.y = CY + ny * clampDist;
   }
@@ -159,8 +160,8 @@ function portalDrawTips(alpha) {
   const tipA = modeState.rotation + modeState.gap / 2;
   const tipB = modeState.rotation - modeState.gap / 2 + Math.PI * 2;
   ctx.strokeStyle = `rgba(224,33,15,${alpha})`;
-  ctx.lineWidth = (0.02 + 0.012 * alpha) * S;
-  ctx.lineCap = 'round';
+  ctx.lineWidth = (num('thickness') + 0.012 * alpha) * S;
+  ctx.lineCap = 'butt';
   ctx.beginPath();
   ctx.arc(CX * S, CY * S, PORTAL_RADIUS * S, tipA, tipA + PORTAL_TIP_SPAN);
   ctx.stroke();
@@ -171,6 +172,7 @@ function portalDrawTips(alpha) {
 
 function portalDraw() {
   const alive = portalAlive();
+  const ballR = portalBallR();
   /* 0 у PORTAL_WARN_ALIVE и выше — кольца ещё не видно. 1 ровно у порога
      конца раунда — там уже любая потеря обрывает игру. Между ними риск
      растёт непрерывно, а не щёлкает переключателем. */
@@ -180,20 +182,20 @@ function portalDraw() {
   const ringAlpha = risk > 0 ? risk * 0.5 + risk * 0.35 * Math.sin(modeState.pulse * pulseFreq) : 0;
 
   for (const b of modeState.balls) {
-    if (b.escaping) { dot(b.x, b.y, RED, PORTAL_BALL_R); continue; }
-    dot(b.x, b.y, ink(0.8), PORTAL_BALL_R);
+    if (b.escaping) { dot(b.x, b.y, RED, ballR); continue; }
+    dot(b.x, b.y, ink(0.8), ballR);
     /* Живой, но на грани — не перекрашиваем саму точку (это значило бы
        «потерян», как у вылетевших), а обводим тонким пульсирующим красным
        кольцом: тот же акцент, другой рисунок, значение не путается. */
     if (risk > 0.02) {
       ctx.beginPath();
-      ctx.arc(b.x * S, b.y * S, PORTAL_BALL_R * 2 * S, 0, Math.PI * 2);
+      ctx.arc(b.x * S, b.y * S, ballR * 2 * S, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(224,33,15,${ringAlpha})`;
       ctx.lineWidth = (0.004 + 0.003 * risk) * S;
       ctx.stroke();
     }
   }
-  drawCShape(CX, CY, PORTAL_RADIUS, modeState.rotation, 0.02, INK, modeState.gap);
+  drawCShape(CX, CY, PORTAL_RADIUS, modeState.rotation, num('thickness'), INK, modeState.gap, 'butt');
   portalDrawTips(modeState.flash * modeState.flash);
   const score = modeState.score.toFixed(1);
   const status = modeState.over
@@ -211,6 +213,8 @@ const portal = {
     { type: 'range', key: 'speed', label: 'скорость', min: 0.15, max: 0.6, step: 0.02, value: 0.3 },
     { type: 'range', key: 'growth', label: 'рост', min: 0.5, max: 6, step: 0.5, value: 1.5 },
     { type: 'range', key: 'jump', label: 'скачок', min: 4, max: 30, step: 1, value: 16 },
+    { type: 'range', key: 'ballSize', label: 'шарик', min: 0.006, max: 0.03, step: 0.001, value: 0.013 },
+    { type: 'range', key: 'thickness', label: 'толщина', min: 0.006, max: 0.045, step: 0.001, value: 0.02 },
     { type: 'button', label: 'заново', action: portalReset },
   ],
   setup() { portalReset(); },
