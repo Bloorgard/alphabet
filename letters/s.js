@@ -22,7 +22,7 @@ const ROT_SPEED = 150 * Math.PI / 180;
    занизить себе сложность и выбить рекорд не глядя было бы тривиально. */
 const GAME_PARAMS = {
   count: 12,
-  speed: 0.5,
+  speed: 0.42,
   growth: 1.5,
   jump: 16,
   ballSize: 0.013,
@@ -44,7 +44,7 @@ export function mountS(workspace) {
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const params = { ...GAME_PARAMS };
-  const state = { play: true };
+  const state = { play: true, dark: false };
   const pointer = { x: 0.5, y: 0.5, down: false };
   let W = 1;
   let H = 1;
@@ -199,7 +199,9 @@ export function mountS(workspace) {
   function draw() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = PAPER;
+    const bg = state.dark ? INK : PAPER;
+    const fg = state.dark ? PAPER : INK;
+    ctx.fillStyle = bg;
     ctx.fillRect(ox, oy, S, S);
 
     const ballR = params.ballSize;
@@ -210,7 +212,7 @@ export function mountS(workspace) {
 
     for (const b of state.balls) {
       if (b.escaping) { dot(b.x, b.y, RED, ballR); continue; }
-      dot(b.x, b.y, INK, ballR);
+      dot(b.x, b.y, fg, ballR);
       /* Живой, но на грани — не перекрашиваем саму точку (значило бы
          «потерян», как у вылетевших), а обводим тонким мигающим красным
          кольцом: тот же акцент, другой рисунок. Зазор равен толщине кольца. */
@@ -223,10 +225,10 @@ export function mountS(workspace) {
         ctx.stroke();
       }
     }
-    drawArc(params.thickness, INK, state.gap, 'butt');
+    drawArc(params.thickness, fg, state.gap, 'butt');
     drawTips(state.flash * state.flash, params.thickness);
 
-    ctx.fillStyle = state.over ? RED : INK;
+    ctx.fillStyle = state.over ? RED : fg;
     ctx.font = `${Math.round(S * 0.022)}px 'DM Mono', monospace`;
     ctx.textAlign = 'center';
     const score = Math.round(state.score);
@@ -307,6 +309,19 @@ export function mountS(workspace) {
       panel.append(field);
       knobs.push({ key, input });
     }
+    const ground = document.createElement('button');
+    ground.type = 'button';
+    ground.className = 'sketch-switch';
+    ground.textContent = 'фон';
+    ground.setAttribute('aria-pressed', 'false');
+    ground.addEventListener('click', () => {
+      state.dark = !state.dark;
+      if (state.dark) delete workspace.dataset.ground;
+      else workspace.dataset.ground = 'paper';
+      ground.setAttribute('aria-pressed', String(state.dark));
+    });
+    panel.append(ground);
+
     const again = document.createElement('button');
     again.type = 'button';
     again.className = 'sketch-action';
@@ -332,8 +347,8 @@ export function mountS(workspace) {
         ? 'результат идёт в общий счёт'
         : 'разрыв открыт для правки, результат не в зачёт';
       hint.textContent = state.play
-        ? 'уводи разрыв от шариков · тяни пальцем или A/D'
-        : 'уводи разрыв от шариков · песочница';
+        ? 'уводи разрыв от шариков · тяни пальцем, A/D или стрелки · C — заново'
+        : 'уводи разрыв от шариков · песочница · C — заново';
       for (const knob of knobs) {
         knob.input.disabled = state.play;
         knob.input.value = params[knob.key];
@@ -354,6 +369,7 @@ export function mountS(workspace) {
     }
     if (event.code === 'KeyA' || event.code === 'ArrowLeft') state.turnLeft = true;
     if (event.code === 'KeyD' || event.code === 'ArrowRight') state.turnRight = true;
+    if (event.code === 'KeyC') reset();
   }
 
   function onKeyUp(event) {
