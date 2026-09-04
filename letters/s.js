@@ -332,7 +332,21 @@ export function mountS(workspace) {
       else workspace.dataset.ground = 'paper';
       ground.setAttribute('aria-pressed', String(state.dark));
     });
-    panel.append(ground);
+
+    const pause = document.createElement('button');
+    pause.type = 'button';
+    pause.className = 'sketch-switch';
+    pause.textContent = 'пауза';
+    pause.setAttribute('aria-pressed', 'false');
+    pause.addEventListener('click', () => {
+      state.paused = !state.paused;
+      sync();
+    });
+
+    const switches = document.createElement('div');
+    switches.className = 'sketch-switches';
+    switches.append(ground, pause);
+    panel.append(switches);
 
     const again = document.createElement('button');
     again.type = 'button';
@@ -365,6 +379,7 @@ export function mountS(workspace) {
         knob.input.disabled = state.play && !knob.alwaysOn;
         knob.input.value = params[knob.key];
       }
+      pause.setAttribute('aria-pressed', String(state.paused));
     }
 
     return { panel, toggle, sync };
@@ -382,7 +397,11 @@ export function mountS(workspace) {
     if (event.code === 'KeyA' || event.code === 'ArrowLeft') state.turnLeft = true;
     if (event.code === 'KeyD' || event.code === 'ArrowRight') state.turnRight = true;
     if (event.code === 'KeyC') reset();
-    if (event.code === 'Space') { event.preventDefault(); state.paused = !state.paused; }
+    if (event.code === 'Space') {
+      event.preventDefault();
+      state.paused = !state.paused;
+      controls.sync();
+    }
   }
 
   function onKeyUp(event) {
