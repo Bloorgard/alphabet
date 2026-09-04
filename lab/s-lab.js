@@ -40,30 +40,29 @@ function drawCShape(cx, cy, r, rotation, width, color, gapWidth = C_GAP) {
 /* ---------- 1. прореха-портал ---------- */
 
 /* Не «выпускать», а «удержать»: разрыв — изъян самой буквы, а не инструмент
-   игрока. Раунд начинается почти с целого кольца и раскрывается сам, но не
-   до конца — кусочек сплошной дуги остаётся навсегда.
-
-   Скорость раскрытия и число шариков внутри не независимы, а связаны в одну
-   петлю: чем больше шариков ещё живо, тем медленнее разрыв растёт — хорошая
-   защита в начале буквально покупает больше времени у самой буквы. Каждая
-   потеря не просто отнимает одну цель — она ускоряет раскрытие для всех
-   оставшихся, поэтому цена ошибки растёт, а не падает.
+   игрока. Фоновый рост разрыва постоянный и еле заметный — почти фон.
+   Настоящее событие — потеря: в момент, когда шарик проскочил, разрыв резко
+   скачком расширяется, а оба его конца на миг вспыхивают красным именно там,
+   где металл только что подался. Так каждая ошибка видна и чувствуется сразу,
+   а не тонет в медленно ползущем градусе в углу экрана.
 
    Раунд обрывается, как только живых шариков остаётся меньше трёх — не
    ждём, пока последний нащупает сплошную дугу. Ботом-симулятором проверено:
    один шарик против любого постоянного зазора можно держать сколько угодно
    долго чистой точностью — единственная угроза в моменте почти не пугает
-   человеческую реакцию, сколько её ни ускоряй. Несколько угроз разом —
-   пугают, и порог не даёт вырождению случиться вообще. Очки — не время до
-   конца, а сумма времени, что каждый шарик провёл живым: потерял рано —
-   с него очки перестали копиться, а не просто стало легче следить за
-   остальными. */
+   человеческую реакцию. Несколько угроз разом — пугают, и порог не даёт
+   вырождению случиться вообще. Очки — не время до конца, а сумма времени,
+   что каждый шарик провёл живым: потерял рано — с него очки перестали
+   копиться. */
 
 const PORTAL_RADIUS = 0.34;
 const PORTAL_BALL_R = 0.013;
 const PORTAL_GAP_START = 24 * Math.PI / 180;
 const PORTAL_GAP_MAX = 350 * Math.PI / 180;
 const PORTAL_MIN_ALIVE = 3;
+const PORTAL_GAP_EASE = 0.1;
+const PORTAL_FLASH_DECAY = 0.45;
+const PORTAL_TIP_SPAN = 15 * Math.PI / 180;
 
 function portalSpawnBall() {
   const speed = num('speed');
@@ -84,6 +83,7 @@ function portalReset() {
   modeState.rotation = 0;
   modeState.time = 0;
   modeState.gap = PORTAL_GAP_START;
+  modeState.gapTarget = PORTAL_GAP_START;
   modeState.score = 0;
   modeState.over = false;
   modeState.flash = 0;
@@ -93,8 +93,6 @@ function portalReset() {
   modeState.initialCount = Math.round(num('count'));
   for (let i = 0; i < modeState.initialCount; i++) portalSpawnBall();
 }
-
-const PORTAL_FLASH_DECAY = 0.4;
 
 function portalStep() {
   const rotSpeed = 150 * Math.PI / 180;
@@ -108,11 +106,12 @@ function portalStep() {
 
   if (!modeState.over) {
     modeState.time += STEP;
-    const alive = portalAlive();
-    const factor = modeState.initialCount / Math.max(alive, 1);
-    modeState.gap = Math.min(PORTAL_GAP_MAX, modeState.gap + num('growth') * factor * Math.PI / 180 * STEP);
-    modeState.score += alive * STEP;
+    modeState.gapTarget = Math.min(PORTAL_GAP_MAX, modeState.gapTarget + num('growth') * Math.PI / 180 * STEP);
+    modeState.score += portalAlive() * STEP;
   }
+  /* Видимый разрыв гонится за целью быстро, но не мгновенно — скачок при
+     потере получает тело движения, а не телепорт, и читается как рывок. */
+  modeState.gap += (modeState.gapTarget - modeState.gap) * Math.min(1, STEP / PORTAL_GAP_EASE);
 
   for (const b of modeState.balls) {
     b.x += b.vx * STEP;
@@ -124,9 +123,8 @@ function portalStep() {
     const angle = Math.atan2(dy, dx);
     if (angleInGap(angle, modeState.rotation, modeState.gap)) {
       b.escaping = true;
-      /* Потеря — событие, не состояние: вспышка отмечает именно момент,
-         когда разрыв кого-то пропустил, а не то, что шариков стало меньше. */
       modeState.flash = 1;
+      modeState.gapTarget = Math.min(PORTAL_GAP_MAX, modeState.gapTarget + num('jump') * Math.PI / 180);
       continue;
     }
     const nx = dx / dist, ny = dy / dist;
@@ -148,13 +146,27 @@ function portalStep() {
   if (!modeState.over && portalAlive() < PORTAL_MIN_ALIVE) modeState.over = true;
 }
 
+/* Не вся дуга — только оба её конца, там, где металл только что подался.
+   Красная краска держится за место события, а не расходится по форме. */
+function portalDrawTips(alpha) {
+  if (alpha <= 0.01) return;
+  const tipA = modeState.rotation + modeState.gap / 2;
+  const tipB = modeState.rotation - modeState.gap / 2 + Math.PI * 2;
+  ctx.strokeStyle = `rgba(224,33,15,${alpha})`;
+  ctx.lineWidth = (0.02 + 0.012 * alpha) * S;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(CX * S, CY * S, PORTAL_RADIUS * S, tipA, tipA + PORTAL_TIP_SPAN);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(CX * S, CY * S, PORTAL_RADIUS * S, tipB - PORTAL_TIP_SPAN, tipB);
+  ctx.stroke();
+}
+
 function portalDraw() {
   for (const b of modeState.balls) dot(b.x, b.y, b.escaping ? RED : ink(0.8), PORTAL_BALL_R);
   drawCShape(CX, CY, PORTAL_RADIUS, modeState.rotation, 0.02, INK, modeState.gap);
-  if (modeState.flash > 0.01) {
-    const alpha = modeState.flash * modeState.flash;
-    drawCShape(CX, CY, PORTAL_RADIUS, modeState.rotation, 0.02 + 0.01 * modeState.flash, `rgba(224,33,15,${alpha})`, modeState.gap);
-  }
+  portalDrawTips(modeState.flash * modeState.flash);
   const alive = portalAlive();
   const score = modeState.score.toFixed(1);
   const status = modeState.over
@@ -165,12 +177,13 @@ function portalDraw() {
 
 const portal = {
   label: 'портал',
-  note: 'Разрыв буквы — не инструмент игрока, а её изъян: раунд начинается с почти целого кольца и раскрывается сам, но не до конца — кусочек сплошной дуги остаётся навсегда. Держи разрыв в стороне от шариков, что вот-вот долетят до края, — A/D или стрелки крутят его, можно и тащить мышью/пальцем от центра. Скорость раскрытия зависит от того, сколько шариков ещё живо: держишь многих — разрыв растёт медленно, теряешь — раскрывается быстрее для всех оставшихся. Раунд обрывается, как только живых остаётся меньше трёх — с одним шариком защищаться уже не интересно, а вечно. Очки — не время до конца, а сумма времени, что каждый шарик провёл живым. C или «заново» — начать заново. «Рост» — базовая скорость раскрытия разрыва, «шариков» и «скорость» — сколько их и как резво летают.',
+  note: 'Разрыв буквы — не инструмент игрока, а её изъян: он растёт сам, ровно и еле заметно, но не до конца — кусочек сплошной дуги остаётся навсегда. Держи разрыв в стороне от шариков, что вот-вот долетят до края, — A/D или стрелки крутят его, можно и тащить мышью/пальцем от центра. Настоящая цена ошибки не в фоновом росте: в момент, когда шарик проскочил, разрыв резко скачком расширяется, а оба его конца вспыхивают красным ровно там, где металл подался. Раунд обрывается, как только живых остаётся меньше трёх — с одним шариком защищаться уже не интересно, а вечно. Очки — не время до конца, а сумма времени, что каждый шарик провёл живым. C или «заново» — начать заново. «Рост» — фоновая скорость раскрытия, «скачок» — насколько резко разрыв расширяется при каждой потере, «шариков» и «скорость» — сколько их и как резво летают.',
   cursor: 'default',
   tools: [
     { type: 'range', key: 'count', label: 'шариков', min: 5, max: 16, step: 1, value: 9 },
     { type: 'range', key: 'speed', label: 'скорость', min: 0.15, max: 0.6, step: 0.02, value: 0.3 },
-    { type: 'range', key: 'growth', label: 'рост', min: 1, max: 12, step: 0.5, value: 3 },
+    { type: 'range', key: 'growth', label: 'рост', min: 0.5, max: 6, step: 0.5, value: 1.5 },
+    { type: 'range', key: 'jump', label: 'скачок', min: 4, max: 30, step: 1, value: 16 },
     { type: 'button', label: 'заново', action: portalReset },
   ],
   setup() { portalReset(); },
