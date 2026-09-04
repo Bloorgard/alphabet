@@ -98,5 +98,6 @@ const LABS = [
   {
     slug: 's', letter: 'С', title: 'механики разрыва', tile: true,
     mechanics: ['портал', 'локатор', 'серп', 'эхо'],
+    chosen: 'портал',
   },
 ];
