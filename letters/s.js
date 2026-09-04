@@ -25,6 +25,13 @@ const GAME_PARAMS = {
   speed: 0.42,
   growth: 1.5,
   jump: 16,
+};
+
+/* Диаметр шарика и толщина дуги — на игру не влияют или влияют пренебрежимо
+   (разница в столкновении на уровне долей радиуса), поэтому их можно крутить
+   всегда, даже на рекорд, и они не откатываются при «заново» — это просто
+   эстетика, как тема оформления, а не сложность. */
+const VISUAL_DEFAULTS = {
   ballSize: 0.013,
   thickness: 0.02,
 };
@@ -43,8 +50,8 @@ export function mountS(workspace) {
   workspace.dataset.ground = 'paper';
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
-  const params = { ...GAME_PARAMS };
-  const state = { play: true, dark: false };
+  const params = { ...GAME_PARAMS, ...VISUAL_DEFAULTS };
+  const state = { play: true, dark: false, paused: false };
   const pointer = { x: 0.5, y: 0.5, down: false };
   let W = 1;
   let H = 1;
@@ -236,6 +243,10 @@ export function mountS(workspace) {
     if (state.over) {
       ctx.font = `${Math.round(S * 0.02)}px 'DM Mono', monospace`;
       ctx.fillText('клик — заново', ox + S * 0.5, oy + S * 0.94);
+    } else if (state.paused) {
+      ctx.fillStyle = fg;
+      ctx.font = `${Math.round(S * 0.02)}px 'DM Mono', monospace`;
+      ctx.fillText('пауза · пробел', ox + S * 0.5, oy + S * 0.94);
     }
     ctx.textAlign = 'left';
   }
@@ -288,13 +299,13 @@ export function mountS(workspace) {
 
     const playButton = modeButton('на рекорд', true);
     const sandboxButton = modeButton('песочница', false);
-    for (const [key, label, min, max, step] of [
-      ['count', 'шариков', 5, 16, 1],
-      ['speed', 'скорость', 0.15, 0.6, 0.02],
-      ['growth', 'рост', 0.5, 6, 0.5],
-      ['jump', 'скачок', 4, 30, 1],
-      ['ballSize', 'шарик', 0.006, 0.03, 0.001],
-      ['thickness', 'толщина', 0.006, 0.045, 0.001],
+    for (const [key, label, min, max, step, alwaysOn] of [
+      ['count', 'шариков', 5, 16, 1, false],
+      ['speed', 'скорость', 0.15, 0.6, 0.02, false],
+      ['growth', 'рост', 0.5, 6, 0.5, false],
+      ['jump', 'скачок', 4, 30, 1, false],
+      ['ballSize', 'размер шариков', 0.006, 0.03, 0.001, true],
+      ['thickness', 'толщина', 0.006, 0.045, 0.001, true],
     ]) {
       const field = document.createElement('label');
       field.textContent = label;
@@ -307,7 +318,7 @@ export function mountS(workspace) {
       input.addEventListener('input', () => { params[key] = Number(input.value); });
       field.append(input);
       panel.append(field);
-      knobs.push({ key, input });
+      knobs.push({ key, input, alwaysOn });
     }
     const ground = document.createElement('button');
     ground.type = 'button';
@@ -347,10 +358,10 @@ export function mountS(workspace) {
         ? 'результат идёт в общий счёт'
         : 'разрыв открыт для правки, результат не в зачёт';
       hint.textContent = state.play
-        ? 'уводи разрыв от шариков · тяни пальцем, A/D или стрелки · C — заново'
-        : 'уводи разрыв от шариков · песочница · C — заново';
+        ? 'уводи разрыв от шариков · тяни пальцем, A/D или стрелки · C — заново · пробел — пауза'
+        : 'уводи разрыв от шариков · песочница · C — заново · пробел — пауза';
       for (const knob of knobs) {
-        knob.input.disabled = state.play;
+        knob.input.disabled = state.play && !knob.alwaysOn;
         knob.input.value = params[knob.key];
       }
     }
@@ -370,6 +381,7 @@ export function mountS(workspace) {
     if (event.code === 'KeyA' || event.code === 'ArrowLeft') state.turnLeft = true;
     if (event.code === 'KeyD' || event.code === 'ArrowRight') state.turnRight = true;
     if (event.code === 'KeyC') reset();
+    if (event.code === 'Space') { event.preventDefault(); state.paused = !state.paused; }
   }
 
   function onKeyUp(event) {
@@ -380,9 +392,13 @@ export function mountS(workspace) {
   function frame(now) {
     debt = Math.min(0.1, debt + (now - last) / 1000);
     last = now;
-    while (debt >= STEP) {
-      step();
-      debt -= STEP;
+    if (state.paused) {
+      debt = 0;
+    } else {
+      while (debt >= STEP) {
+        step();
+        debt -= STEP;
+      }
     }
     draw();
     frameId = requestAnimationFrame(frame);
