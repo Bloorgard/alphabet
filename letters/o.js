@@ -6,9 +6,11 @@
 // поэтому её не ставят руками — кольцо само себе затравка.
 
 const MARK = { paper: '#161616', ink: '#f1ede5' };
+const BG = { paper: '#f1ede5', ink: '#161616' };
 const GRID_LINE = { paper: 'rgba(22, 22, 22, .07)', ink: 'rgba(241, 237, 229, .06)' };
 const RED = '#e0210f';
 const GRID = 91;
+const EXPORT_CELL = 10;
 
 const RULES = {
   life: { label: 'жизнь', rule: 'B3/S23', birth: [3], survival: [2, 3] },
@@ -103,6 +105,7 @@ export function mountO(workspace) {
   let ruleButtons = [];
   let ruleNote = null;
   let radiusInput = null;
+  let pauseButton = null;
   let drag = null;
 
   function resize() {
@@ -157,6 +160,57 @@ export function mountO(workspace) {
   function applyGround(paper) {
     if (paper) workspace.dataset.ground = 'paper';
     else delete workspace.dataset.ground;
+  }
+
+  function togglePause() {
+    state.paused = !state.paused;
+    if (pauseButton) pauseButton.setAttribute('aria-pressed', String(state.paused));
+  }
+
+  /* Тот же кадр, что и draw(), но в векторе и на фиксированной сетке —
+     размер файла не зависит от текущих размеров канваса. */
+  function buildSVG() {
+    const size = GRID * EXPORT_CELL;
+    const mark = params.paper ? MARK.paper : MARK.ink;
+    const bg = params.paper ? BG.paper : BG.ink;
+    const parts = [`<rect width="${size}" height="${size}" fill="${bg}"/>`];
+
+    if (params.showGrid) {
+      const gridLine = params.paper ? GRID_LINE.paper : GRID_LINE.ink;
+      let d = '';
+      for (let i = 1; i < GRID; i += 1) {
+        const at = i * EXPORT_CELL;
+        d += `M${at} 0V${size}M0 ${at}H${size}`;
+      }
+      parts.push(`<path d="${d}" stroke="${gridLine}"/>`);
+    }
+
+    for (let y = 0; y < GRID; y += 1) {
+      for (let x = 0; x < GRID; x += 1) {
+        const index = gridIndex(x, y);
+        if (!state.cells[index] || state.wall.has(`${x},${y}`)) continue;
+        const fill = state.front[index] ? RED : mark;
+        parts.push(`<rect x="${x * EXPORT_CELL}" y="${y * EXPORT_CELL}" width="${EXPORT_CELL}" height="${EXPORT_CELL}" fill="${fill}"/>`);
+      }
+    }
+    if (!params.hideWall) {
+      state.wall.forEach((key) => {
+        const [x, y] = key.split(',').map(Number);
+        parts.push(`<rect x="${x * EXPORT_CELL}" y="${y * EXPORT_CELL}" width="${EXPORT_CELL}" height="${EXPORT_CELL}" fill="${mark}"/>`);
+      });
+    }
+
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${parts.join('')}</svg>`;
+  }
+
+  function downloadSVG() {
+    const blob = new Blob([buildSVG()], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `о-${state.generation}.svg`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   function selectRule(name) {
@@ -346,6 +400,21 @@ export function mountO(workspace) {
     resetButton.addEventListener('click', reset);
     panel.append(resetButton);
 
+    pauseButton = document.createElement('button');
+    pauseButton.type = 'button';
+    pauseButton.className = 'sketch-switch';
+    pauseButton.textContent = 'пауза';
+    pauseButton.setAttribute('aria-pressed', String(state.paused));
+    pauseButton.addEventListener('click', togglePause);
+    panel.append(pauseButton);
+
+    const downloadButton = document.createElement('button');
+    downloadButton.type = 'button';
+    downloadButton.className = 'sketch-action';
+    downloadButton.textContent = 'скачать SVG';
+    downloadButton.addEventListener('click', downloadSVG);
+    panel.append(downloadButton);
+
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'sketch-toggle';
@@ -373,7 +442,7 @@ export function mountO(workspace) {
     }
     if (event.key === ' ' || event.code === 'Space') {
       event.preventDefault();
-      state.paused = !state.paused;
+      togglePause();
       return;
     }
     if (event.code === 'KeyC') {

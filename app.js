@@ -13,10 +13,10 @@ import { mountK } from './letters/k.js?v=15';
 import { mountL } from './letters/l.js?v=10';
 import { mountM } from './letters/m.js?v=12';
 import { mountN } from './letters/n.js?v=1';
-import { mountO } from './letters/o.js?v=4';
+import { mountO } from './letters/o.js?v=5';
 import { mountP } from './letters/p.js?v=1';
 import { mountR } from './letters/r.js?v=3';
-import { mountS } from './letters/s.js?v=3';
+import { mountS } from './letters/s.js?v=4';
 import { mountYa } from './letters/ya.js?v=20';
 import { mountCredit } from './wall.js?v=12';
 
