@@ -255,6 +255,7 @@ export function mountS(workspace) {
     track(event);
     canvas.setPointerCapture?.(event.pointerId);
     if (state.over) { reset(); return; }
+    if (state.paused) return;
     pointer.down = true;
     state.rotation = Math.atan2(pointer.y - CY, pointer.x - CX);
   }
