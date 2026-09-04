@@ -11,11 +11,13 @@ const CY = 0.52;
 const C_GAP = 76 * Math.PI / 180;
 
 /* Разрыв центрирован на угол rotation. angleInGap проверяет, попадает ли
-   мировой угол в открытый сектор при текущем повороте буквы. */
-function angleInGap(angle, rotation) {
+   мировой угол в открытый сектор при текущем повороте буквы. Ширина разрыва
+   у большинства режимов постоянна (C_GAP), но у портала растёт по ходу
+   раунда — поэтому она отдельный параметр, а не всегда константа. */
+function angleInGap(angle, rotation, gapWidth = C_GAP) {
   let d = angle - rotation;
   d = ((d % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
-  return Math.abs(d) < C_GAP / 2;
+  return Math.abs(d) < gapWidth / 2;
 }
 
 function angleDiff(a, b) {
@@ -25,10 +27,10 @@ function angleDiff(a, b) {
   return d;
 }
 
-/* Дуга — окружность без сектора C_GAP, отцентрованного на rotation. */
-function drawCShape(cx, cy, r, rotation, width, color) {
+/* Дуга — окружность без сектора gapWidth, отцентрованного на rotation. */
+function drawCShape(cx, cy, r, rotation, width, color, gapWidth = C_GAP) {
   ctx.beginPath();
-  ctx.arc(cx * S, cy * S, r * S, rotation + C_GAP / 2, rotation - C_GAP / 2 + Math.PI * 2);
+  ctx.arc(cx * S, cy * S, r * S, rotation + gapWidth / 2, rotation - gapWidth / 2 + Math.PI * 2);
   ctx.strokeStyle = color;
   ctx.lineWidth = width * S;
   ctx.lineCap = 'round';
@@ -37,8 +39,17 @@ function drawCShape(cx, cy, r, rotation, width, color) {
 
 /* ---------- 1. прореха-портал ---------- */
 
+/* Не «выпускать», а «удержать»: разрыв — изъян самой буквы, а не инструмент
+   игрока. Раунд начинается почти с целого кольца (узкий разрыв — С едва
+   приоткрыта) и со временем раскрывается сама, пока не перестаёт спасать
+   вообще ничего. Проигрыш не нужен как отдельное правило — раунд сам
+   заканчивается, когда прикрывать уже нечем: все шарики снаружи. Счёт —
+   продержавшееся время. */
+
 const PORTAL_RADIUS = 0.34;
-const PORTAL_BALL_R = 0.014;
+const PORTAL_BALL_R = 0.013;
+const PORTAL_GAP_START = 24 * Math.PI / 180;
+const PORTAL_GAP_MAX = 300 * Math.PI / 180;
 
 function portalSpawnBall() {
   const speed = num('speed');
@@ -55,7 +66,9 @@ function portalSpawnBall() {
 
 function portalReset() {
   modeState.rotation = 0;
-  modeState.score = 0;
+  modeState.time = 0;
+  modeState.gap = PORTAL_GAP_START;
+  modeState.over = false;
   modeState.balls = [];
   modeState.turnLeft = false;
   modeState.turnRight = false;
@@ -64,10 +77,16 @@ function portalReset() {
 }
 
 function portalStep() {
-  const rotSpeed = 130 * Math.PI / 180;
+  const rotSpeed = 150 * Math.PI / 180;
   if (modeState.turnLeft || modeState.turnRight) {
     const dir = (modeState.turnRight ? 1 : 0) - (modeState.turnLeft ? 1 : 0);
     modeState.rotation += dir * rotSpeed * STEP;
+  }
+  if (pointer.down) modeState.rotation = Math.atan2(pointer.y - CY, pointer.x - CX);
+
+  if (!modeState.over) {
+    modeState.time += STEP;
+    modeState.gap = Math.min(PORTAL_GAP_MAX, PORTAL_GAP_START + num('growth') * Math.PI / 180 * modeState.time);
   }
 
   for (const b of modeState.balls) {
@@ -78,7 +97,7 @@ function portalStep() {
     const dist = Math.hypot(dx, dy);
     if (dist + PORTAL_BALL_R < PORTAL_RADIUS) continue;
     const angle = Math.atan2(dy, dx);
-    if (angleInGap(angle, modeState.rotation)) {
+    if (angleInGap(angle, modeState.rotation, modeState.gap)) {
       b.escaping = true;
       continue;
     }
@@ -93,37 +112,41 @@ function portalStep() {
 
   const kept = [];
   for (const b of modeState.balls) {
-    if (b.escaping && (b.x < -0.08 || b.x > 1.08 || b.y < -0.08 || b.y > 1.08)) {
-      modeState.score++;
-      continue;
-    }
+    if (b.escaping && (b.x < -0.1 || b.x > 1.1 || b.y < -0.1 || b.y > 1.1)) continue;
     kept.push(b);
   }
   modeState.balls = kept;
-  while (modeState.balls.length < Math.round(num('count'))) portalSpawnBall();
+  if (!modeState.over && !modeState.balls.some((b) => !b.escaping)) modeState.over = true;
 }
 
 function portalDraw() {
   for (const b of modeState.balls) dot(b.x, b.y, b.escaping ? RED : ink(0.8), PORTAL_BALL_R);
-  drawCShape(CX, CY, PORTAL_RADIUS, modeState.rotation, 0.02, INK);
-  drawStatus(`вышло: ${modeState.score} · Q/E крутить разрыв`, modeState.balls.some((b) => b.escaping));
+  drawCShape(CX, CY, PORTAL_RADIUS, modeState.rotation, 0.02, INK, modeState.gap);
+  const inside = modeState.balls.filter((b) => !b.escaping).length;
+  const time = modeState.time.toFixed(1);
+  const status = modeState.over
+    ? `все снаружи · продержался ${time} с · C — заново`
+    : `${time} с · внутри ${inside} · разрыв ${Math.round(modeState.gap * 180 / Math.PI)}°`;
+  drawStatus(status, modeState.over);
 }
 
 const portal = {
   label: 'портал',
-  note: 'Шарики бьются о кольцо изнутри и отражаются, кроме одного места — разрыва буквы. Крути его клавишами Q/E: шарик, что в этот миг летит наружу как раз через разрыв, вылетает и засчитывается; остальные продолжают биться внутри. «Шариков» держит их число в игре разом, «скорость» — их резвость.',
+  note: 'Разрыв буквы — не инструмент игрока, а её изъян: раунд начинается с почти целого кольца и со временем сам раскрывается всё шире. Держи разрыв в стороне от шариков, что вот-вот долетят до края, — A/D или стрелки крутят его, можно и тащить мышью/пальцем от центра. Раунд кончается сам, когда прикрывать уже нечем — все снаружи; счёт — продержавшееся время. C или «заново» — начать раунд заново. «Рост» — насколько быстро раскрывается разрыв, «шариков» и «скорость» — сколько их и как резво летают.',
   cursor: 'default',
   tools: [
-    { type: 'range', key: 'count', label: 'шариков', min: 3, max: 12, step: 1, value: 6 },
-    { type: 'range', key: 'speed', label: 'скорость', min: 0.15, max: 0.6, step: 0.02, value: 0.32 },
+    { type: 'range', key: 'count', label: 'шариков', min: 4, max: 16, step: 1, value: 9 },
+    { type: 'range', key: 'speed', label: 'скорость', min: 0.15, max: 0.6, step: 0.02, value: 0.3 },
+    { type: 'range', key: 'growth', label: 'рост', min: 1, max: 12, step: 0.5, value: 4 },
     { type: 'button', label: 'заново', action: portalReset },
   ],
   setup() { portalReset(); },
   step() { portalStep(); },
   draw() { portalDraw(); },
   onKey(event, down) {
-    if (event.code === 'KeyQ') modeState.turnLeft = down;
-    if (event.code === 'KeyE') modeState.turnRight = down;
+    if (event.code === 'KeyA' || event.code === 'ArrowLeft') modeState.turnLeft = down;
+    if (event.code === 'KeyD' || event.code === 'ArrowRight') modeState.turnRight = down;
+    if (event.code === 'KeyC' && down) portalReset();
   },
   onTool(key) { if (key === 'count') portalReset(); },
 };
