@@ -49,7 +49,17 @@ function drawCShape(cx, cy, r, rotation, width, color, gapWidth = C_GAP) {
 const PORTAL_RADIUS = 0.34;
 const PORTAL_BALL_R = 0.013;
 const PORTAL_GAP_START = 24 * Math.PI / 180;
-const PORTAL_GAP_MAX = 300 * Math.PI / 180;
+/* Не 300° — на широком, но постоянном запасе сплошной дуги последний шарик
+   можно гонять сколько угодно, было бы терпение. Потолок почти у полного
+   круга: под конец от буквы остаётся пара градусов металла, и спрятать под
+   ними даже один шарик уже не выходит при любом умении. */
+const PORTAL_GAP_MAX = 358 * Math.PI / 180;
+/* Ширина разрыва не спасает сама по себе: идеальному игроку без задержки
+   реакции хватит и волоска сплошной дуги, чтобы бесконечно держать
+   единственный оставшийся шарик прямо напротив него. Гарантия конца — не
+   геометрия, а время: досидев до потолка разрыва, буква ещё немного
+   держится, а потом распахивается совсем — что бы ни оставалось внутри. */
+const PORTAL_FINAL_GRACE = 6;
 
 function portalSpawnBall() {
   const speed = num('speed');
@@ -68,7 +78,9 @@ function portalReset() {
   modeState.rotation = 0;
   modeState.time = 0;
   modeState.gap = PORTAL_GAP_START;
+  modeState.maxedAt = null;
   modeState.over = false;
+  modeState.forced = false;
   modeState.balls = [];
   modeState.turnLeft = false;
   modeState.turnRight = false;
@@ -87,6 +99,7 @@ function portalStep() {
   if (!modeState.over) {
     modeState.time += STEP;
     modeState.gap = Math.min(PORTAL_GAP_MAX, PORTAL_GAP_START + num('growth') * Math.PI / 180 * modeState.time);
+    if (modeState.gap >= PORTAL_GAP_MAX && modeState.maxedAt === null) modeState.maxedAt = modeState.time;
   }
 
   for (const b of modeState.balls) {
@@ -116,7 +129,21 @@ function portalStep() {
     kept.push(b);
   }
   modeState.balls = kept;
+
   if (!modeState.over && !modeState.balls.some((b) => !b.escaping)) modeState.over = true;
+
+  if (!modeState.over && modeState.maxedAt !== null && modeState.time - modeState.maxedAt > PORTAL_FINAL_GRACE) {
+    for (const b of modeState.balls) {
+      if (b.escaping) continue;
+      b.escaping = true;
+      const dx = b.x - CX, dy = b.y - CY;
+      const d = Math.hypot(dx, dy) || 1;
+      b.vx = (dx / d) * 0.4;
+      b.vy = (dy / d) * 0.4;
+    }
+    modeState.over = true;
+    modeState.forced = true;
+  }
 }
 
 function portalDraw() {
@@ -125,14 +152,14 @@ function portalDraw() {
   const inside = modeState.balls.filter((b) => !b.escaping).length;
   const time = modeState.time.toFixed(1);
   const status = modeState.over
-    ? `все снаружи · продержался ${time} с · C — заново`
+    ? `${modeState.forced ? 'буква распахнулась совсем' : 'все снаружи'} · продержался ${time} с · C — заново`
     : `${time} с · внутри ${inside} · разрыв ${Math.round(modeState.gap * 180 / Math.PI)}°`;
   drawStatus(status, modeState.over);
 }
 
 const portal = {
   label: 'портал',
-  note: 'Разрыв буквы — не инструмент игрока, а её изъян: раунд начинается с почти целого кольца и со временем сам раскрывается всё шире. Держи разрыв в стороне от шариков, что вот-вот долетят до края, — A/D или стрелки крутят его, можно и тащить мышью/пальцем от центра. Раунд кончается сам, когда прикрывать уже нечем — все снаружи; счёт — продержавшееся время. C или «заново» — начать раунд заново. «Рост» — насколько быстро раскрывается разрыв, «шариков» и «скорость» — сколько их и как резво летают.',
+  note: 'Разрыв буквы — не инструмент игрока, а её изъян: раунд начинается с почти целого кольца и со временем сам раскрывается всё шире. Держи разрыв в стороне от шариков, что вот-вот долетят до края, — A/D или стрелки крутят его, можно и тащить мышью/пальцем от центра. Раунд кончается сам: либо все шарики уже снаружи, либо буква дораскрылась до предела и через несколько секунд распахивается совсем — тогда наружу летит всё разом, сколько бы ни оставалось внутри. Счёт — продержавшееся время. C или «заново» — начать раунд заново. «Рост» — насколько быстро раскрывается разрыв, «шариков» и «скорость» — сколько их и как резво летают.',
   cursor: 'default',
   tools: [
     { type: 'range', key: 'count', label: 'шариков', min: 4, max: 16, step: 1, value: 9 },
