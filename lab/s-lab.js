@@ -101,6 +101,13 @@ function portalReset() {
 }
 
 function portalStep() {
+  /* Раунд кончился — сцена замирает целиком: разрыв, шарики, вспышка,
+     мигание, даже ручное вращение. Без этой отсечки живые на момент конца
+     шарики продолжали бы биться о дугу дальше и рано или поздно тоже
+     краснели, хотя раунд уже подведён — «финальный» кадр на деле никогда
+     не останавливался. */
+  if (modeState.over) return;
+
   const rotSpeed = 150 * Math.PI / 180;
   if (modeState.turnLeft || modeState.turnRight) {
     const dir = (modeState.turnRight ? 1 : 0) - (modeState.turnLeft ? 1 : 0);
@@ -110,12 +117,9 @@ function portalStep() {
 
   modeState.flash = Math.max(0, modeState.flash - STEP / PORTAL_FLASH_DECAY);
   modeState.pulse += STEP;
-
-  if (!modeState.over) {
-    modeState.time += STEP;
-    modeState.gapTarget = Math.min(PORTAL_GAP_MAX, modeState.gapTarget + num('growth') * Math.PI / 180 * STEP);
-    modeState.score += portalAlive() * STEP;
-  }
+  modeState.time += STEP;
+  modeState.gapTarget = Math.min(PORTAL_GAP_MAX, modeState.gapTarget + num('growth') * Math.PI / 180 * STEP);
+  modeState.score += portalAlive() * STEP;
   /* Видимый разрыв гонится за целью быстро, но не мгновенно — скачок при
      потере получает тело движения, а не телепорт, и читается как рывок. */
   modeState.gap += (modeState.gapTarget - modeState.gap) * Math.min(1, STEP / PORTAL_GAP_EASE);
@@ -151,7 +155,7 @@ function portalStep() {
   }
   modeState.balls = kept;
 
-  if (!modeState.over && portalAlive() < PORTAL_MIN_ALIVE) modeState.over = true;
+  if (portalAlive() < PORTAL_MIN_ALIVE) modeState.over = true;
 }
 
 /* Не вся дуга — только оба её конца, там, где металл только что подался.
