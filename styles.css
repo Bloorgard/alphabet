@@ -213,6 +213,9 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
    постановки за нижний край: играть можно, а поставить клетку нечем.
    Холст остаётся квадратом сверху, панель ложится под ним в потоке. */
 @media (max-width: 560px) {
+  /* Высокая панель С с переключателем режима и шестью параметрами должна
+     целиком помещаться в квадрат сцены, иначе верх обрезает overflow окна. */
+  .sketch-panel { gap: 4px; }
   /* `bottom: 0` вместе с `height: auto` растянул бы окно на весь экран:
      окно фиксированное, и заданы оба края. Отпускаем нижний — тогда высота
      считается по содержимому, а окно держится по центру. */
@@ -254,7 +257,7 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
   .workspace-info[aria-expanded="true"] { color: var(--paper); }
   .letter-workspace[data-ground="paper"] .workspace-info { background: rgba(241, 237, 229, .92); color: rgba(22, 22, 22, .5); }
   .letter-workspace[data-ground="paper"] .workspace-info[aria-expanded="true"] { color: var(--ink); }
-  .sketch-panel { bottom: 50px; }
+  .sketch-panel { bottom: 27px; }
   .workspace-hint { display: none; right: auto !important; bottom: 50px; left: 14px !important; width: 178px; max-width: calc(100% - 28px); padding: 12px 14px; background: rgba(22, 22, 22, .8); backdrop-filter: blur(2px); color: rgba(241, 237, 229, .5); line-height: 1.4; letter-spacing: .02em; text-align: left; text-transform: none; transform: none !important; }
   .letter-workspace[data-ground="paper"] .workspace-hint { background: rgba(241, 237, 229, .86); color: rgba(22, 22, 22, .6); }
   .workspace-hint[data-mobile-open="true"] { display: block; }
