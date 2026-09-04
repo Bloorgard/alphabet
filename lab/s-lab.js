@@ -86,12 +86,15 @@ function portalReset() {
   modeState.gap = PORTAL_GAP_START;
   modeState.score = 0;
   modeState.over = false;
+  modeState.flash = 0;
   modeState.balls = [];
   modeState.turnLeft = false;
   modeState.turnRight = false;
   modeState.initialCount = Math.round(num('count'));
   for (let i = 0; i < modeState.initialCount; i++) portalSpawnBall();
 }
+
+const PORTAL_FLASH_DECAY = 0.4;
 
 function portalStep() {
   const rotSpeed = 150 * Math.PI / 180;
@@ -100,6 +103,8 @@ function portalStep() {
     modeState.rotation += dir * rotSpeed * STEP;
   }
   if (pointer.down) modeState.rotation = Math.atan2(pointer.y - CY, pointer.x - CX);
+
+  modeState.flash = Math.max(0, modeState.flash - STEP / PORTAL_FLASH_DECAY);
 
   if (!modeState.over) {
     modeState.time += STEP;
@@ -119,6 +124,9 @@ function portalStep() {
     const angle = Math.atan2(dy, dx);
     if (angleInGap(angle, modeState.rotation, modeState.gap)) {
       b.escaping = true;
+      /* Потеря — событие, не состояние: вспышка отмечает именно момент,
+         когда разрыв кого-то пропустил, а не то, что шариков стало меньше. */
+      modeState.flash = 1;
       continue;
     }
     const nx = dx / dist, ny = dy / dist;
@@ -143,6 +151,10 @@ function portalStep() {
 function portalDraw() {
   for (const b of modeState.balls) dot(b.x, b.y, b.escaping ? RED : ink(0.8), PORTAL_BALL_R);
   drawCShape(CX, CY, PORTAL_RADIUS, modeState.rotation, 0.02, INK, modeState.gap);
+  if (modeState.flash > 0.01) {
+    const alpha = modeState.flash * modeState.flash;
+    drawCShape(CX, CY, PORTAL_RADIUS, modeState.rotation, 0.02 + 0.01 * modeState.flash, `rgba(224,33,15,${alpha})`, modeState.gap);
+  }
   const alive = portalAlive();
   const score = modeState.score.toFixed(1);
   const status = modeState.over
