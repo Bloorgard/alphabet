@@ -67,7 +67,6 @@ const PORTAL_WARN_ALIVE = PORTAL_MIN_ALIVE + 3;
 const PORTAL_GAP_EASE = 0.1;
 const PORTAL_FLASH_DECAY = 0.45;
 const PORTAL_TIP_SPAN = 15 * Math.PI / 180;
-const PORTAL_RING_MARGIN = 0.006;
 
 function portalSpawnBall() {
   const speed = num('speed');
@@ -197,13 +196,14 @@ function portalDraw() {
     /* Живой, но на грани — не перекрашиваем саму точку (это значило бы
        «потерян», как у вылетевших), а обводим тонким мигающим красным
        кольцом: тот же акцент, другой рисунок, значение не путается.
-       Отступ кольца от шарика — фиксированный, не пропорция радиуса:
-       у крупного шарика кольцо и так заметно, лишний зазор только мешает. */
+       Зазор между шариком и кольцом равен толщине самого кольца — так
+       чище, чем произвольный отступ. */
     if (blinkOn) {
+      const ringWidth = 0.004 + 0.003 * risk;
       ctx.beginPath();
-      ctx.arc(b.x * S, b.y * S, (ballR + PORTAL_RING_MARGIN) * S, 0, Math.PI * 2);
+      ctx.arc(b.x * S, b.y * S, (ballR + ringWidth * 1.5) * S, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgb(224,33,15)';
-      ctx.lineWidth = (0.004 + 0.003 * risk) * S;
+      ctx.lineWidth = ringWidth * S;
       ctx.stroke();
     }
   }
