@@ -60,6 +60,7 @@ const PORTAL_BALL_R = 0.013;
 const PORTAL_GAP_START = 24 * Math.PI / 180;
 const PORTAL_GAP_MAX = 350 * Math.PI / 180;
 const PORTAL_MIN_ALIVE = 3;
+const PORTAL_CRITICAL_ALIVE = PORTAL_MIN_ALIVE + 1;
 const PORTAL_GAP_EASE = 0.1;
 const PORTAL_FLASH_DECAY = 0.45;
 const PORTAL_TIP_SPAN = 15 * Math.PI / 180;
@@ -87,6 +88,7 @@ function portalReset() {
   modeState.score = 0;
   modeState.over = false;
   modeState.flash = 0;
+  modeState.pulse = 0;
   modeState.balls = [];
   modeState.turnLeft = false;
   modeState.turnRight = false;
@@ -103,6 +105,7 @@ function portalStep() {
   if (pointer.down) modeState.rotation = Math.atan2(pointer.y - CY, pointer.x - CX);
 
   modeState.flash = Math.max(0, modeState.flash - STEP / PORTAL_FLASH_DECAY);
+  modeState.pulse += STEP;
 
   if (!modeState.over) {
     modeState.time += STEP;
@@ -164,10 +167,26 @@ function portalDrawTips(alpha) {
 }
 
 function portalDraw() {
-  for (const b of modeState.balls) dot(b.x, b.y, b.escaping ? RED : ink(0.8), PORTAL_BALL_R);
+  const alive = portalAlive();
+  const critical = !modeState.over && alive <= PORTAL_CRITICAL_ALIVE;
+  const ringAlpha = critical ? 0.45 + 0.4 * Math.sin(modeState.pulse * 6) : 0;
+
+  for (const b of modeState.balls) {
+    if (b.escaping) { dot(b.x, b.y, RED, PORTAL_BALL_R); continue; }
+    dot(b.x, b.y, ink(0.8), PORTAL_BALL_R);
+    /* Живой, но на грани — не перекрашиваем саму точку (это значило бы
+       «потерян», как у вылетевших), а обводим тонким пульсирующим красным
+       кольцом: тот же акцент, другой рисунок, значение не путается. */
+    if (critical) {
+      ctx.beginPath();
+      ctx.arc(b.x * S, b.y * S, PORTAL_BALL_R * 2 * S, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(224,33,15,${ringAlpha})`;
+      ctx.lineWidth = 0.005 * S;
+      ctx.stroke();
+    }
+  }
   drawCShape(CX, CY, PORTAL_RADIUS, modeState.rotation, 0.02, INK, modeState.gap);
   portalDrawTips(modeState.flash * modeState.flash);
-  const alive = portalAlive();
   const score = modeState.score.toFixed(1);
   const status = modeState.over
     ? `защита рассыпалась · очки ${score} · C — заново`
@@ -177,7 +196,7 @@ function portalDraw() {
 
 const portal = {
   label: 'портал',
-  note: 'Разрыв буквы — не инструмент игрока, а её изъян: он растёт сам, ровно и еле заметно, но не до конца — кусочек сплошной дуги остаётся навсегда. Держи разрыв в стороне от шариков, что вот-вот долетят до края, — A/D или стрелки крутят его, можно и тащить мышью/пальцем от центра. Настоящая цена ошибки не в фоновом росте: в момент, когда шарик проскочил, разрыв резко скачком расширяется, а оба его конца вспыхивают красным ровно там, где металл подался. Раунд обрывается, как только живых остаётся меньше трёх — с одним шариком защищаться уже не интересно, а вечно. Очки — не время до конца, а сумма времени, что каждый шарик провёл живым. C или «заново» — начать заново. «Рост» — фоновая скорость раскрытия, «скачок» — насколько резко разрыв расширяется при каждой потере, «шариков» и «скорость» — сколько их и как резво летают.',
+  note: 'Разрыв буквы — не инструмент игрока, а её изъян: он растёт сам, ровно и еле заметно, но не до конца — кусочек сплошной дуги остаётся навсегда. Держи разрыв в стороне от шариков, что вот-вот долетят до края, — A/D или стрелки крутят его, можно и тащить мышью/пальцем от центра. Настоящая цена ошибки не в фоновом росте: в момент, когда шарик проскочил, разрыв резко скачком расширяется, а оба его конца вспыхивают красным ровно там, где металл подался. Раунд обрывается, как только живых остаётся меньше трёх — с одним шариком защищаться уже не интересно, а вечно; когда до этого рубежа остаётся один шаг, живые шарики обводит тонкое пульсирующее красное кольцо — не спутать со сплошной заливкой у уже выбывших. Очки — не время до конца, а сумма времени, что каждый шарик провёл живым. C или «заново» — начать заново. «Рост» — фоновая скорость раскрытия, «скачок» — насколько резко разрыв расширяется при каждой потере, «шариков» и «скорость» — сколько их и как резво летают.',
   cursor: 'default',
   tools: [
     { type: 'range', key: 'count', label: 'шариков', min: 5, max: 16, step: 1, value: 9 },
