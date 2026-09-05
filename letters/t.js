@@ -270,7 +270,7 @@ export function mountT(workspace) {
 
   function buildControls() {
     const panel = document.createElement('div');
-    panel.className = 'sketch-panel';
+    panel.className = 'sketch-panel sketch-panel-t';
     panel.dataset.letterLayer = '';
     panel.hidden = true;
 
