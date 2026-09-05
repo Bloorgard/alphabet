@@ -300,7 +300,150 @@ const U_ART_TOOLS = [
   { type: 'button', label: 'очистить', action() { setMode(current); } },
 ];
 
+const U_FABRIC_SHADER = `
+precision highp float;
+uniform vec2 resolution;
+uniform float weave;
+uniform float folds;
+uniform float motif;
+uniform float inverse;
+uniform vec4 pulls[8];
+varying vec2 uv;
+float hash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+vec2 material(vec2 p) {
+  for(int i=0;i<8;i++) {
+    vec2 d=p-pulls[i].xy;
+    float falloff=exp(-dot(d,d)/0.025);
+    p-=pulls[i].zw*falloff;
+  }
+  vec2 q=p;
+  q.x+=folds*(0.046*sin(p.y*8.0+p.x*3.0)+0.025*sin(p.y*17.0-2.0));
+  q.y+=folds*(0.032*sin(p.x*9.0-0.7)+0.018*sin(p.x*19.0+p.y*5.0));
+  vec2 d=q-vec2(0.49,0.48);
+  float r=length(d);
+  float a=folds*0.62*exp(-r*r*4.0);
+  q=vec2(cos(a)*d.x-sin(a)*d.y,sin(a)*d.x+cos(a)*d.y)+vec2(0.5);
+  return q;
+}
+void main() {
+  vec2 p=vec2(uv.x,1.0-uv.y);
+  vec2 q=material(p);
+  vec2 cell=q*vec2(weave,weave*0.84);
+  vec2 id=floor(cell);
+  vec2 f=fract(cell);
+  float jitter=(hash(id)-0.5)*0.1;
+  vec2 stripe=q;
+  stripe.x+=0.12*sin(q.y*5.0-0.7)+0.022*sin(q.y*21.0);
+  float ax=stripe.x*motif;
+  float ay=(stripe.y+0.05*sin(q.x*11.0))*motif*0.82;
+  float blocks=mod(floor(ax)+floor(ay),2.0);
+  float fine=step(0.54,fract(ax*4.0));
+  float pattern=mix(blocks,fine,smoothstep(0.18,0.5,abs(sin(ay*0.61))));
+  float crossing=mod(id.x+id.y,2.0);
+  float warp=exp(-pow((f.x-0.5+jitter)*2.7,4.0));
+  float weft=exp(-pow((f.y-0.5-jitter)*2.7,4.0));
+  float warpShade=0.5+0.5*sin(f.x*3.14159);
+  float weftShade=0.5+0.5*sin(f.y*3.14159);
+  float fiber=0.9+0.1*sin(f.x*45.0+hash(id)*7.0);
+  float yarn=mix(weft*weftShade,warp*warpShade,crossing)*fiber;
+  float under=mix(warp,weft,crossing)*0.34;
+  float thread=max(yarn,under);
+  float light=mix(0.065,0.88,pattern);
+  light=mix(light,0.55,step(0.965,hash(vec2(id.x,0.0)))*0.28);
+  float foldShade=0.81+0.15*cos(q.x*26.0+sin(q.y*7.0)*3.0)+0.04*sin(q.y*58.0+q.x*12.0);
+  float value=0.021+thread*light*foldShade;
+  float fleck=hash(floor(p*resolution));
+  value+=(fleck-0.5)*0.035;
+  value=mix(value,1.0-value,inverse);
+  vec3 dark=vec3(0.022,0.028,0.03);
+  vec3 cream=vec3(0.94,0.923,0.878);
+  gl_FragColor=vec4(mix(dark,cream,clamp(value,0.0,1.0)),1.0);
+}`;
+
+let uFabricRenderer = null;
+
+function uFabricSetup() {
+  const surface = uFabricRenderer?.surface || document.createElement('canvas');
+  const gl = uFabricRenderer?.gl || surface.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
+  Object.assign(modeState, { surface, gl, pulls: Array.from({ length: 8 }, () => [0, 0, 0, 0]), next: 0, grab: null, dirty: true });
+  if (!gl) return;
+  if (uFabricRenderer) { modeState.uniforms = uFabricRenderer.uniforms; return; }
+  const program = gl.createProgram();
+  for (const [type, source] of [
+    [gl.VERTEX_SHADER, 'attribute vec2 position; varying vec2 uv; void main(){uv=position*0.5+0.5;gl_Position=vec4(position,0.,1.);}'],
+    [gl.FRAGMENT_SHADER, U_FABRIC_SHADER],
+  ]) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
+    gl.attachShader(program, shader);
+    gl.deleteShader(shader);
+  }
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+  gl.useProgram(program);
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+  const attr = gl.getAttribLocation(program, 'position');
+  gl.enableVertexAttribArray(attr);
+  gl.vertexAttribPointer(attr, 2, gl.FLOAT, false, 0, 0);
+  modeState.uniforms = Object.fromEntries(['resolution','weave','folds','motif','inverse','pulls'].map(name => [name, gl.getUniformLocation(program, name === 'pulls' ? 'pulls[0]' : name)]));
+  uFabricRenderer = { surface, gl, uniforms: modeState.uniforms };
+}
+
+function uFabricDraw() {
+  const m = modeState;
+  if (!m.gl) { uText('Для ткани нужен WebGL', 0.15, 0.5); return; }
+  const size = Math.min(1600, Math.round(S * dpr));
+  if (m.surface.width !== size) { m.surface.width = m.surface.height = size; m.dirty = true; }
+  if (m.dirty || m.ground !== ground) {
+    const gl = m.gl, u = m.uniforms;
+    gl.viewport(0, 0, size, size);
+    gl.uniform2f(u.resolution, size, size);
+    gl.uniform1f(u.weave, num('threads'));
+    gl.uniform1f(u.folds, num('folds'));
+    gl.uniform1f(u.motif, num('motif'));
+    gl.uniform1f(u.inverse, ground === 'ink' ? 1 : 0);
+    gl.uniform4fv(u.pulls, new Float32Array(m.pulls.flat()));
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    m.dirty = false;
+    m.ground = ground;
+  }
+  ctx.drawImage(m.surface, 0, 0, S, S);
+}
+
+function uFabricDown() {
+  const m = modeState;
+  m.grab = { x: pointer.x, y: pointer.y, slot: m.next++ % 8 };
+  m.pulls[m.grab.slot] = [pointer.x, pointer.y, 0, 0];
+  m.dirty = true;
+}
+
+function uFabricMove() {
+  const m = modeState;
+  if (!pointer.down || !m.grab) return;
+  const g = m.grab;
+  m.pulls[g.slot] = [g.x, g.y, clamp(pointer.x - g.x, -0.25, 0.25), clamp(pointer.y - g.y, -0.25, 0.25)];
+  m.dirty = true;
+}
+
 const MODES = {
+  fabric: {
+    label: 'ткань',
+    note: 'Захватите ткань и потяните: рисунок и переплетение сдвигаются вместе. Складки остаются после отпускания; хранятся восемь последних захватов. «Нити» меняют плотность плетения, «рисунок» — масштаб орнамента, «складки» — исходную деформацию. Кнопка «фон» инвертирует ткань.',
+    tools: [
+      { type: 'range', key: 'threads', label: 'нити', min: 100, max: 360, step: 10, value: 240 },
+      { type: 'range', key: 'motif', label: 'рисунок', min: 4, max: 18, step: 1, value: 9 },
+      { type: 'range', key: 'folds', label: 'складки', min: 0, max: 2, step: 0.05, value: 1.15 },
+      { type: 'button', label: 'расправить', action() { modeState.pulls.forEach(p => p.fill(0)); modeState.dirty = true; } },
+    ],
+    cursor: 'grab', setup: uFabricSetup, draw: uFabricDraw,
+    onDown: uFabricDown, onMove: uFabricMove,
+    onUp() { modeState.grab = null; },
+    onTool() { modeState.dirty = true; },
+  },
   stitch: {
     label: 'сшиватель',
     note: 'Прописная У: две точки входят по плечам, совпавшая пара уходит по общей ноге. Зажмите сцену и двигайте узел влево-вправо: он скользит вдоль правого штриха, меняя длины обоих путей. Красный — момент сшивания. 12 одинаковых для каждой попытки пар; результат только здесь, без зачёта. Попробуйте сначала широкий допуск, затем 80 мс.',
@@ -347,4 +490,4 @@ canvas.addEventListener('pointercancel', () => {
   if (current === 'pen' || current === 'loop') uArtUp();
 });
 
-startLab({ title: 'У · развилка и память', modes: MODES, start: 'stitch', ground: 'paper' });
+startLab({ title: 'У · развилка и память', modes: MODES, start: 'fabric', ground: 'paper' });
