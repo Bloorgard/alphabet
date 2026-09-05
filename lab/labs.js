@@ -100,4 +100,9 @@ const LABS = [
     mechanics: ['портал', 'локатор', 'серп', 'эхо'],
     chosen: 'портал',
   },
+  {
+    slug: 't', letter: 'Т', title: 'рост из точки', tile: true,
+    mechanics: ['иней', 'крона', 'слизь'],
+    chosen: 'слизь',
+  },
 ];
