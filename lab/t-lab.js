@@ -343,6 +343,8 @@ function slimeSetup() {
 
 function slimeWrap(v) { return ((v % 1) + 1) % 1; }
 
+const STREAK_STEPS = 3;
+
 /* dist и foodAmount приходят готовыми параметрами, а не через num() —
    num() внутри строит строку-ключ через slot() на каждый вызов, а тут их
    3 на агента на каждый шаг (десятки тысяч на кадр при плотном поле).
@@ -417,6 +419,7 @@ function slimeStep() {
   const foodAmount = num('food');
   const barRect = drift > 0 ? slimeBarRect() : null;
   const stemRect = drift > 0 ? slimeStemRect() : null;
+  const streak = on('streak');
   const speed = 0.006;
 
   for (const a of modeState.agents) {
@@ -442,13 +445,30 @@ function slimeStep() {
       }
     }
 
+    const px = a.x, py = a.y;
     a.x = slimeWrap(a.x + Math.cos(a.heading) * speed);
     a.y = slimeWrap(a.y + Math.sin(a.heading) * speed);
 
-    const gx = clamp(Math.floor(a.x * G), 0, G - 1);
-    const gy = clamp(Math.floor(a.y * G), 0, G - 1);
-    const idx = gy * G + gx;
-    modeState.trail[idx] = Math.min(1, modeState.trail[idx] + 0.4);
+    /* Смаз: вместо одной точки в новом месте — несколько по пути от старой
+       позиции к новой. Пунктир превращается в текучую нить. Общая доза
+       следа поделена на число точек, чтобы включение/выключение смаза не
+       меняло, сколько трафика агент в целом откладывает. */
+    if (streak) {
+      for (let s = 1; s <= STREAK_STEPS; s += 1) {
+        const t = s / STREAK_STEPS;
+        const ix = slimeWrap(px + (a.x - px) * t);
+        const iy = slimeWrap(py + (a.y - py) * t);
+        const gx = clamp(Math.floor(ix * G), 0, G - 1);
+        const gy = clamp(Math.floor(iy * G), 0, G - 1);
+        const idx = gy * G + gx;
+        modeState.trail[idx] = Math.min(1, modeState.trail[idx] + 0.4 / STREAK_STEPS);
+      }
+    } else {
+      const gx = clamp(Math.floor(a.x * G), 0, G - 1);
+      const gy = clamp(Math.floor(a.y * G), 0, G - 1);
+      const idx = gy * G + gx;
+      modeState.trail[idx] = Math.min(1, modeState.trail[idx] + 0.4);
+    }
   }
 }
 
@@ -472,21 +492,36 @@ function slimeDraw() {
   modeState.offCtx.putImageData(modeState.imageData, 0, 0);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(modeState.offscreen, 0, 0, G, G, 0, 0, S, S);
+
+  /* Свечение: та же картинка ещё раз, размытая и тусклее, поверх резкой —
+     складывается («lighter»), а не перекрывает, поэтому не мылит контур,
+     только добавляет ему ореол. */
+  if (on('bloom')) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.55;
+    ctx.filter = `blur(${Math.max(1, S * 0.01)}px)`;
+    ctx.drawImage(modeState.offscreen, 0, 0, G, G, 0, 0, S, S);
+    ctx.restore();
+  }
+
   drawStatus(`${modeState.agents.length} агентов`);
 }
 
 const SLIME_TOOLS = [
-  { type: 'range', key: 'agents', label: 'агенты', min: 200, max: 15000, step: 200, value: 6000 },
+  { type: 'range', key: 'agents', label: 'агенты', min: 200, max: 25000, step: 200, value: 9600 },
   { type: 'range', key: 'brush', label: 'кисть', min: 0.01, max: 0.08, step: 0.005, value: 0.03 },
-  { type: 'range', key: 'sensorAngle', label: 'угол', min: 0.15, max: 1.4, step: 0.05, value: 0.5 },
+  { type: 'range', key: 'sensorAngle', label: 'угол', min: 0.15, max: 1.4, step: 0.05, value: 0.7 },
   { type: 'range', key: 'sensorDist', label: 'нюх', min: 0.01, max: 0.05, step: 0.005, value: 0.025 },
-  { type: 'range', key: 'turnSpeed', label: 'поворот', min: 0.05, max: 0.5, step: 0.02, value: 0.15 },
-  { type: 'range', key: 'decay', label: 'угасание', min: 0.02, max: 0.3, step: 0.02, value: 0.08 },
-  { type: 'range', key: 'food', label: 'зов', min: 0, max: 1, step: 0.02, value: 0.12 },
-  { type: 'range', key: 'foodRadius', label: 'ширина зова', min: 0.02, max: 0.14, step: 0.01, value: 0.07 },
-  { type: 'range', key: 'drift', label: 'снос', min: 0, max: 0.2, step: 0.005, value: 0.015 },
-  { type: 'range', key: 'barThick', label: 'толщина бара', min: 0.02, max: 0.22, step: 0.01, value: 0.12 },
-  { type: 'range', key: 'stemThick', label: 'толщина ствола', min: 0.04, max: 0.32, step: 0.01, value: 0.2 },
+  { type: 'range', key: 'turnSpeed', label: 'поворот', min: 0.05, max: 0.5, step: 0.02, value: 0.05 },
+  { type: 'range', key: 'decay', label: 'угасание', min: 0.02, max: 0.3, step: 0.02, value: 0.3 },
+  { type: 'range', key: 'food', label: 'зов', min: 0, max: 1, step: 0.02, value: 0 },
+  { type: 'range', key: 'foodRadius', label: 'ширина зова', min: 0.02, max: 0.14, step: 0.01, value: 0.04 },
+  { type: 'range', key: 'drift', label: 'снос', min: 0, max: 0.2, step: 0.005, value: 0.035 },
+  { type: 'range', key: 'barThick', label: 'толщина бара', min: 0.02, max: 0.22, step: 0.01, value: 0.02 },
+  { type: 'range', key: 'stemThick', label: 'толщина ствола', min: 0.04, max: 0.32, step: 0.01, value: 0.04 },
+  { type: 'toggle', key: 'bloom', label: 'свечение', value: true },
+  { type: 'toggle', key: 'streak', label: 'смаз', value: true },
 ];
 
 const slimeMode = {
