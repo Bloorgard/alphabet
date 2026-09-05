@@ -429,7 +429,168 @@ function uFabricMove() {
   m.dirty = true;
 }
 
+function uStructureSetup() {
+  const m = modeState;
+  Object.assign(m, { points: [], edges: [], faces: [], angle: -0.65, tilt: 0.38, grab: null, auto: false, seed: 517, dirty: true });
+  const rnd = () => { m.seed = (m.seed * 1664525 + 1013904223) >>> 0; return m.seed / 4294967296; };
+  const edge = (a, b, alpha = 0.14) => m.edges.push({ a, b, alpha });
+  const panel = (a, b, c, d, density = 650, alpha = 0.018) => {
+    m.faces.push({ corners: [a, b, c, d], alpha });
+    for (let i = 0; i < density; i++) {
+      const u = rnd(), v = rnd();
+      const p = a.map((x, j) => x + (b[j] - x) * u + (d[j] - x) * v);
+      m.points.push({ p, alpha: 0.04 + rnd() * 0.24, radius: rnd() < 0.03 ? 1.1 : 0.45 });
+    }
+    edge(a, b); edge(b, c); edge(c, d); edge(d, a);
+  };
+  const room = (x, y, z, w, h, depth) => {
+    const a = [x,y,z], b = [x+w,y,z], c = [x+w,y+h,z], d = [x,y+h,z];
+    const e = [x,y,z+depth], f = [x+w,y,z+depth], g = [x+w,y+h,z+depth], k = [x,y+h,z+depth];
+    panel(a,b,c,d,1700,0.033); panel(e,f,g,k,900,0.014);
+    panel(a,e,k,d,1100,0.025); panel(b,f,g,c,1100,0.024);
+    panel(d,c,g,k,2200,0.085); panel(a,b,f,e,1400,0.055);
+    for(let level=1;level<=3;level++) {
+      const yy=y+h*level/4;
+      for(let slab=0;slab<3;slab++) {
+        const xx=x+w*slab/3, zz=z+depth*(slab===1?0.4:0.08);
+        panel([xx,yy,zz],[xx+w*0.3,yy,zz],[xx+w*0.3,yy,z+depth*0.92],[xx,yy,z+depth*0.92],450,0.105);
+        edge([xx,yy-0.035,zz],[xx+w*0.3,yy-0.035,zz],0.5);
+      }
+      const xx=x+w*(level%2?0.2:0.72);
+      panel([xx,yy,z+0.08],[xx,yy,z+depth*0.65],[xx,yy+h*0.18,z+depth*0.65],[xx,yy+h*0.18,z+0.08],450,0.085);
+    }
+    for(let i=1;i<8;i++) {
+      const xx=x+w*i/8;
+      edge([xx,y,z],[xx,y+h,z],0.08);
+      edge([xx,y+h,z],[xx,y+h,z+depth],0.06);
+    }
+    for(let i=1;i<5;i++) {
+      const yy=y+h*i/5;
+      edge([x,yy,z],[x+w,yy,z],0.07);
+    }
+  };
+  const ring = (x, y, z, radius, vertical = false, alpha = 0.24) => {
+    let prev;
+    for(let i=0;i<=72;i++) {
+      const a=i*Math.PI/36;
+      const p=vertical ? [x+radius*Math.cos(a),y+radius*Math.sin(a),z] : [x+radius*Math.cos(a),y,z+radius*Math.sin(a)];
+      if(prev)edge(prev,p,alpha);
+      prev=p;
+    }
+  };
+  room(-1.45,-0.65,-0.65,1.15,1.5,1.3);
+  room(-0.12,-0.85,-0.76,1.4,1.28,1.12);
+  room(-0.18,-0.12,0.56,1.05,1.26,0.92);
+  for(let i=0;i<18;i++) {
+    const y=-0.75+i*0.078, z=-0.5+i*0.078;
+    panel([-0.32,y,z],[0.16,y,z],[0.16,y,z+0.078],[-0.32,y,z+0.078],50,0.06);
+  }
+  for(let i=0;i<14;i++) {
+    const y=-0.55+i*0.089, r=0.22+0.13*Math.sin(i*0.28);
+    ring(-0.9,y,0,r,false,0.12);
+    for(let j=0;j<200;j++) {
+      const a=rnd()*Math.PI*2;
+      m.points.push({p:[-0.9+r*Math.cos(a),y+rnd()*0.07,r*Math.sin(a)],alpha:0.16,radius:0.5});
+    }
+  }
+  for(let i=0;i<11;i++) ring(0.62,-0.25,-0.7+i*0.084,0.36,true,0.11);
+  for(let i=0;i<32;i++) {
+    const x=-0.14+i*0.037;
+    const arch=[];
+    for(let j=0;j<=24;j++) {
+      const a=j*Math.PI/24;
+      arch.push([x,0.25+0.61*Math.sin(a),0.9+0.36*Math.cos(a)]);
+    }
+    for(let j=1;j<arch.length;j++)edge(arch[j-1],arch[j],0.12);
+  }
+  for(let i=0;i<110;i++) {
+    const x=-1.45+rnd()*2.72,z=-0.76+rnd()*2.15;
+    const bottom=-0.82-rnd()*0.16;
+    edge([x,bottom,z],[x,bottom+0.12+rnd()*0.35,z],0.055);
+  }
+  m.cache=document.createElement('canvas');
+}
+
+function uStructureProject(p) {
+  const m=modeState, spread=num('separate');
+  const y=p[1]+Math.sign(p[1])*spread*0.24;
+  const x=p[0]*Math.cos(m.angle)+p[2]*Math.sin(m.angle);
+  const z=-p[0]*Math.sin(m.angle)+p[2]*Math.cos(m.angle);
+  return { x:0.5+x*0.225, y:0.53-(y*Math.cos(m.tilt)-z*Math.sin(m.tilt))*0.225, depth:z*Math.cos(m.tilt)+y*Math.sin(m.tilt) };
+}
+
+function uStructureDraw() {
+  const m=modeState;
+  if (m.size !== S || m.ground !== ground) m.dirty=true;
+  if (!m.dirty) { ctx.drawImage(m.cache,0,0,S,S); return; }
+  ctx.fillStyle=INK;ctx.fillRect(0,0,S,S);
+  const density=num('opacity'), cut=-1.6+num('section')*0.032;
+  const visible=p=>p[0]<=cut;
+  const shade=alpha=>paper(alpha*density);
+  const faces=m.faces.map(f=>({...f,screen:f.corners.map(uStructureProject)})).sort((a,b)=>a.screen[0].depth-b.screen[0].depth);
+  for(const face of faces) {
+    const clipped=[];
+    for(let i=0;i<4;i++) {
+      const a=face.corners[i],b=face.corners[(i+1)%4];
+      if(visible(a))clipped.push(a);
+      if(visible(a)!==visible(b)) { const t=(cut-a[0])/(b[0]-a[0]);clipped.push(a.map((v,j)=>lerp(v,b[j],t))); }
+    }
+    if(clipped.length<3)continue;
+    ctx.beginPath();clipped.map(uStructureProject).forEach((p,i)=>ctx[i?'lineTo':'moveTo'](p.x*S,p.y*S));
+    ctx.closePath();ctx.fillStyle=shade(face.alpha);ctx.fill();
+  }
+  for(const e of m.edges) {
+    let a=e.a,b=e.b;
+    if(!visible(a)&&!visible(b))continue;
+    if(visible(a)!==visible(b)) {
+      const t=(cut-a[0])/(b[0]-a[0]),p=a.map((v,j)=>lerp(v,b[j],t));
+      if(!visible(a))a=p;else b=p;
+    }
+    const aa=uStructureProject(a),bb=uStructureProject(b);
+    ctx.beginPath();ctx.moveTo(aa.x*S,aa.y*S);ctx.lineTo(bb.x*S,bb.y*S);
+    ctx.lineWidth=Math.max(0.45,S*0.0008);ctx.strokeStyle=shade(e.alpha);ctx.stroke();
+  }
+  for(const dot of m.points) {
+    if(!visible(dot.p))continue;
+    const p=uStructureProject(dot.p);
+    ctx.fillStyle=shade(dot.alpha);
+    const r=dot.radius*Math.max(0.8,S/800);
+    ctx.fillRect(p.x*S,p.y*S,r,r);
+  }
+  uText('ПРОСВЕЧИВАЮЩАЯ КОНСТРУКЦИЯ',0.055,0.105,0.016,paper(0.45));
+  uText('Ведите, чтобы повернуть',0.055,0.93,0.016,paper(0.4));
+  const size=Math.round(S*dpr);
+  m.cache.width=m.cache.height=size;
+  m.cache.getContext('2d').drawImage(canvas,0,0,size,size);
+  m.dirty=false;m.size=S;m.ground=ground;
+}
+
+function uStructureMove() {
+  const m=modeState;
+  if(!pointer.down||!m.grab)return;
+  m.angle=m.grab.angle+(pointer.x-m.grab.x)*3.5;
+  m.tilt=clamp(m.grab.tilt+(pointer.y-m.grab.y)*1.8,-0.8,0.9);
+  m.dirty=true;
+}
+
 const MODES = {
+  structure: {
+    label: 'конструкция',
+    note: 'Поверните конструкцию мышью или пальцем. Полупрозрачные оболочки открывают лестницы, кольца и арочные перекрытия внутри. «Сечение» снимает конструкцию справа налево, «раздвинуть» разделяет верхние и нижние слои. «Свет» регулирует плотность просвечивания. «Фон» переключает негатив.',
+    tools: [
+      { type: 'range', key: 'opacity', label: 'свет', min: 0.5, max: 3, step: 0.1, value: 2.3 },
+      { type: 'range', key: 'section', label: 'сечение', min: 0, max: 100, step: 1, value: 100 },
+      { type: 'range', key: 'separate', label: 'раздвинуть', min: 0, max: 2, step: 0.1, value: 0 },
+      { type: 'toggle', key: 'rotate', label: 'вращение', value: false },
+      { type: 'button', label: 'исходный вид', action() { modeState.angle=-0.65;modeState.tilt=0.38;modeState.dirty=true; } },
+    ],
+    cursor: 'grab', setup: uStructureSetup, draw: uStructureDraw,
+    step() { if(on('rotate')&&!pointer.down){modeState.angle+=STEP*0.13;modeState.dirty=true;} },
+    onDown() { modeState.grab={x:pointer.x,y:pointer.y,angle:modeState.angle,tilt:modeState.tilt}; },
+    onMove: uStructureMove,
+    onUp() { modeState.grab=null; },
+    onTool() { modeState.dirty=true; },
+  },
   fabric: {
     label: 'ткань',
     note: 'Захватите ткань и потяните: рисунок и переплетение сдвигаются вместе. Складки остаются после отпускания; хранятся восемь последних захватов. «Нити» меняют плотность плетения, «рисунок» — масштаб орнамента, «складки» — исходную деформацию. Кнопка «фон» инвертирует ткань.',
