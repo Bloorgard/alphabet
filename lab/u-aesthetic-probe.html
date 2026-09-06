@@ -1,0 +1,850 @@
+<title>У · три приёма</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#100e0b;
+    --paper:#f1ece0;
+    --muted:#8a8276;
+    --faint:#3a352c;
+    --accent:#d1441f;
+  }
+  *{box-sizing:border-box}
+  body{
+    background:var(--ink);
+    color:var(--paper);
+    font-family:'DM Mono', ui-monospace, monospace;
+    padding:40px clamp(20px,4vw,64px) 64px;
+    display:flex;
+    flex-direction:column;
+    gap:36px;
+  }
+  header{max-width:640px}
+  header .eyebrow{
+    font-size:12px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin:0 0 10px;
+  }
+  h1{
+    font-size:22px;
+    font-weight:500;
+    margin:0 0 12px;
+    text-wrap:balance;
+  }
+  header p{
+    font-size:13.5px;
+    line-height:1.6;
+    color:var(--muted);
+    margin:0;
+  }
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+    gap:28px;
+  }
+  .card{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  .card .head{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    gap:12px;
+  }
+  .card h2{
+    font-size:14.5px;
+    font-weight:500;
+    margin:0;
+  }
+  .card h2 span{color:var(--muted);font-weight:400}
+  button{
+    font-family:inherit;
+    font-size:12px;
+    letter-spacing:.03em;
+    color:var(--paper);
+    background:transparent;
+    border:1px solid var(--faint);
+    padding:6px 12px;
+    border-radius:3px;
+    cursor:pointer;
+  }
+  button:hover{border-color:var(--muted)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  canvas{
+    width:100%;
+    aspect-ratio:1/1;
+    background:var(--ink);
+    border:1px solid var(--faint);
+    border-radius:2px;
+    display:block;
+  }
+  .card p{
+    font-size:12.5px;
+    line-height:1.55;
+    color:var(--muted);
+    margin:0;
+  }
+  footer{
+    max-width:640px;
+    font-size:12px;
+    line-height:1.6;
+    color:var(--faint);
+    border-top:1px solid var(--faint);
+    padding-top:16px;
+  }
+</style>
+
+<header>
+  <p class="eyebrow">Полигон эстетики · буква У · девять приёмов, три раунда + сравнение композиции</p>
+  <h1>Тот же скелет, тот же закон — ещё три устройства</h1>
+  <p>Правила зафиксированы: только чёрный и белый, полутон исключительно паттерном, контраст крупного и мелкого гарантирует сам алгоритм, расстановка не идёт по кривой и не сыплет кружками. Плетение (Г) пока оставлено как есть — не хватает понимания, каким правилом его усилить. Трещина и жадная упаковка подтверждены. Три новых — разлом со сдвигом, нарост и чешуя.</p>
+  <p>Ниже — статическое сравнение двух способов скрестить приём «Трещина» с деревом-У из основного полигона: передний план всегда сидит на трёх плечах буквы (развилка + два плеча + нога), задний — свободные деревца без привязки к силуэту буквы. Ещё без курсорного изгиба — сначала смотрим, как ложится рисунок.</p>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <div class="head"><h2>Осколки <span>приём А</span></h2><button data-mode="a">ещё раз</button></div>
+    <canvas id="cA" width="440" height="440"></canvas>
+    <p>Строгая сетка, повёрнутая по ноге буквы: шаг растёт от развилки к краю, через ряд — сдвиг вразбежку. Каждая ячейка сама решает, залита она, расколота на два тона или оставлена пустой.</p>
+  </div>
+  <div class="card">
+    <div class="head"><h2>Колонизация <span>приём Б</span></h2><button data-mode="b">ещё раз</button></div>
+    <canvas id="cB" width="440" height="440"></canvas>
+    <p>Три колонии стартуют из разных концов буквы и клетка за клеткой отвоёвывают сетку друг у друга. Граница рваная и не повторяется; часть клеток остаётся ничьей.</p>
+  </div>
+  <div class="card">
+    <div class="head"><h2>Осыпь <span>приём В</span></h2><button data-mode="c">ещё раз</button></div>
+    <canvas id="cC" width="440" height="440"></canvas>
+    <p>Пара крупных валунов и рой мелкого щебня падают вдоль направления к ноге и оседают, натыкаясь друг на друга. Разрыв масштаба задан заранее, не оставлен случаю.</p>
+  </div>
+  <div class="card">
+    <div class="head"><h2>Плетение <span>приём Г</span></h2><button data-mode="d">ещё раз</button></div>
+    <canvas id="cD" width="440" height="440"></canvas>
+    <p>Две решётки полос, каждая по направлению своего плеча буквы, проходят друг под другом и друг над другом по чёткому правилу чётности. Одна полоса в каждой решётке — намеренно широкая; изредка нить рвётся совсем.</p>
+  </div>
+  <div class="card">
+    <div class="head"><h2>Трещина <span>приём Д</span></h2><button data-mode="e">ещё раз</button></div>
+    <canvas id="cE" width="440" height="440"></canvas>
+    <p>Сплошное поле бумаги раскалывается от развилки: главный разлом широкий, каждое ответвление уже предыдущего по неизменному правилу. Контраст ствола и веток встроен в саму рекурсию.</p>
+  </div>
+  <div class="card">
+    <div class="head"><h2>Жадная упаковка <span>приём Е</span></h2><button data-mode="f">ещё раз</button></div>
+    <canvas id="cF" width="440" height="440"></canvas>
+    <p>Сначала кладутся один-два больших неровных камня, потом более мелкие в свободные промежутки, и так до совсем мелкой крошки. Порядок укладки — от крупного к мелкому — сам гарантирует контраст.</p>
+  </div>
+  <div class="card">
+    <div class="head"><h2>Разлом со сдвигом <span>приём Ж</span></h2><button data-mode="g">ещё раз</button></div>
+    <canvas id="cG" width="440" height="440"></canvas>
+    <p>Слои породы вдоль одного плеча буквы разрезаны трещиной под другим углом; всё по одну сторону от неё сдвинуто целиком, как при геологическом сбросе. Разрыв виден по несовпадению слоёв, не по самой линии.</p>
+  </div>
+  <div class="card">
+    <div class="head"><h2>Нарост <span>приём З</span></h2><button data-mode="h">ещё раз</button></div>
+    <canvas id="cH" width="440" height="440"></canvas>
+    <p>От развилки растёт коралловая масса: частицы блуждают и прилипают, где коснулись. Ядро становится сплошным пятном, к краям — рассыпается на отдельные веточки без обводки.</p>
+  </div>
+  <div class="card">
+    <div class="head"><h2>Чешуя <span>приём И</span></h2><button data-mode="i">ещё раз</button></div>
+    <canvas id="cI" width="440" height="440"></canvas>
+    <p>Ряды лепестков внахлёст идут вдоль ноги буквы, каждый следующий ряд перекрывает предыдущий. Размер растёт от одного конца к другому — какой конец крупнее, решает жребий, не рука.</p>
+  </div>
+  <div class="card">
+    <div class="head"><h2>Дерево-гибрид <span>сравнение 1</span></h2><button data-mode="j">ещё раз</button></div>
+    <canvas id="cJ" width="440" height="440"></canvas>
+    <p>Ствол дерева-У у развилки — заливка, как в основном полигоне; как только рекурсия утончает ветку ниже порога, заливка сама уступает место штриху. Задний план — три свободных деревца тем же правилом, без привязки к букве.</p>
+  </div>
+  <div class="card">
+    <div class="head"><h2>Дерево-трещина <span>сравнение 2</span></h2><button data-mode="k">ещё раз</button></div>
+    <canvas id="cK" width="440" height="440"></canvas>
+    <p>То же дерево-У, но целиком приёмом «Трещина»: рваный штрих без единой заливки, включая ствол у самой развилки. Задний план — те же свободные трещины-деревца, мельче и без ствола-буквы.</p>
+  </div>
+</div>
+
+<footer>Ч/б — выбор конкретного этюда, не ограничение. Скелет буквы (развилка + два плеча + нога) остаётся источником асимметрии и точек отсчёта, но ни один приём не рисует по нему ни линией, ни цепочкой кружков, и ни один не смешивает тон прозрачностью.</footer>
+
+<script>
+const INK = '#100e0b', PAPER = '#f1ece0';
+// Только чёрный и белый. Полутон — не цвет, а плотность паттерна: штриховка внахлёст.
+function hatchRect(ctx, x0, y0, w, h, pitch){
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0,y0,w,h); ctx.clip();
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = Math.max(0.6, pitch*0.32);
+  const diag = w+h;
+  for(let o=-diag; o<diag; o+=pitch){
+    ctx.beginPath();
+    ctx.moveTo(x0+o, y0);
+    ctx.lineTo(x0+o-h, y0+h);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function rand(seed){ let s = seed >>> 0; return () => { s = (s*1664525+1013904223)>>>0; return s/4294967296; }; }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function mix(A,B,t){ return [lerp(A[0],B[0],t), lerp(A[1],B[1],t)]; }
+function norm(A,B){ const dx=B[0]-A[0], dy=B[1]-A[1]; const len=Math.hypot(dx,dy)||1; return [-dy/len, dx/len]; }
+
+// Развилка не в центре, плечи независимой длины/угла, нога может уйти за кадр.
+// Ничего не отражено: rnd() зовётся отдельно на каждый параметр каждой стороны.
+function skeleton(rnd){
+  const J = [0.22 + rnd()*0.56, 0.18 + rnd()*0.5];
+  const mk = (aMin,aMax,lMin,lMax) => {
+    const a = (aMin + rnd()*(aMax-aMin)) * Math.PI/180;
+    const l = lMin + rnd()*(lMax-lMin);
+    return [J[0]+Math.cos(a)*l, J[1]+Math.sin(a)*l];
+  };
+  const P1 = mk(200, 260, 0.28, 0.85);
+  const P2 = mk(250, 340, 0.2, 0.7);
+  const T  = mk(35, 130, 0.4, 1.05);
+  return { J, P1, P2, T,
+    w1: 0.006 + rnd()*0.02, w1j: 0.02 + rnd()*0.05,
+    w2: 0.006 + rnd()*0.02, w2j: 0.02 + rnd()*0.06,
+    wt: 0.015 + rnd()*0.05, wtEnd: 0.006 + rnd()*0.03 };
+}
+
+function setup(canvas){
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  const size = canvas.clientWidth || 440;
+  canvas.width = size*dpr; canvas.height = size*dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return { ctx, S: size };
+}
+
+function drawA(canvas, seed){
+  const { ctx, S } = setup(canvas);
+  const rnd = rand(seed);
+  const K = skeleton(rnd);
+  ctx.clearRect(0,0,S,S);
+
+  // Не рекурсивное дробление под случайными углами, а строгая сетка:
+  // повёрнута по направлению ноги буквы, шаг растёт от развилки к краю,
+  // через ряд — сдвиг вразбежку. Ряды/столбцы прямые, шаг — переменный.
+  const angle = Math.atan2(K.T[1]-K.J[1], K.T[0]-K.J[0]);
+  const cosA = Math.cos(angle), sinA = Math.sin(angle);
+  const toCanvas = (u,v) => [ K.J[0] + cosA*u - sinA*v, K.J[1] + sinA*u + cosA*v ];
+  const nHalf = 7;
+  const growth = 0.09 + rnd()*0.09;
+  function axis(){
+    const sizes = [];
+    for(let i=-nHalf;i<=nHalf;i++) sizes.push(0.02 + growth*Math.pow(Math.abs(i)/nHalf, 1.7));
+    const total = sizes.reduce((a,b)=>a+b,0);
+    let acc = -total/2, pos = [acc];
+    for(const s of sizes){ acc += s; pos.push(acc); }
+    return pos;
+  }
+  const rows = axis();
+  const colsBase = axis();
+  const rowStep = rows[1]-rows[0];
+
+  for(let r=0; r<rows.length-1; r++){
+    const v0 = rows[r], v1 = rows[r+1];
+    const shift = (r%2===1) ? rowStep*0.5 : 0;
+    for(let c=-1; c<colsBase.length; c++){
+      const u0 = (colsBase[c] ?? colsBase[0]-rowStep) + shift;
+      const u1 = (colsBase[c+1] ?? colsBase[colsBase.length-1]+rowStep) + shift;
+      const p0=toCanvas(u0,v0), p1=toCanvas(u1,v0), p2=toCanvas(u1,v1), p3=toCanvas(u0,v1);
+      const xs=[p0[0],p1[0],p2[0],p3[0]], ys=[p0[1],p1[1],p2[1],p3[1]];
+      const bx0=Math.min(...xs)*S, by0=Math.min(...ys)*S;
+      const bw=(Math.max(...xs)-Math.min(...xs))*S, bh=(Math.max(...ys)-Math.min(...ys))*S;
+      if(Math.max(...xs)<0 || Math.min(...xs)>1 || Math.max(...ys)<0 || Math.min(...ys)>1) continue;
+      const path = () => { ctx.beginPath(); [p0,p1,p2,p3].forEach((p,i)=> i? ctx.lineTo(p[0]*S,p[1]*S): ctx.moveTo(p[0]*S,p[1]*S)); ctx.closePath(); };
+      const roll = rnd();
+      if(roll < 0.1){
+        // пусто — дыра до фона (чернила)
+      } else if(roll < 0.46){
+        path(); ctx.fillStyle = PAPER; ctx.fill();
+      } else if(roll < 0.62){
+        path(); ctx.fillStyle = PAPER; ctx.fill();
+        hatchRect(ctx, bx0, by0, bw, bh, Math.max(1.6, bw*0.16));
+      } else if(roll < 0.82){
+        ctx.beginPath(); ctx.moveTo(p0[0]*S,p0[1]*S); ctx.lineTo(p1[0]*S,p1[1]*S); ctx.lineTo(p3[0]*S,p3[1]*S); ctx.closePath();
+        ctx.fillStyle = PAPER; ctx.fill();
+        ctx.save();
+        ctx.beginPath(); ctx.moveTo(p1[0]*S,p1[1]*S); ctx.lineTo(p2[0]*S,p2[1]*S); ctx.lineTo(p3[0]*S,p3[1]*S); ctx.closePath(); ctx.clip();
+        ctx.fillStyle = PAPER; ctx.fillRect(bx0,by0,bw,bh);
+        hatchRect(ctx, bx0, by0, bw, bh, Math.max(1.4, bw*0.12));
+        ctx.restore();
+      } else {
+        path(); ctx.fillStyle = PAPER; ctx.fill();
+        const cxp = bx0+bw/2, cyp = by0+bh/2, rr = Math.min(bw,bh)*0.32;
+        ctx.save(); path(); ctx.clip();
+        ctx.fillStyle = INK;
+        ctx.beginPath(); ctx.arc(cxp,cyp, rr*(0.6+rnd()*0.8), 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+      }
+      path(); ctx.strokeStyle = INK; ctx.lineWidth = Math.max(0.5, S/650); ctx.stroke();
+    }
+  }
+}
+
+function drawB(canvas, seed){
+  const { ctx, S } = setup(canvas);
+  const rnd = rand(seed);
+  const K = skeleton(rnd);
+  ctx.clearRect(0,0,S,S);
+  const gridN = 56;
+  const owner = new Int8Array(gridN*gridN).fill(-1);
+  const idx = (x,y) => y*gridN+x;
+  const seeds = [K.P1, K.P2, K.T];
+  const bias = seeds.map(()=> 0.3 + rnd()*0.55);
+  seeds.forEach((s,i)=>{
+    const gx = Math.min(gridN-1, Math.max(0, (s[0]*gridN)|0));
+    const gy = Math.min(gridN-1, Math.max(0, (s[1]*gridN)|0));
+    owner[idx(gx,gy)] = i;
+  });
+  for(let iter=0; iter<170; iter++){
+    for(let y=0;y<gridN;y++) for(let x=0;x<gridN;x++){
+      if(owner[idx(x,y)] !== -1) continue;
+      const ns = [];
+      if(x>0 && owner[idx(x-1,y)]>=0) ns.push(owner[idx(x-1,y)]);
+      if(x<gridN-1 && owner[idx(x+1,y)]>=0) ns.push(owner[idx(x+1,y)]);
+      if(y>0 && owner[idx(x,y-1)]>=0) ns.push(owner[idx(x,y-1)]);
+      if(y<gridN-1 && owner[idx(x,y+1)]>=0) ns.push(owner[idx(x,y+1)]);
+      if(!ns.length) continue;
+      const pick = ns[(rnd()*ns.length)|0];
+      if(rnd() < bias[pick]) owner[idx(x,y)] = pick;
+    }
+  }
+  const cs = S/gridN;
+  // три колонии — три чёрно-белых текстуры, ни одной серой заливки:
+  // сплошная бумага / шашечка клетка-через-клетку / диагональная штриховка
+  for(let y=0;y<gridN;y++) for(let x=0;x<gridN;x++){
+    const o = owner[idx(x,y)];
+    if(o < 0) continue;
+    const px=x*cs, py=y*cs;
+    if(o === 0){
+      ctx.fillStyle = PAPER; ctx.fillRect(px,py,cs+0.6,cs+0.6);
+    } else if(o === 1){
+      ctx.fillStyle = (x+y)%2===0 ? PAPER : INK;
+      ctx.fillRect(px,py,cs+0.6,cs+0.6);
+    } else {
+      ctx.fillStyle = INK; ctx.fillRect(px,py,cs+0.6,cs+0.6);
+      ctx.strokeStyle = PAPER; ctx.lineWidth = Math.max(0.6,S/500);
+      ctx.beginPath(); ctx.moveTo(px,py+cs); ctx.lineTo(px+cs,py); ctx.stroke();
+    }
+  }
+  // граница между колониями — сплошная тёмная нить трассировки
+  ctx.strokeStyle = INK; ctx.lineWidth = Math.max(0.6, S/500);
+  for(let y=0;y<gridN;y++) for(let x=0;x<gridN;x++){
+    const o = owner[idx(x,y)];
+    if(o<0) continue;
+    const px=x*cs, py=y*cs;
+    if(x<gridN-1 && owner[idx(x+1,y)]>=0 && owner[idx(x+1,y)]!==o){ ctx.beginPath(); ctx.moveTo(px+cs,py); ctx.lineTo(px+cs,py+cs); ctx.stroke(); }
+    if(y<gridN-1 && owner[idx(x,y+1)]>=0 && owner[idx(x,y+1)]!==o){ ctx.beginPath(); ctx.moveTo(px,py+cs); ctx.lineTo(px+cs,py+cs); ctx.stroke(); }
+  }
+}
+
+function drawC(canvas, seed){
+  const { ctx, S } = setup(canvas);
+  const rnd = rand(seed);
+  const K = skeleton(rnd);
+  ctx.clearRect(0,0,S,S);
+  const gdir = Math.atan2(K.T[1]-K.J[1], K.T[0]-K.J[0]);
+  const shards = [];
+
+  // сперва несколько валунов — крупная масса, вокруг которой осыпается мелочь.
+  // Разрыв между крупным и мелким должен читаться сразу, без сравнения на глаз.
+  const boulderN = 1 + ((rnd()*3)|0);
+  for(let i=0;i<boulderN;i++){
+    const t = 0.15 + rnd()*0.7;
+    const x = lerp(K.J[0], K.T[0], t) + (rnd()-0.5)*0.18;
+    const y = lerp(K.J[1], K.T[1], t) + (rnd()-0.5)*0.18;
+    const w = 0.16 + rnd()*0.26, h = 0.1 + rnd()*0.18;
+    shards.push({ x, y, w, h, rot: rnd()*Math.PI*2, r: Math.max(w,h)*0.5, patterned: rnd()<0.5, boulder:true });
+  }
+
+  let tries = 0;
+  while(shards.length < boulderN + 190 && tries < 7000){
+    tries++;
+    const spawnA = gdir + Math.PI + (rnd()-0.5)*1.6;
+    const dist = 0.05 + rnd()*0.25;
+    let px = K.J[0] + Math.cos(spawnA)*dist + (rnd()-0.5)*0.35;
+    let py = K.J[1] + Math.sin(spawnA)*dist + (rnd()-0.5)*0.35;
+    let settled = false, steps = 0;
+    while(steps < 60){
+      steps++;
+      px += Math.cos(gdir)*0.014 + (rnd()-0.5)*0.006;
+      py += Math.sin(gdir)*0.014 + (rnd()-0.5)*0.006;
+      let hit = false;
+      for(const sh of shards){
+        if(Math.hypot(px-sh.x, py-sh.y) < sh.r + 0.018){ hit = true; break; }
+      }
+      if(hit){ settled = steps>1; break; }
+      if(px<-0.15||px>1.15||py<-0.15||py>1.15){ break; }
+    }
+    if(settled || (steps>=60 && px>-0.1 && px<1.1 && py>-0.1 && py<1.1)){
+      const w = 0.008+rnd()*0.024, h = 0.004+rnd()*0.012;
+      shards.push({ x:px, y:py, w, h, rot: rnd()*Math.PI*2, r: Math.max(w,h)*0.55, patterned: rnd()<0.16, boulder:false });
+    }
+  }
+  shards.sort((a,b)=> (a.boulder===b.boulder) ? a.y-b.y : (a.boulder? -1:1));
+  for(const sh of shards){
+    ctx.save();
+    ctx.translate(sh.x*S, sh.y*S);
+    ctx.rotate(sh.rot);
+    const w = sh.w*S, h = sh.h*S;
+    ctx.fillStyle = PAPER;
+    ctx.fillRect(-w/2,-h/2,w,h);
+    if(sh.patterned) hatchRect(ctx, -w/2, -h/2, w, h, Math.max(1.4, Math.min(w,h)*0.3));
+    ctx.strokeStyle = INK; ctx.lineWidth = Math.max(0.5, S/700);
+    ctx.strokeRect(-w/2,-h/2,w,h);
+    ctx.restore();
+  }
+}
+
+function drawD(canvas, seed){
+  const { ctx, S } = setup(canvas);
+  const rnd = rand(seed);
+  const K = skeleton(rnd);
+  ctx.clearRect(0,0,S,S);
+
+  const angA = Math.atan2(K.P1[1]-K.J[1], K.P1[0]-K.J[0]);
+  const angB = Math.atan2(K.P2[1]-K.J[1], K.P2[0]-K.J[0]);
+  const perpA = [-Math.sin(angA), Math.cos(angA)], dirA = [Math.cos(angA), Math.sin(angA)];
+  const perpB = [-Math.sin(angB), Math.cos(angB)], dirB = [Math.cos(angB), Math.sin(angB)];
+
+  function family(n, pitchBase){
+    const bigIndex = ((rnd()*(n*2+1))|0) - n;
+    const strips = [];
+    for(let i=-n;i<=n;i++){
+      const off = i*pitchBase*(0.78+rnd()*0.44);
+      let width = pitchBase*(0.32+rnd()*0.32);
+      if(i===bigIndex) width *= 2.5;
+      strips.push({ i, off, width });
+    }
+    return strips;
+  }
+  const n = 6;
+  const stripsA = family(n, 0.09+rnd()*0.05);
+  const stripsB = family(n, 0.09+rnd()*0.05);
+  const diag = 2.4;
+
+  function stripQuad(off, perp, dir, width){
+    const cx = K.J[0]+perp[0]*off, cy = K.J[1]+perp[1]*off;
+    const hx = dir[0]*diag, hy = dir[1]*diag, px = perp[0]*width/2, py = perp[1]*width/2;
+    return [[cx-hx+px,cy-hy+py],[cx+hx+px,cy+hy+py],[cx+hx-px,cy+hy-py],[cx-hx-px,cy-hy-py]];
+  }
+  function fillPoly(pts, style, lw){
+    ctx.beginPath(); pts.forEach((p,i)=> i? ctx.lineTo(p[0]*S,p[1]*S): ctx.moveTo(p[0]*S,p[1]*S)); ctx.closePath();
+    ctx.fillStyle = style; ctx.fill();
+    ctx.strokeStyle = INK; ctx.lineWidth = Math.max(0.4, lw); ctx.stroke();
+  }
+  for(const s of stripsA) fillPoly(stripQuad(s.off, perpA, dirA, s.width), PAPER, S/650);
+  for(const s of stripsB) fillPoly(stripQuad(s.off, perpB, dirB, s.width), PAPER, S/650);
+
+  function intersect(offA, offB){
+    const p1 = [K.J[0]+perpA[0]*offA, K.J[1]+perpA[1]*offA];
+    const p2 = [K.J[0]+perpB[0]*offB, K.J[1]+perpB[1]*offB];
+    const denom = dirA[0]*dirB[1]-dirA[1]*dirB[0];
+    if(Math.abs(denom)<1e-6) return null;
+    const t = ((p2[0]-p1[0])*dirB[1] - (p2[1]-p1[1])*dirB[0]) / denom;
+    return [p1[0]+dirA[0]*t, p1[1]+dirA[1]*t];
+  }
+  for(const a of stripsA){
+    for(const b of stripsB){
+      const pt = intersect(a.off, b.off);
+      if(!pt || pt[0]<-0.08||pt[0]>1.08||pt[1]<-0.08||pt[1]>1.08) continue;
+      if(rnd() < 0.045){
+        ctx.beginPath(); ctx.arc(pt[0]*S, pt[1]*S, Math.max(a.width,b.width)*S*0.55, 0, Math.PI*2);
+        ctx.fillStyle = INK; ctx.fill();
+        continue;
+      }
+      if((a.i+b.i)%2===0){
+        const len = a.width*1.3, hx=dirA[0]*len, hy=dirA[1]*len, nx=-dirA[1]*a.width/2, ny=dirA[0]*a.width/2;
+        fillPoly([[pt[0]-hx+nx,pt[1]-hy+ny],[pt[0]+hx+nx,pt[1]+hy+ny],[pt[0]+hx-nx,pt[1]+hy-ny],[pt[0]-hx-nx,pt[1]-hy-ny]], PAPER, S/800);
+      }
+    }
+  }
+}
+
+function drawE(canvas, seed){
+  const { ctx, S } = setup(canvas);
+  const rnd = rand(seed);
+  const K = skeleton(rnd);
+  ctx.clearRect(0,0,S,S);
+  ctx.fillStyle = PAPER; ctx.fillRect(0,0,S,S);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+  function crack(x, y, angle, width, budget){
+    if(budget<=0 || width<0.0015) return;
+    let cx=x, cy=y, a=angle;
+    const steps = 5+((rnd()*7)|0);
+    for(let s=0;s<steps;s++){
+      a += (rnd()-0.5)*0.55;
+      const step = 0.02+rnd()*0.05;
+      const nx = cx+Math.cos(a)*step, ny = cy+Math.sin(a)*step;
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = Math.max(0.6, width*S);
+      ctx.beginPath(); ctx.moveTo(cx*S,cy*S); ctx.lineTo(nx*S,ny*S); ctx.stroke();
+      cx=nx; cy=ny;
+      if(rnd() < 0.22 && budget>1){
+        crack(cx, cy, a + (rnd()<0.5?1:-1)*(0.5+rnd()*0.7), width*(0.4+rnd()*0.25), budget-1);
+      }
+      if(cx<-0.08||cx>1.08||cy<-0.08||cy>1.08) return;
+    }
+    crack(cx, cy, a, width*(0.68+rnd()*0.22), budget-1);
+  }
+
+  const startAngle = Math.atan2(K.T[1]-K.J[1], K.T[0]-K.J[0]);
+  crack(K.J[0], K.J[1], startAngle, 0.045+rnd()*0.02, 6+((rnd()*2)|0));
+  crack(K.J[0], K.J[1], startAngle+Math.PI+(rnd()-0.5)*0.7, 0.026+rnd()*0.014, 4+((rnd()*3)|0));
+}
+
+function drawF(canvas, seed){
+  const { ctx, S } = setup(canvas);
+  const rnd = rand(seed);
+  const K = skeleton(rnd);
+  ctx.clearRect(0,0,S,S);
+  const placed = [];
+  const tiers = [
+    { size:[0.15,0.27], count:1+((rnd()*2)|0), tries:60 },
+    { size:[0.06,0.12], count:3+((rnd()*3)|0), tries:100 },
+    { size:[0.028,0.055], count:6+((rnd()*6)|0), tries:160 },
+    { size:[0.01,0.022], count:18+((rnd()*16)|0), tries:240 },
+  ];
+  for(const tier of tiers){
+    for(let n=0;n<tier.count;n++){
+      for(let attempt=0; attempt<tier.tries; attempt++){
+        const size = lerp(tier.size[0], tier.size[1], rnd());
+        let x,y;
+        if(rnd()<0.6){
+          const d = Math.pow(rnd(),1.5)*0.55;
+          const a = rnd()*Math.PI*2;
+          x = K.J[0]+Math.cos(a)*d; y = K.J[1]+Math.sin(a)*d;
+        } else { x = rnd(); y = rnd(); }
+        let ok = x>-0.05 && x<1.05 && y>-0.05 && y<1.05;
+        if(ok) for(const p of placed){ if(Math.hypot(x-p.x,y-p.y) < (size+p.r)*0.88){ ok=false; break; } }
+        if(ok){ placed.push({x,y,r:size, rot:rnd()*Math.PI*2, sides: 5+((rnd()*3)|0), patterned: rnd()<0.2}); break; }
+      }
+    }
+  }
+  for(const p of placed){
+    const pts = [];
+    for(let k=0;k<p.sides;k++){
+      const a = p.rot + k/p.sides*Math.PI*2;
+      const rr = p.r*(0.72+rnd()*0.5);
+      pts.push([p.x+Math.cos(a)*rr, p.y+Math.sin(a)*rr]);
+    }
+    ctx.beginPath(); pts.forEach((pt,i)=> i? ctx.lineTo(pt[0]*S,pt[1]*S): ctx.moveTo(pt[0]*S,pt[1]*S)); ctx.closePath();
+    ctx.fillStyle = PAPER; ctx.fill();
+    if(p.patterned){
+      const xs=pts.map(q=>q[0]*S), ys=pts.map(q=>q[1]*S);
+      ctx.save();
+      ctx.beginPath(); pts.forEach((pt,i)=> i? ctx.lineTo(pt[0]*S,pt[1]*S): ctx.moveTo(pt[0]*S,pt[1]*S)); ctx.closePath(); ctx.clip();
+      hatchRect(ctx, Math.min(...xs), Math.min(...ys), Math.max(...xs)-Math.min(...xs), Math.max(...ys)-Math.min(...ys), Math.max(1.4, p.r*S*0.22));
+      ctx.restore();
+    }
+    ctx.strokeStyle = INK; ctx.lineWidth = Math.max(0.5, S/650); ctx.stroke();
+  }
+}
+
+function drawG(canvas, seed){
+  const { ctx, S } = setup(canvas);
+  const rnd = rand(seed);
+  const K = skeleton(rnd);
+  ctx.clearRect(0,0,S,S);
+  const BIG = 2.6;
+
+  const layerAngle = Math.atan2(K.P1[1]-K.J[1], K.P1[0]-K.J[0]);
+  const dirL = [Math.cos(layerAngle), Math.sin(layerAngle)];
+  const perpL = [-Math.sin(layerAngle), Math.cos(layerAngle)];
+
+  function bandQuad(c0, c1){
+    return [
+      [K.J[0]+perpL[0]*c0-dirL[0]*BIG, K.J[1]+perpL[1]*c0-dirL[1]*BIG],
+      [K.J[0]+perpL[0]*c0+dirL[0]*BIG, K.J[1]+perpL[1]*c0+dirL[1]*BIG],
+      [K.J[0]+perpL[0]*c1+dirL[0]*BIG, K.J[1]+perpL[1]*c1+dirL[1]*BIG],
+      [K.J[0]+perpL[0]*c1-dirL[0]*BIG, K.J[1]+perpL[1]*c1-dirL[1]*BIG],
+    ];
+  }
+  const bands = [];
+  let pos = -1.3;
+  while(pos < 1.3){
+    let width = 0.028 + rnd()*0.045;
+    if(rnd() < 0.1) width *= 3.2;
+    bands.push({ c0: pos, c1: pos+width, roll: rnd() });
+    pos += width;
+  }
+
+  const faultAngle = layerAngle + Math.PI/2 + (rnd()-0.5)*0.9;
+  const dF = [Math.cos(faultAngle), Math.sin(faultAngle)];
+  const nF = [-dF[1], dF[0]];
+  const shift = (0.05 + rnd()*0.22) * (rnd()<0.5?1:-1);
+
+  function clipToHalf(side){
+    const pts = [
+      [K.J[0]+dF[0]*BIG, K.J[1]+dF[1]*BIG],
+      [K.J[0]-dF[0]*BIG, K.J[1]-dF[1]*BIG],
+      [K.J[0]-dF[0]*BIG+nF[0]*BIG*side, K.J[1]-dF[1]*BIG+nF[1]*BIG*side],
+      [K.J[0]+dF[0]*BIG+nF[0]*BIG*side, K.J[1]+dF[1]*BIG+nF[1]*BIG*side],
+    ];
+    ctx.beginPath();
+    pts.forEach((p,i)=> i? ctx.lineTo(p[0]*S,p[1]*S): ctx.moveTo(p[0]*S,p[1]*S));
+    ctx.closePath(); ctx.clip();
+  }
+  function paintBands(offset){
+    for(const b of bands){
+      const quad = bandQuad(b.c0+offset, b.c1+offset);
+      const xs=quad.map(p=>p[0]*S), ys=quad.map(p=>p[1]*S);
+      ctx.beginPath(); quad.forEach((p,i)=> i? ctx.lineTo(p[0]*S,p[1]*S): ctx.moveTo(p[0]*S,p[1]*S)); ctx.closePath();
+      if(b.roll < 0.14){ /* пусто — до фона */ }
+      else if(b.roll < 0.6){ ctx.fillStyle=PAPER; ctx.fill(); }
+      else {
+        ctx.fillStyle=PAPER; ctx.fill();
+        hatchRect(ctx, Math.min(...xs), Math.min(...ys), Math.max(...xs)-Math.min(...xs), Math.max(...ys)-Math.min(...ys), Math.max(1.6,(b.c1-b.c0)*S*0.5));
+      }
+      ctx.strokeStyle=INK; ctx.lineWidth=Math.max(0.5,S/700); ctx.stroke();
+    }
+  }
+  ctx.save(); clipToHalf(1); paintBands(0); ctx.restore();
+  ctx.save(); clipToHalf(-1); paintBands(shift); ctx.restore();
+
+  ctx.strokeStyle = INK; ctx.lineWidth = Math.max(0.6, S/500);
+  ctx.beginPath();
+  ctx.moveTo((K.J[0]+dF[0]*BIG)*S, (K.J[1]+dF[1]*BIG)*S);
+  ctx.lineTo((K.J[0]-dF[0]*BIG)*S, (K.J[1]-dF[1]*BIG)*S);
+  ctx.stroke();
+}
+
+function drawH(canvas, seed){
+  const { ctx, S } = setup(canvas);
+  const rnd = rand(seed);
+  const K = skeleton(rnd);
+  ctx.clearRect(0,0,S,S);
+  const gridN = 84;
+  const occ = new Uint8Array(gridN*gridN);
+  const idx = (x,y) => y*gridN+x;
+  const seedX = Math.min(gridN-1, Math.max(0, (K.J[0]*gridN)|0));
+  const seedY = Math.min(gridN-1, Math.max(0, (K.J[1]*gridN)|0));
+  occ[idx(seedX,seedY)] = 1;
+  let clusterR = 2;
+  const target = 560 + ((rnd()*260)|0);
+  let placed = 1, attempts = 0;
+  const dxs=[1,-1,0,0,1,1,-1,-1], dys=[0,0,1,-1,1,-1,1,-1];
+  while(placed < target && attempts < target*45){
+    attempts++;
+    const spawnR = clusterR + 5 + rnd()*4;
+    const a0 = rnd()*Math.PI*2;
+    let x = Math.round(seedX + Math.cos(a0)*spawnR);
+    let y = Math.round(seedY + Math.sin(a0)*spawnR);
+    for(let step=0; step<240; step++){
+      if(x<1||x>=gridN-1||y<1||y>=gridN-1) break;
+      const k = (rnd()*8)|0;
+      x += dxs[k]; y += dys[k];
+      if(x<1||x>=gridN-1||y<1||y>=gridN-1) break;
+      if(occ[idx(x-1,y)]||occ[idx(x+1,y)]||occ[idx(x,y-1)]||occ[idx(x,y+1)]){
+        occ[idx(x,y)] = 1; placed++;
+        const dist = Math.hypot(x-seedX,y-seedY);
+        if(dist > clusterR) clusterR = dist;
+        break;
+      }
+      if(Math.hypot(x-seedX,y-seedY) > clusterR + 20) break;
+    }
+  }
+  const cs = S/gridN;
+  for(let y=0;y<gridN;y++) for(let x=0;x<gridN;x++){
+    if(!occ[idx(x,y)]) continue;
+    const core = occ[idx(x-1,y)] && occ[idx(x+1,y)] && occ[idx(x,y-1)] && occ[idx(x,y+1)];
+    ctx.fillStyle = PAPER;
+    ctx.fillRect(x*cs, y*cs, cs+0.6, cs+0.6);
+    if(!core){
+      ctx.strokeStyle = INK; ctx.lineWidth = Math.max(0.5, S/700);
+      ctx.strokeRect(x*cs, y*cs, cs+0.6, cs+0.6);
+    }
+  }
+}
+
+function drawI(canvas, seed){
+  const { ctx, S } = setup(canvas);
+  const rnd = rand(seed);
+  const K = skeleton(rnd);
+  ctx.clearRect(0,0,S,S);
+  const rowAngle = Math.atan2(K.T[1]-K.J[1], K.T[0]-K.J[0]);
+  const dirR = [Math.cos(rowAngle), Math.sin(rowAngle)];
+  const perpR = [-Math.sin(rowAngle), Math.cos(rowAngle)];
+
+  const rows = 9 + ((rnd()*4)|0);
+  let sizeStart = 0.018 + rnd()*0.018, sizeEnd = 0.09 + rnd()*0.07;
+  if(rnd()<0.5){ const t=sizeStart; sizeStart=sizeEnd; sizeEnd=t; }
+
+  let rowPos = -0.55;
+  for(let r=0;r<rows;r++){
+    const t = r/(rows-1);
+    const size = lerp(sizeStart, sizeEnd, t);
+    const overlap = 0.55 + rnd()*0.2;
+    rowPos += size*(1-overlap*0.5);
+    const rowOffset = (r%2)*size*0.5;
+    let colPos = -0.7 + rowOffset;
+    while(colPos < 0.9){
+      const cx = K.J[0] + dirR[0]*rowPos + perpR[0]*colPos;
+      const cy = K.J[1] + dirR[1]*rowPos + perpR[1]*colPos;
+      if(cx>-0.1 && cx<1.1 && cy>-0.1 && cy<1.1){
+        ctx.save();
+        ctx.translate(cx*S, cy*S);
+        ctx.rotate(rowAngle+Math.PI/2);
+        const rr = size*S;
+        ctx.beginPath();
+        ctx.moveTo(-rr*0.55, 0);
+        ctx.quadraticCurveTo(0, -rr*1.05, rr*0.55, 0);
+        ctx.quadraticCurveTo(0, rr*0.45, -rr*0.55, 0);
+        ctx.closePath();
+        ctx.fillStyle = PAPER; ctx.fill();
+        if(rnd()<0.22) hatchRect(ctx, -rr*0.6, -rr*1.1, rr*1.2, rr*1.6, Math.max(1.4, rr*0.28));
+        ctx.strokeStyle = INK; ctx.lineWidth = Math.max(0.5, S/700);
+        ctx.stroke();
+        ctx.restore();
+      }
+      colPos += size*(1-overlap);
+    }
+  }
+}
+
+// --- Сравнение: дерево-У скрещённое с приёмом «Трещина», два способа ---
+// Общий генератор гладких ветвящихся полилиний (переиспользует форму
+// grow()/branch() из lab/u-lab.js: 5 промежуточных точек на сегмент,
+// ширина падает на фиксированную долю на каждой точке, две рекурсии —
+// продолжение и боковой отвод).
+function genTreeBranches(rnd, x, y, angle, length, width, depth, list){
+  const pts = [{x,y,w:width}];
+  let cx=x, cy=y, a=angle;
+  for(let i=1;i<=5;i++){
+    a += (rnd()-0.5)*0.3;
+    cx += Math.cos(a)*length/5; cy += Math.sin(a)*length/5;
+    pts.push({x:cx, y:cy, w:width*(1-i*0.12)});
+  }
+  list.push(pts);
+  if(depth>0){
+    genTreeBranches(rnd, cx, cy, a+(rnd()-0.5)*0.4, length*(0.6+rnd()*0.2), width*0.5, depth-1, list);
+    const mid = pts[2+((rnd()*2)|0)];
+    genTreeBranches(rnd, mid.x, mid.y, a+(rnd()<0.5?-1:1)*(0.5+rnd()*0.6), length*(0.45+rnd()*0.2), mid.w*0.4, depth-1, list);
+  }
+}
+
+// Рваный генератор один в один с crack() из приёма Д: короткие шаги со
+// случайным доворотом, изредка боковой разлом, ширина падает по рекурсии.
+function genCrackBranches(rnd, x, y, angle, width, budget, list){
+  if(budget<=0 || width<0.0015) return;
+  let cx=x, cy=y, a=angle;
+  const steps = 5+((rnd()*7)|0);
+  const pts = [{x:cx, y:cy, w:width}];
+  for(let s=0; s<steps; s++){
+    a += (rnd()-0.5)*0.55;
+    const step = 0.02+rnd()*0.05;
+    cx += Math.cos(a)*step; cy += Math.sin(a)*step;
+    pts.push({x:cx, y:cy, w:width});
+    if(rnd() < 0.22 && budget>1){
+      genCrackBranches(rnd, cx, cy, a+(rnd()<0.5?1:-1)*(0.5+rnd()*0.7), width*(0.4+rnd()*0.25), budget-1, list);
+    }
+    if(cx<-0.08||cx>1.08||cy<-0.08||cy>1.08) break;
+  }
+  list.push(pts);
+  genCrackBranches(rnd, cx, cy, a, width*(0.68+rnd()*0.22), budget-1, list);
+}
+
+// Заливка, пока сегмент толще порога; тоньше порога — сразу штрих. Порог и
+// есть та самая граница «толстое не гнётся, тонкое отвечает курсору» — на
+// этом сравнении курсора ещё нет, но порог уже тот, что пойдёт в интерактив.
+function strokeSegment(ctx, p, q, S){
+  ctx.strokeStyle = INK; ctx.lineCap = 'round';
+  ctx.lineWidth = Math.max(0.6, (p.w+q.w)/2*S);
+  ctx.beginPath(); ctx.moveTo(p.x*S,p.y*S); ctx.lineTo(q.x*S,q.y*S); ctx.stroke();
+}
+function fillSegment(ctx, p, q, S){
+  const dx=q.x-p.x, dy=q.y-p.y, len=Math.hypot(dx,dy)||1;
+  const nx=-dy/len, ny=dx/len;
+  ctx.beginPath();
+  ctx.moveTo((p.x+nx*p.w/2)*S,(p.y+ny*p.w/2)*S);
+  ctx.lineTo((q.x+nx*q.w/2)*S,(q.y+ny*q.w/2)*S);
+  ctx.lineTo((q.x-nx*q.w/2)*S,(q.y-ny*q.w/2)*S);
+  ctx.lineTo((p.x-nx*p.w/2)*S,(p.y-ny*p.w/2)*S);
+  ctx.closePath(); ctx.fillStyle = INK; ctx.fill();
+}
+function renderHybrid(ctx, pts, S, threshold){
+  for(let i=1;i<pts.length;i++){
+    const p=pts[i-1], q=pts[i];
+    if((p.w+q.w)/2 > threshold) fillSegment(ctx,p,q,S); else strokeSegment(ctx,p,q,S);
+  }
+}
+function renderStroke(ctx, pts, S){
+  for(let i=1;i<pts.length;i++) strokeSegment(ctx, pts[i-1], pts[i], S);
+}
+
+function backgroundOrigins(rnd, n){
+  const pts = [];
+  for(let i=0;i<n;i++) pts.push({ x: 0.08+rnd()*0.84, y: 0.08+rnd()*0.5, a: -Math.PI/2+(rnd()-0.5)*1.6 });
+  return pts;
+}
+
+function drawJ(canvas, seed){
+  const { ctx, S } = setup(canvas);
+  const rnd = rand(seed);
+  const K = skeleton(rnd);
+  ctx.clearRect(0,0,S,S);
+  ctx.fillStyle = PAPER; ctx.fillRect(0,0,S,S);
+  const threshold = 0.013;
+
+  const back = backgroundOrigins(rnd, 3);
+  for(const o of back){
+    const list = [];
+    genTreeBranches(rnd, o.x, o.y, o.a, 0.14+rnd()*0.08, 0.02+rnd()*0.012, 3, list);
+    for(const pts of list) renderHybrid(ctx, pts, S, threshold*0.7);
+  }
+
+  const angP1 = Math.atan2(K.P1[1]-K.J[1], K.P1[0]-K.J[0]);
+  const angP2 = Math.atan2(K.P2[1]-K.J[1], K.P2[0]-K.J[0]);
+  const angT  = Math.atan2(K.T[1]-K.J[1],  K.T[0]-K.J[0]);
+  const front = [];
+  genTreeBranches(rnd, K.J[0], K.J[1], angP1, 0.34+rnd()*0.14, 0.05+rnd()*0.02, 4, front);
+  genTreeBranches(rnd, K.J[0], K.J[1], angP2, 0.3+rnd()*0.12, 0.04+rnd()*0.018, 4, front);
+  genTreeBranches(rnd, K.J[0], K.J[1], angT,  0.4+rnd()*0.16, 0.06+rnd()*0.024, 5, front);
+  for(const pts of front) renderHybrid(ctx, pts, S, threshold);
+}
+
+function drawK(canvas, seed){
+  const { ctx, S } = setup(canvas);
+  const rnd = rand(seed);
+  const K = skeleton(rnd);
+  ctx.clearRect(0,0,S,S);
+  ctx.fillStyle = PAPER; ctx.fillRect(0,0,S,S);
+
+  const back = backgroundOrigins(rnd, 3);
+  for(const o of back){
+    const list = [];
+    genCrackBranches(rnd, o.x, o.y, o.a, 0.014+rnd()*0.008, 4, list);
+    for(const pts of list) renderStroke(ctx, pts, S);
+  }
+
+  const angP1 = Math.atan2(K.P1[1]-K.J[1], K.P1[0]-K.J[0]);
+  const angP2 = Math.atan2(K.P2[1]-K.J[1], K.P2[0]-K.J[0]);
+  const angT  = Math.atan2(K.T[1]-K.J[1],  K.T[0]-K.J[0]);
+  const front = [];
+  genCrackBranches(rnd, K.J[0], K.J[1], angP1, 0.04+rnd()*0.015, 6, front);
+  genCrackBranches(rnd, K.J[0], K.J[1], angP2, 0.032+rnd()*0.012, 6, front);
+  genCrackBranches(rnd, K.J[0], K.J[1], angT,  0.05+rnd()*0.018, 7, front);
+  for(const pts of front) renderStroke(ctx, pts, S);
+}
+
+const renderers = { a: drawA, b: drawB, c: drawC, d: drawD, e: drawE, f: drawF, g: drawG, h: drawH, i: drawI, j: drawJ, k: drawK };
+const modes = Object.keys(renderers);
+const seeds = {};
+modes.forEach(m => seeds[m] = (Math.random()*1e9)|0);
+function run(mode){
+  const canvas = document.getElementById('c'+mode.toUpperCase());
+  renderers[mode](canvas, seeds[mode]);
+}
+document.querySelectorAll('button[data-mode]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const mode = btn.dataset.mode;
+    seeds[mode] = (Math.random()*1e9)|0;
+    run(mode);
+  });
+});
+modes.forEach(run);
+window.addEventListener('resize', ()=> modes.forEach(run));
+</script>

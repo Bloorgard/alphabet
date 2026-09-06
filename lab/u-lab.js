@@ -1167,7 +1167,253 @@ function uGeneratedTreeSetup(){
   m.layers.push(layer);
 }
 
+function uGroveSetup(){
+  const m=modeState;
+  Object.assign(m,{layers:[],view:{x:0,y:0},target:{x:0,y:0},grab:null,windPrev:null,reveal:0,berryVisible:on('berries')?1:0});
+  let seed=num('seed');
+  const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
+  // Рябина садится только на настоящие концы веток — где рекурсия
+  // остановилась (depth<=0), а не на любую последнюю точку сегмента: почти
+  // каждый сегмент продолжается дальше своим же концом, и без этой пометки
+  // ягоды сыпались бы на стыки веток, а не на их окончания.
+  const leafTips=[];
+  // Задний план — те же четыре случайных слоя, что и в «между ветвями»:
+  // свободные деревья без всякой привязки к силуэту буквы.
+  const grow=(layer,x,y,angle,length,width,depth)=>{
+    const points=[{x,y,w:width}];
+    for(let i=1;i<=5;i++){
+      angle+=(rnd()-.5)*.27;
+      x+=Math.cos(angle)*length/5;y+=Math.sin(angle)*length/5;
+      points.push({x,y,w:width*(1-i*.09)});
+    }
+    layer.branches.push(points);
+    if(depth<=0){leafTips.push({p:points[points.length-1],parallax:layer.parallax,layer});return;}
+    grow(layer,x,y,angle+(rnd()-.5)*.25,length*(.69+rnd()*.13),width*.53,depth-1);
+    const p=points[3];
+    grow(layer,p.x,p.y,angle+(rnd()<.5?-1:1)*(.42+rnd()*.65),length*(.44+rnd()*.25),width*.32,depth-1);
+  };
+  const back=[];
+  for(const [x,y,scale,alpha,parallax] of [[.7,1.15,.5,.09,.09],[.38,1.2,.6,.14,.15],[.93,1.1,.72,.25,.25],[.48,1.26,.77,.6,.43]]){
+    const layer={branches:[],alpha,parallax};
+    grow(layer,x+(rnd()-.5)*.12,y+(rnd()-.5)*.1,-1.75+(rnd()-.5)*.35,.34*scale*(.85+rnd()*.3),.045*scale,6);back.push(layer);m.layers.push(layer);
+  }
+  // Порядок проявления — от тёмного (близкого) к светлому (дальнему), не по
+  // индексу массива: так пространство строится в правильном порядке, а не
+  // светлое поверх тёмного.
+  [...back].sort((a,b)=>b.alpha-a.alpha).forEach((layer,order)=>{layer.order=order;});
+  // Передний план — процедурное дерево-У (та же развилка+плечи+нога,
+  // что и в отдельном режиме «дерево У»), а не зашитый вручную силуэт.
+  const front={branches:[],alpha:1,parallax:1,front:true};
+  const junction={x:.3+rnd()*.42,y:.32+rnd()*.34};
+  const angle=-1.32+(rnd()-.5)*.8;
+  const thickness=.09+rnd()*.10;
+  const branch=(start,dir,length,width,depth)=>{
+    const points=[{x:start.x-Math.cos(dir)*width*.3,y:start.y-Math.sin(dir)*width*.3,w:width}];
+    let x=start.x,y=start.y;
+    for(let i=1;i<=5;i++){
+      dir+=(rnd()-.5)*.32;
+      x+=Math.cos(dir)*length/5;y+=Math.sin(dir)*length/5;
+      points.push({x,y,w:width*(1-i*.11)});
+    }
+    front.branches.push(points);
+    if(depth>0){
+      branch(points[5],dir+(rnd()-.5)*.4,length*(.62+rnd()*.18),width*.45,depth-1);
+      const p=points[2+Math.floor(rnd()*2)];
+      branch(p,dir+(rnd()<.5?-1:1)*(.5+rnd()*.6),length*(.45+rnd()*.25),p.w*.36,depth-1);
+    } else leafTips.push({p:points[points.length-1],parallax:1,layer:front});
+  };
+  const trunk=[{x:junction.x+Math.cos(angle)*thickness*.45,y:junction.y+Math.sin(angle)*thickness*.45,w:thickness},{...junction,w:thickness}];
+  let tx=junction.x,ty=junction.y,tdir=angle+Math.PI;
+  for(let i=1;i<=6;i++){
+    tdir+=(rnd()-.5)*.25;
+    tx+=Math.cos(tdir)*.17;ty+=Math.sin(tdir)*.17;
+    trunk.push({x:tx,y:ty,w:thickness*(1+i*.14)});
+  }
+  front.branches.push(trunk);
+  branch(junction,angle,.32+rnd()*.3,thickness*.9,5);
+  branch(junction,angle-(.65+rnd()*.6),.28+rnd()*.24,thickness*(.48+rnd()*.2),5);
+  if(rnd()>.35)branch(trunk[2],angle+1.15,.3+rnd()*.2,trunk[2].w*.35,4);
+  const zoom=.85+rnd()*.4;
+  for(const points of front.branches)for(const p of points){p.x=junction.x+(p.x-junction.x)*zoom;p.y=junction.y+(p.y-junction.y)*zoom;p.w*=zoom;}
+  m.layers.push(front);
+  // Гроздь, не одиночная ягода: 3-6 кружков вокруг конца ветки, размер
+  // немного зависит от толщины самого кончика. Кому гореть — решает roll,
+  // сохранённый на кисть; плотность и размер регулируются уже при отрисовке,
+  // без пересборки геометрии.
+  m.berries=[];
+  for(const leaf of leafTips){
+    if(leaf.p.w>0.016)continue;
+    const count=2+Math.floor(rnd()*3);
+    const seeds=[];
+    for(let k=0;k<count;k++){
+      const a=rnd()*Math.PI*2,d=rnd()*0.014;
+      seeds.push({dx:Math.cos(a)*d,dy:Math.sin(a)*d,base:(0.0016+leaf.p.w*0.32)*(0.6+rnd()*0.7)});
+    }
+    m.berries.push({tip:leaf.p,parallax:leaf.parallax,layer:leaf.layer,roll:rnd(),seeds});
+  }
+}
+
+function uGroveStep(){
+  const m=modeState;
+  m.view.x+=(m.target.x-m.view.x)*.13;m.view.y+=(m.target.y-m.view.y)*.13;
+  // Таймлайн растянут за 1: деревья проявляются до t=1, рябина — только
+  // после, отдельным окном (см. uGroveDraw). Само значение может расти и
+  // дальше 1, лишние доли просто ждут в очереди у ягод.
+  m.reveal=Math.min(1.5,(m.reveal||0)+STEP/1.6);
+  // Видимость ягод от тумблера — отдельная плавная величина, не резкий
+  // щелчок: включение/выключение «ягод» само по себе анимировано, поверх
+  // таймлайна общего проявления.
+  const berryTarget=on('berries')?1:0;
+  m.berryVisible=(m.berryVisible??berryTarget)+(berryTarget-(m.berryVisible??berryTarget))*.08;
+  // Ветер, не линза: толчок идёт вдоль вектора движения самого курсора
+  // (порыв), а не радиально от его точки — иначе любая неподвижная мышь
+  // выглядит как статичное искажение поля. У каждой точки своя пружина
+  // (bx/by — смещение, vx/vy — скорость): толчок даёт импульс, дальше
+  // жёсткость и затухание сами гасят колебание — отсюда инерция и лёгкий
+  // перелёт, а не мгновенное прилипание к цели. Отключаемо тумблером
+  // «ветер»: без него пружина всё равно распрямляет уже согнутые ветки,
+  // просто новый порыв силы не добавляет.
+  if(!m.windPrev)m.windPrev={x:pointer.x,y:pointer.y};
+  const seen=pointer.seen&&on('wind');
+  const windX=seen?pointer.x-m.windPrev.x:0, windY=seen?pointer.y-m.windPrev.y:0;
+  m.windPrev={x:pointer.x,y:pointer.y};
+  const K=70,C=9,GUST=170,MAXB=0.08;
+  for(const layer of m.layers){
+    const shiftX=m.view.x*layer.parallax, shiftY=m.view.y*layer.parallax;
+    const px=pointer.x-shiftX, py=pointer.y-shiftY;
+    for(const points of layer.branches)for(const p of points){
+      let fx=-K*(p.bx||0)-C*(p.vx||0), fy=-K*(p.by||0)-C*(p.vy||0);
+      if(seen){
+        const dist=Math.hypot(p.x-px,p.y-py)||1;
+        const reach=Math.max(0,1-dist/.18);
+        if(reach>0){
+          const soft=clamp(1-p.w/.02,0,1);
+          fx+=windX*GUST*reach*soft;
+          fy+=windY*GUST*reach*soft;
+        }
+      }
+      const vx=(p.vx||0)+fx*STEP, vy=(p.vy||0)+fy*STEP;
+      let bx=(p.bx||0)+vx*STEP, by=(p.by||0)+vy*STEP;
+      const mag=Math.hypot(bx,by);
+      if(mag>MAXB){bx=bx/mag*MAXB;by=by/mag*MAXB;}
+      p.vx=vx;p.vy=vy;p.bx=bx;p.by=by;
+    }
+  }
+}
+
+// Сплошной цвет вместо прозрачности: на стыке двух заливок одного тона
+// не появляется шов от повторного наложения альфы, как было бы с ink(a).
+function uGroveTone(t){
+  const g=labGrounds[ground], mark=g.mark, field=g.field;
+  const r=Math.round(field[0]+(mark[0]-field[0])*t);
+  const gr=Math.round(field[1]+(mark[1]-field[1])*t);
+  const b=Math.round(field[2]+(mark[2]-field[2])*t);
+  return `rgb(${r},${gr},${b})`;
+}
+
+function uHexRgb(hex){
+  return [parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16)];
+}
+
+// Тот же приём для ягод: сплошной цвет от бумаги к красному, не альфа —
+// у мелких кружков рядом друг с другом иначе тоже был бы шов на стыке.
+const U_GROVE_RED=uHexRgb(RED);
+function uGroveBerryTone(t){
+  const field=labGrounds[ground].field;
+  const r=Math.round(field[0]+(U_GROVE_RED[0]-field[0])*t);
+  const g=Math.round(field[1]+(U_GROVE_RED[1]-field[1])*t);
+  const b=Math.round(field[2]+(U_GROVE_RED[2]-field[2])*t);
+  return `rgb(${r},${g},${b})`;
+}
+
+// Проверка гипотезы: небо на весь верх кадра, от своего цвета до цвета
+// фона — по той же логике смешивания, что тон дерева и ягод, только сразу
+// линейным градиентом канваса, а не по точкам.
+const U_GROVE_SUNSET=uHexRgb('#ef8d8a');
+const U_GROVE_SKYBLUE=uHexRgb('#afc4e5');
+function uGroveSky(rgb){
+  const field=labGrounds[ground].field;
+  const grad=ctx.createLinearGradient(0,0,0,S*0.5);
+  grad.addColorStop(0,`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`);
+  grad.addColorStop(1,`rgb(${field[0]},${field[1]},${field[2]})`);
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,0,S,S*0.5);
+}
+
+function uGroveDraw(){
+  const m=modeState;
+  ctx.fillStyle=PAPER;ctx.fillRect(0,0,S,S);
+  if(on('sunset'))uGroveSky(U_GROVE_SUNSET);
+  if(on('sky'))uGroveSky(U_GROVE_SKYBLUE);
+  const t=m.reveal??1;
+  const ease=x=>x*x*(3-2*x);
+  // Проявление: фигура рисуется сразу целиком, цветом фона — то есть не
+  // прозрачной, а буквально того же тона, что бумага, — и дальше этот тон
+  // плавно сдвигается к своему итоговому оттенку. Передний план идёт первым,
+  // задние слои — по очереди следом, темнее раньше, светлее позже.
+  const density=num('berryDensity'),size=num('berrySize');
+  // Рябина проявляется отдельным окном уже после деревьев (t от 1 до 1.4),
+  // тем же приёмом «цвет от бумаги к своему тону», а не альфой. Поверх —
+  // берриVisible: плавная величина от тумблера «ягоды», а не резкий щелчок
+  // видимости — включение/выключение само анимировано.
+  const berryReveal=ease(clamp((t-1)/0.4,0,1));
+  const berryFactor=berryReveal*(m.berryVisible??0);
+  // Ягоды рисуются вместе со своим слоем, а не отдельным проходом поверх
+  // всего: иначе передний ствол не перекрывал бы рябину заднего плана —
+  // порядок наложения ягод должен совпадать с порядком слоёв.
+  m.layers.forEach((layer)=>{
+    const factor=layer.front ? ease(clamp(t/0.3,0,1)) : ease(clamp((t-(0.2+layer.order*0.1667))/0.3,0,1));
+    const shiftX=m.view.x*layer.parallax,shiftY=m.view.y*layer.parallax;
+    ctx.save();ctx.translate(shiftX*S,shiftY*S);
+    ctx.fillStyle=uGroveTone(layer.alpha*factor);
+    for(const points of layer.branches){
+      const left=[],right=[];
+      for(let j=0;j<points.length;j++){
+        const p=points[j],a=points[Math.max(0,j-1)],b=points[Math.min(points.length-1,j+1)];
+        const ax=a.x+(a.bx||0),ay=a.y+(a.by||0),bx=b.x+(b.bx||0),by=b.y+(b.by||0);
+        const px=p.x+(p.bx||0),py=p.y+(p.by||0);
+        const len=Math.hypot(bx-ax,by-ay)||1;
+        const nx=-(by-ay)/len,ny=(bx-ax)/len;
+        left.push({x:px+nx*p.w/2,y:py+ny*p.w/2});right.push({x:px-nx*p.w/2,y:py-ny*p.w/2});
+      }
+      ctx.beginPath();[...left,...right.reverse()].forEach((p,k)=>ctx[k?'lineTo':'moveTo'](p.x*S,p.y*S));ctx.closePath();
+      ctx.fill();
+    }
+    if(berryFactor>0.002){
+      const berryColor=uGroveBerryTone(berryFactor);
+      for(const b of m.berries){
+        if(b.layer!==layer||b.roll>density)continue;
+        const tx=b.tip.x+(b.tip.bx||0),ty=b.tip.y+(b.tip.by||0);
+        for(const seed of b.seeds)dot(tx+seed.dx,ty+seed.dy,berryColor,seed.base*size);
+      }
+    }
+    ctx.restore();
+  });
+}
+
 const MODES = {
+  grove: {
+    label: 'дерево и лес',
+    note: 'Передний план — дерево-У, задний — свободный лес без привязки к силуэту буквы; оба перегенерируются вместе. Зажмите и медленно смещайте взгляд, ближний ствол движется сильнее дальних ветвей. Номер варианта сохраняется в адресе.',
+    tools: [
+      { type: 'range', key: 'seed', label: 'вариант', min: 1, max: 99999, step: 1, value: 8461 },
+      { type: 'button', label: 'другая композиция', action() { toolValues[slot('seed')]=1+Math.floor(Math.random()*99999);setMode('grove'); } },
+      { type: 'button', label: 'исходный взгляд', action() { modeState.target={x:0,y:0}; } },
+      { type: 'toggle', key: 'berries', label: 'ягоды', value: true },
+      { type: 'range', key: 'berryDensity', label: 'density рябины', min: 0, max: 1, step: 0.05, value: 0.12 },
+      { type: 'range', key: 'berrySize', label: 'размер ягод', min: 0.5, max: 2, step: 0.1, value: 1 },
+      { type: 'toggle', key: 'wind', label: 'ветер', value: true },
+      { type: 'toggle', key: 'sunset', label: 'закат', value: true },
+      { type: 'toggle', key: 'sky', label: 'небо', value: false },
+    ],
+    // Сид перегенерирует всю сцену; рябина и её параметры только красятся
+    // заново в draw — геометрия не пересобирается, ветки не дёргаются.
+    onTool(key) { if(key==='seed') uGroveSetup(); },
+    cursor: 'grab', setup: uGroveSetup, step: uGroveStep, draw: uGroveDraw,
+    onDown() { modeState.grab={x:pointer.x,y:pointer.y,vx:modeState.target.x,vy:modeState.target.y}; },
+    onMove() { const g=modeState.grab;if(pointer.down&&g){modeState.target.x=clamp(g.vx+(pointer.x-g.x)*.5,-.22,.22);modeState.target.y=clamp(g.vy+(pointer.y-g.y)*.5,-.16,.16);} },
+    onUp() { modeState.grab=null; },
+  },
   generated: {
     label: 'дерево У',
     note: 'Отдельный генератор: меняются положение развилки, направление ствола, толщина, длина плеч и приближение. Один штрих продолжается через развилку, второй отходит в сторону. Ведите по сцене для смещения кадра; номер варианта сохраняется в адресе.',
@@ -1348,6 +1594,13 @@ canvas.addEventListener('pointercancel', () => {
   pointer.down = false;
   if (current === 'pen' || current === 'loop') uArtUp();
   if (current === 'exposure') modeState.held = false;
+});
+
+// Изгиб веток в «дереве и лесу» держится на pointer.seen: без этого сброса
+// последнее положение курсора застыло бы в ветках навсегда после ухода
+// мыши с канваса, а не отпустило их обратно в покой.
+canvas.addEventListener('pointerleave', () => {
+  if (current === 'grove') pointer.seen = false;
 });
 
 startLab({ title: 'У · развилка и память', modes: MODES, start: 'fabric', ground: 'paper' });
