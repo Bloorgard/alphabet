@@ -897,7 +897,101 @@ function uMonolithMove() {
   m.dirty=true;
 }
 
+function uExposureSource(t) {
+  return {x:.5+.23*Math.sin(t*.63),y:.48+.22*Math.sin(t*.91+.5)};
+}
+
+function uExposureSection(p,t) {
+  const radius=num('aperture')*(.8+.3*Math.sin(t*1.7));
+  const twist=t*num('spin');
+  return Array.from({length:53},(_,i)=>{
+    const a=-.35+i/52*Math.PI*1.83;
+    const x=Math.cos(a)*radius,y=Math.sin(a)*radius;
+    const z=y*Math.sin(twist);
+    const yy=y*Math.cos(twist);
+    const rot=t*.37;
+    return {x:p.x+x*Math.cos(rot)-yy*Math.sin(rot),y:p.y+x*Math.sin(rot)+yy*Math.cos(rot)+z*.28};
+  });
+}
+
+function uExposureSample() {
+  const m=modeState;
+  Object.assign(m,{time:0,frames:[],demo:true,held:false,tick:0,last:null});
+  for(let i=0;i<210;i++) {
+    const t=(i-209)/30;
+    m.frames.push({born:t,points:uExposureSection(uExposureSource(t),t),stroke:0});
+  }
+  m.stroke=0;
+}
+
+function uExposureSetup() {
+  Object.assign(modeState,{stroke:0});uExposureSample();
+}
+
+function uExposureStep() {
+  const m=modeState;
+  if(on('freeze'))return;
+  m.time+=STEP;
+  const duration=num('exposure');
+  while(m.frames.length&&m.frames[0].born<m.time-duration)m.frames.shift();
+  if(!m.demo&&!m.held)return;
+  m.tick++;
+  if(m.tick%2)return;
+  const p=m.demo?uExposureSource(m.time):{x:clamp(pointer.x,.08,.92),y:clamp(pointer.y,.13,.87)};
+  m.frames.push({born:m.time,points:uExposureSection(p,m.time),stroke:m.stroke});
+}
+
+function uExposureDraw() {
+  const m=modeState;
+  ctx.fillStyle=INK;ctx.fillRect(0,0,S,S);
+  const duration=num('exposure');
+  for(let i=0;i<m.frames.length;i++) {
+    const frame=m.frames[i];
+    const strength=Math.max(0,1-(m.time-frame.born)/duration);
+    if(strength<=0)continue;
+    const alpha=strength*strength;
+    uPath(frame.points,paper(.035*alpha),.007);
+    uPath(frame.points,paper(.18*alpha),.0011);
+    const prev=m.frames[i-1];
+    if(prev&&prev.stroke===frame.stroke&&Math.hypot(frame.points[0].x-prev.points[0].x,frame.points[0].y-prev.points[0].y)<.16) {
+      for(let j=0;j<53;j+=8)uPath([prev.points[j],frame.points[j]],paper(.15*alpha),.00075);
+    }
+  }
+  const newest=m.frames.at(-1);
+  if(newest) {
+    const power=Math.max(0,1-(m.time-newest.born)/duration);
+    uPath(newest.points,paper(.07*power),.014);
+    uPath(newest.points,paper(.22*power),.005);
+    uPath(newest.points,paper(.92*power),.0016);
+  }
+  uText('СВЕТОВАЯ ВЫДЕРЖКА',.055,.105,.016,paper(.45));
+  uText(on('freeze')?'Рисунок заморожен':m.demo?'Зажмите и проведите свой свет':'Медленно ведите свет · отпустите',.055,.93,.016,paper(.45));
+}
+
+function uExposureDown() {
+  if(on('freeze'))return;
+  const m=modeState;
+  if(m.demo){m.frames=[];m.demo=false;}
+  m.held=true;m.stroke++;
+}
+
 const MODES = {
+  exposure: {
+    label: 'выдержка',
+    note: 'Зажмите и ведите светящийся разрез. Его прежние положения остаются в кадре и постепенно гаснут. Медленное движение собирает плотную оболочку, быстрое растягивает её. Первый жест заменяет образец, следующие добавляют свет. «Заморозить» останавливает и затухание, и рисование; для сохранения используйте «снимок».',
+    tools: [
+      { type: 'range', key: 'exposure', label: 'выдержка, с', min: 2, max: 20, step: 1, value: 12 },
+      { type: 'range', key: 'aperture', label: 'разрез', min: 0.03, max: 0.16, step: 0.01, value: 0.1 },
+      { type: 'range', key: 'spin', label: 'вращение', min: 0.2, max: 2, step: 0.1, value: 0.8 },
+      { type: 'toggle', key: 'freeze', label: 'заморозить', value: false },
+      { type: 'button', label: 'образец', action: uExposureSample },
+      { type: 'button', label: 'очистить', action() { modeState.frames=[];modeState.demo=false;modeState.held=false; } },
+    ],
+    cursor: 'crosshair', setup: uExposureSetup, step: uExposureStep, draw: uExposureDraw,
+    onDown: uExposureDown,
+    onUp() { modeState.held=false; },
+    onTool() { if(on('freeze'))modeState.held=false; },
+  },
   monolith: {
     label: 'монолит',
     note: 'Захватите край монолита и потяните: ближайшие обломки сдвинутся вместе с рукой. Каждый жест сохраняется. «Осыпь» раздвигает мелкие фрагменты по направлению распада, «захват» меняет область воздействия. Для осмотра включите «поворот рукой». «Заново» возвращает исходное положение фрагментов.',
@@ -1018,6 +1112,7 @@ const MODES = {
 canvas.addEventListener('pointercancel', () => {
   pointer.down = false;
   if (current === 'pen' || current === 'loop') uArtUp();
+  if (current === 'exposure') modeState.held = false;
 });
 
 startLab({ title: 'У · развилка и память', modes: MODES, start: 'fabric', ground: 'paper' });
