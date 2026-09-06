@@ -1059,7 +1059,76 @@ function uTreeDraw() {
   uText(m.growth>=1?'Дерево выросло · можно вырастить другое':'Ведите влево / вправо — время роста',.055,.96,.016,MUTED);
 }
 
+function uForestSetup() {
+  const m=modeState;
+  Object.assign(m,{layers:[],view:{x:0,y:0},target:{x:0,y:0},grab:null});
+  let seed=21983;
+  const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
+  const grow=(layer,x,y,angle,length,width,depth)=>{
+    const points=[{x,y,w:width}];
+    for(let i=1;i<=5;i++){
+      angle+=(rnd()-.5)*.27;
+      x+=Math.cos(angle)*length/5;y+=Math.sin(angle)*length/5;
+      points.push({x,y,w:width*(1-i*.09)});
+    }
+    layer.branches.push(points);
+    if(depth<=0)return;
+    grow(layer,x,y,angle+(rnd()-.5)*.25,length*(.69+rnd()*.13),width*.53,depth-1);
+    const p=points[3];
+    grow(layer,p.x,p.y,angle+(rnd()<.5?-1:1)*(.42+rnd()*.65),length*(.44+rnd()*.25),width*.32,depth-1);
+  };
+  for(const [x,y,scale,alpha,parallax] of [[.7,1.15,.5,.09,.09],[.38,1.2,.6,.14,.15],[.93,1.1,.72,.25,.25],[.48,1.26,.77,.6,.43]]){
+    const layer={branches:[],alpha,parallax};
+    grow(layer,x,y,-1.75,.34*scale,.045*scale,6);m.layers.push(layer);
+  }
+  const front={branches:[],alpha:1,parallax:1};
+  front.branches.push([{x:1.22,y:1.12,w:.29},{x:.87,y:.99,w:.24},{x:.59,y:.84,w:.185},{x:.37,y:.63,w:.145},{x:.23,y:.34,w:.10},{x:.10,y:-.13,w:.075}]);
+  front.branches.push([{x:.37,y:.63,w:.137},{x:.13,y:.70,w:.085},{x:-.20,y:.76,w:.065}]);
+  front.branches.push([{x:.23,y:.34,w:.091},{x:.39,y:.21,w:.052},{x:.51,y:-.13,w:.029}]);
+  grow(front,.10,-.02,-2.2,.23,.047,4);
+  grow(front,.34,.26,-.82,.27,.027,5);
+  grow(front,.20,.29,-2.63,.25,.033,4);
+  const edge={branches:[],alpha:1,parallax:1.28};
+  grow(edge,1.17,-.18,2.0,.29,.075,5);
+  m.layers.push(front,edge);
+}
+
+function uForestStep(){
+  const m=modeState;
+  m.view.x+=(m.target.x-m.view.x)*.13;m.view.y+=(m.target.y-m.view.y)*.13;
+}
+
+function uForestDraw(){
+  const m=modeState;
+  ctx.fillStyle=PAPER;ctx.fillRect(0,0,S,S);
+  for(const layer of m.layers){
+    const shiftX=m.view.x*layer.parallax,shiftY=m.view.y*layer.parallax;
+    ctx.save();ctx.translate(shiftX*S,shiftY*S);
+    for(const points of layer.branches){
+      const left=[],right=[];
+      for(let i=0;i<points.length;i++){
+        const p=points[i],a=points[Math.max(0,i-1)],b=points[Math.min(points.length-1,i+1)];
+        const len=Math.hypot(b.x-a.x,b.y-a.y)||1;
+        const nx=-(b.y-a.y)/len,ny=(b.x-a.x)/len;
+        left.push({x:p.x+nx*p.w/2,y:p.y+ny*p.w/2});right.push({x:p.x-nx*p.w/2,y:p.y-ny*p.w/2});
+      }
+      ctx.beginPath();[...left,...right.reverse()].forEach((p,i)=>ctx[i?'lineTo':'moveTo'](p.x*S,p.y*S));ctx.closePath();
+      ctx.fillStyle=ink(layer.alpha);ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
 const MODES = {
+  forest: {
+    label: 'между ветвями',
+    note: 'Зажмите и медленно смещайте взгляд. Ближняя развилка движется сильнее дальних ветвей. Это пространственный эскиз по выбранной композиции: крупный фрагмент дерева вместо целой буквы в центре.',
+    tools: [{ type: 'button', label: 'исходный взгляд', action() { modeState.target={x:0,y:0}; } }],
+    cursor: 'grab', setup: uForestSetup, step: uForestStep, draw: uForestDraw,
+    onDown() { modeState.grab={x:pointer.x,y:pointer.y,vx:modeState.target.x,vy:modeState.target.y}; },
+    onMove() { const g=modeState.grab;if(pointer.down&&g){modeState.target.x=clamp(g.vx+(pointer.x-g.x)*.5,-.22,.22);modeState.target.y=clamp(g.vy+(pointer.y-g.y)*.5,-.16,.16);} },
+    onUp() { modeState.grab=null; },
+  },
   tree: {
     label: 'рябина',
     note: 'Один плотный ствол и асимметричная развилка образуют У. Дальше ветви заполняют свободное пространство кроны алгоритмом space colonization; толщина зависит от числа потомков. Ягоды появляются после завершения ветвей. Ведите по сцене влево или вправо, чтобы промотать рост. «Расти» включает или останавливает время.',
