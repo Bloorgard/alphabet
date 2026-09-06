@@ -691,7 +691,129 @@ function uVolumeMove() {
   } else uVolumeAdd();
 }
 
+const U_ENGRAVE_SHADER = `
+precision highp float;
+varying vec2 uv;
+uniform sampler2D relief;
+uniform vec2 resolution;
+uniform float rings;
+uniform float contrast;
+uniform float inverse;
+float height(vec2 p) {
+  vec2 q=p*5.5;
+  q+=vec2(sin(q.y*1.4+cos(q.x)),cos(q.x*1.3-sin(q.y)))*0.52;
+  float h=sin(q.x*1.7+q.y*.4)*.4+cos(q.y*1.9-q.x*.65)*.35;
+  h+=sin(q.x*3.2-q.y*2.3)*.105+cos(q.y*4.0+q.x*1.9)*.055;
+  vec4 t=texture2D(relief,p);
+  h+=(t.r*65280.0+t.g*255.0)/65535.0*3.0-1.5;
+  return h;
+}
+void main() {
+  vec2 p=vec2(uv.x,1.0-uv.y);
+  float h=height(p);
+  vec2 e=vec2(1.0/resolution.x,0.0);
+  float dx=height(p+e)-h,dy=height(p+e.yx)-h;
+  float phase=h*rings;
+  float distance=abs(fract(phase)-.5);
+  float aa=max(.012,length(vec2(dx,dy))*rings*.7);
+  float width=.085+.07*(.5+.5*sin(h*3.0+1.0))*contrast;
+  float line=1.0-smoothstep(width-aa,width+aa,distance);
+  float shadow=clamp((dx-dy)*resolution.x*.006,-.075,.11);
+  float grain=fract(sin(dot(floor(p*resolution),vec2(12.9898,78.233)))*43758.5453);
+  float light=clamp(1.0-line*.98-shadow-(grain*.024),0.0,1.0);
+  light=mix(light,1.0-light,inverse);
+  gl_FragColor=vec4(mix(vec3(.04,.043,.038),vec3(.947,.926,.874),light),1.0);
+}`;
+let uEngraveRenderer;
+
+function uEngraveSetup() {
+  const m=modeState;
+  Object.assign(m,{grid:new Float32Array(192*192),pixels:new Uint8Array(192*192*4),dirty:true,upload:true,grab:null});
+  if(uEngraveRenderer){Object.assign(m,uEngraveRenderer);return;}
+  const surface=document.createElement('canvas');
+  const gl=surface.getContext('webgl',{antialias:false,preserveDrawingBuffer:true});
+  m.surface=surface;m.gl=gl;
+  if(!gl)return;
+  const program=gl.createProgram();
+  for(const [type,source] of [[gl.VERTEX_SHADER,'attribute vec2 position;varying vec2 uv;void main(){uv=position*.5+.5;gl_Position=vec4(position,0.,1.);}'],[gl.FRAGMENT_SHADER,U_ENGRAVE_SHADER]]) {
+    const shader=gl.createShader(type);gl.shaderSource(shader,source);gl.compileShader(shader);
+    if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(shader));
+    gl.attachShader(program,shader);gl.deleteShader(shader);
+  }
+  gl.linkProgram(program);
+  if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));
+  gl.useProgram(program);
+  gl.bindBuffer(gl.ARRAY_BUFFER,gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
+  const a=gl.getAttribLocation(program,'position');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
+  gl.bindTexture(gl.TEXTURE_2D,gl.createTexture());
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  const uniforms=Object.fromEntries(['relief','resolution','rings','contrast','inverse'].map(k=>[k,gl.getUniformLocation(program,k)]));
+  gl.uniform1i(uniforms.relief,0);
+  m.uniforms=uniforms;uEngraveRenderer={surface,gl,uniforms};
+}
+
+function uEngraveStep() {
+  const m=modeState;
+  if(on('settle')) {
+    let moving=false;
+    for(let i=0;i<m.grid.length;i++)if(Math.abs(m.grid[i])>.00001){m.grid[i]*=.9992;moving=true;}
+    if(moving)m.upload=m.dirty=true;
+  }
+  if(!pointer.down||!m.grab)return;
+  const x=clamp(pointer.x,0,1),y=clamp(pointer.y,0,1),r=num('brush');
+  const samples=Math.max(1,Math.ceil(Math.hypot(x-m.grab.x,y-m.grab.y)/(r*.3)));
+  for(let s=1;s<=samples;s++) {
+    const cx=lerp(m.grab.x,x,s/samples)*192,cy=lerp(m.grab.y,y,s/samples)*192,rad=r*192;
+    for(let yy=Math.max(0,Math.floor(cy-rad*2));yy<Math.min(192,cy+rad*2);yy++) {
+      for(let xx=Math.max(0,Math.floor(cx-rad*2));xx<Math.min(192,cx+rad*2);xx++) {
+        const d=((xx-cx)**2+(yy-cy)**2)/(rad*rad);
+        const i=yy*192+xx;
+        m.grid[i]=clamp(m.grid[i]+(on('carve')?-1:1)*.013*Math.exp(-d*2)/samples,-1.4,1.4);
+      }
+    }
+  }
+  m.grab={x,y};m.upload=m.dirty=true;
+}
+
+function uEngraveDraw() {
+  const m=modeState;
+  if(!m.gl){uText('Для гравюры нужен WebGL',.1,.5);return;}
+  const gl=m.gl,u=m.uniforms,size=Math.min(1600,Math.round(S*dpr));
+  if(m.surface.width!==size){m.surface.width=m.surface.height=size;m.dirty=true;}
+  if(m.upload) {
+    for(let i=0;i<m.grid.length;i++) {
+      const v=Math.round((m.grid[i]+1.5)/3*65535);
+      m.pixels[i*4]=v>>8;m.pixels[i*4+1]=v&255;m.pixels[i*4+3]=255;
+    }
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,192,192,0,gl.RGBA,gl.UNSIGNED_BYTE,m.pixels);m.upload=false;
+  }
+  if(m.dirty||m.ground!==ground) {
+    gl.viewport(0,0,size,size);gl.uniform2f(u.resolution,size,size);
+    gl.uniform1f(u.rings,num('rings'));gl.uniform1f(u.contrast,num('contrast'));gl.uniform1f(u.inverse,ground==='ink'?1:0);
+    gl.drawArrays(gl.TRIANGLES,0,6);m.dirty=false;m.ground=ground;
+  }
+  ctx.drawImage(m.surface,0,0,S,S);
+}
+
 const MODES = {
+  engraving: {
+    label: 'гравюра',
+    note: 'Зажмите и ведите: поверхность постепенно поднимается под рукой, контурные линии обтекают новый рельеф. Удержание на месте наращивает холм. «Углублять» меняет направление, «оседание» медленно возвращает поверхность к исходной. Новые жесты сохраняют прежние следы. На паузе рельеф не меняется.',
+    tools: [
+      { type: 'range', key: 'rings', label: 'линии', min: 8, max: 35, step: 1, value: 19 },
+      { type: 'range', key: 'brush', label: 'захват', min: 0.04, max: 0.2, step: 0.01, value: 0.12 },
+      { type: 'range', key: 'contrast', label: 'насыщенность', min: 0.5, max: 2, step: 0.1, value: 1.2 },
+      { type: 'toggle', key: 'carve', label: 'углублять', value: false },
+      { type: 'toggle', key: 'settle', label: 'оседание', value: false },
+      { type: 'button', label: 'заново', action() { modeState.grid.fill(0);modeState.upload=modeState.dirty=true; } },
+    ],
+    cursor: 'crosshair', setup: uEngraveSetup, step: uEngraveStep, draw: uEngraveDraw,
+    onDown() { modeState.grab={x:pointer.x,y:pointer.y}; },
+    onUp() { modeState.grab=null; },
+    onTool() { modeState.dirty=true; },
+  },
   volume: {
     label: 'росчерк',
     note: 'Проведите линию: она становится объёмной лентой из сечений. Первый жест заменит образец, следующие добавят новые ленты. Включите «поворот рукой», чтобы рассмотреть их с другой стороны. «Скрутка» вращает сечение вдоль пути. Хранятся пять последних лент, каждая до 400 сечений. «Образец» возвращает исходную композицию.',
