@@ -797,7 +797,121 @@ function uEngraveDraw() {
   ctx.drawImage(m.surface,0,0,S,S);
 }
 
+function uMonolithSetup() {
+  const m=modeState;
+  Object.assign(m,{blocks:[],angle:-0.62,tilt:0.36,grab:null,dirty:true,cache:document.createElement('canvas')});
+  let seed=731;
+  const random=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
+  const split=(p,size,level)=>{
+    const eroded=p[0]+p[1]*.22>.01;
+    if(level<2||(level<4&&random()<(eroded?.92:.15))) {
+      for(let i=0;i<8;i++)split(p.map((v,j)=>v+((i>>j)&1?.25:-.25)*size[j]),size.map(v=>v/2),level+1);
+      return;
+    }
+    const cavity=Math.hypot((p[0]+.035)*1.3,p[1]-.05,p[2]+.14);
+    if(cavity<.14)return;
+    if(eroded&&level===4&&random()<.28)return;
+    const scatter=Math.max(0,p[0]+.1)*1.9;
+    m.blocks.push({p,size:size.map(v=>v*(.84+random()*.08)),offset:[0,0,0],drift:[scatter*(.4+random()),-scatter*(.15+random()*.8),scatter*(random()-.5)],tone:random()*.075});
+  };
+  split([-.09,.035,0],[.59,.75,.45],0);
+  for(let i=0;i<450;i++) {
+    const x=.05+random()*.44,y=-.36+random()*.38,z=(random()-.5)*.45;
+    const size=.0015+random()*.006;
+    m.blocks.push({p:[x,y,z],size:[size,size,size],offset:[0,0,0],drift:[random()*.13,-random()*.12,0],tone:random()*.3,dust:true});
+  }
+}
+
+function uMonolithProject(p) {
+  const m=modeState;
+  const x=p[0]*Math.cos(m.angle)+p[2]*Math.sin(m.angle);
+  const z=-p[0]*Math.sin(m.angle)+p[2]*Math.cos(m.angle);
+  const y=p[1]*Math.cos(m.tilt)-z*Math.sin(m.tilt);
+  const depth=z*Math.cos(m.tilt)+p[1]*Math.sin(m.tilt);
+  const scale=.67/(1-depth*.28);
+  return {x:.46+x*scale,y:.46-y*scale,z:depth};
+}
+
+function uMonolithPosition(b) {
+  return b.p.map((v,j)=>v+b.offset[j]+b.drift[j]*num('erosion'));
+}
+
+function uMonolithDraw() {
+  const m=modeState;
+  if(m.size!==S||m.ground!==ground)m.dirty=true;
+  if(!m.dirty){ctx.drawImage(m.cache,0,0,S,S);return;}
+  ctx.fillStyle=PAPER;ctx.fillRect(0,0,S,S);
+  const faces=[];
+  const sides=[[0,2,6,4],[1,5,7,3],[0,4,5,1],[2,3,7,6],[0,1,3,2],[4,6,7,5]];
+  for(const b of m.blocks) {
+    const p=uMonolithPosition(b),center=uMonolithProject(p);
+    b.screen=center;
+    const vertices=Array.from({length:8},(_,i)=>uMonolithProject(p.map((v,j)=>v+((i>>j)&1?.5:-.5)*b.size[j])));
+    sides.forEach((indices,side)=>{
+      const vv=indices.map(i=>vertices[i]);
+      const cross=(vv[1].x-vv[0].x)*(vv[2].y-vv[0].y)-(vv[1].y-vv[0].y)*(vv[2].x-vv[0].x);
+      if(cross<=0)return;
+      faces.push({v:vv,z:vv.reduce((s,v)=>s+v.z,0)/4,side,tone:b.tone,dust:b.dust});
+    });
+  }
+  faces.sort((a,b)=>a.z-b.z);
+  for(const f of faces) {
+    ctx.beginPath();f.v.forEach((p,i)=>ctx[i?'lineTo':'moveTo'](p.x*S,p.y*S));ctx.closePath();
+    ctx.fillStyle=PAPER;ctx.fill();
+    const darkness=[.16,.78,.94,.07,.37,.84][f.side]+f.tone;
+    ctx.fillStyle=ink(Math.min(1,darkness));ctx.fill();
+    if(!f.dust){ctx.strokeStyle=ink(.8);ctx.lineWidth=Math.max(.3,S*.0005);ctx.stroke();}
+  }
+  uText('ОСЫПАВШИЙСЯ МОНОЛИТ',.055,.105,.016,MUTED);
+  uText(on('turn')?'Ведите, чтобы повернуть':'Захватите край и раздвиньте обломки',.055,.93,.016,MUTED);
+  m.cache.width=m.cache.height=Math.round(S*dpr);m.cache.getContext('2d').drawImage(canvas,0,0,m.cache.width,m.cache.height);
+  m.size=S;m.ground=ground;m.dirty=false;
+}
+
+function uMonolithDown() {
+  const m=modeState;
+  m.grab={x:pointer.x,y:pointer.y,angle:m.angle,tilt:m.tilt};
+  if(on('turn'))return;
+  m.grab.weights=m.blocks.map(b=>{
+    const p=uMonolithProject(uMonolithPosition(b));
+    return Math.exp(-((p.x-pointer.x)**2+(p.y-pointer.y)**2)/(num('grip')**2));
+  });
+}
+
+function uMonolithMove() {
+  const m=modeState,g=m.grab;
+  if(!pointer.down||!g)return;
+  if(on('turn')) {
+    m.angle=g.angle+(pointer.x-g.x)*3.5;
+    m.tilt=clamp(g.tilt+(pointer.y-g.y)*2,-1,1);
+  } else {
+    const dx=pointer.x-g.x,dy=pointer.y-g.y;
+    m.blocks.forEach((b,i)=>{
+      const w=g.weights[i];
+      b.offset[0]+=dx*Math.cos(m.angle)*w;
+      b.offset[2]+=dx*Math.sin(m.angle)*w;
+      b.offset[1]-=dy*w;
+    });
+    g.x=pointer.x;g.y=pointer.y;
+  }
+  m.dirty=true;
+}
+
 const MODES = {
+  monolith: {
+    label: 'монолит',
+    note: 'Захватите край монолита и потяните: ближайшие обломки сдвинутся вместе с рукой. Каждый жест сохраняется. «Осыпь» раздвигает мелкие фрагменты по направлению распада, «захват» меняет область воздействия. Для осмотра включите «поворот рукой». «Заново» возвращает исходное положение фрагментов.',
+    tools: [
+      { type: 'range', key: 'erosion', label: 'осыпь', min: 0, max: 1.5, step: 0.05, value: 0.55 },
+      { type: 'range', key: 'grip', label: 'захват', min: 0.04, max: 0.25, step: 0.01, value: 0.12 },
+      { type: 'toggle', key: 'turn', label: 'поворот рукой', value: false },
+      { type: 'button', label: 'заново', action: uMonolithSetup },
+    ],
+    cursor: 'grab', setup: uMonolithSetup, draw: uMonolithDraw,
+    onDown: uMonolithDown, onMove: uMonolithMove,
+    onUp() { modeState.grab=null; },
+    onTool() { modeState.grab=null;modeState.dirty=true; },
+  },
   engraving: {
     label: 'гравюра',
     note: 'Зажмите и ведите: поверхность постепенно поднимается под рукой, контурные линии обтекают новый рельеф. Удержание на месте наращивает холм. «Углублять» меняет направление, «оседание» медленно возвращает поверхность к исходной. Новые жесты сохраняют прежние следы. На паузе рельеф не меняется.',
