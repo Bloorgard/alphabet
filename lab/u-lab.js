@@ -573,7 +573,140 @@ function uStructureMove() {
   m.dirty=true;
 }
 
+function uVolumeSample() {
+  const m=modeState;
+  m.paths=[Array.from({length:170},(_,i)=>{
+    const t=i/169;
+    return [-0.34+0.66*t+0.19*Math.sin(t*8.4),0.31-0.64*t,0.22*Math.cos(t*7.2)];
+  })];
+  m.sample=true;m.angle=-0.32;m.tilt=0.4;m.dirty=true;
+}
+
+function uVolumeSetup() {
+  Object.assign(modeState,{paths:[],angle:-0.32,tilt:0.4,grab:null,dirty:true,cache:document.createElement('canvas')});
+  uVolumeSample();
+}
+
+function uVolumeProject(v) {
+  const m=modeState;
+  const x=v[0]*Math.cos(m.angle)+v[2]*Math.sin(m.angle);
+  const z=-v[0]*Math.sin(m.angle)+v[2]*Math.cos(m.angle);
+  const y=v[1]*Math.cos(m.tilt)-z*Math.sin(m.tilt);
+  const depth=z*Math.cos(m.tilt)+v[1]*Math.sin(m.tilt);
+  const perspective=1/(1.55-depth*0.5);
+  return {x:0.5+x*perspective*1.28,y:0.5-y*perspective*1.28,z:depth};
+}
+
+function uVolumeMesh(path) {
+  const rings=[];
+  let distance=0;
+  for(let i=0;i<path.length;i++) {
+    const p=path[i],a=path[Math.max(0,i-1)],b=path[Math.min(path.length-1,i+1)];
+    if(i)distance+=Math.hypot(...p.map((v,j)=>v-path[i-1][j]));
+    const tangent=b.map((v,j)=>v-a[j]);
+    const len=Math.hypot(...tangent)||1;
+    const t=tangent.map(v=>v/len);
+    let n=[-t[1],t[0],0];
+    const nl=Math.hypot(...n)||1;n=n.map(v=>v/nl);
+    const bin=[t[1]*n[2]-t[2]*n[1],t[2]*n[0]-t[0]*n[2],t[0]*n[1]-t[1]*n[0]];
+    const twist=distance*num('twist')*5;
+    const normal=n.map((v,j)=>v*Math.cos(twist)+bin[j]*Math.sin(twist));
+    const side=n.map((v,j)=>-v*Math.sin(twist)+bin[j]*Math.cos(twist));
+    const taper=0.4+0.6*Math.sin(Math.PI*(0.13+0.73*i/Math.max(1,path.length-1)));
+    const width=num('width')*taper;
+    const profile=[[-1,-.45],[-.82,-.64],[.82,-.64],[1,-.45],[1,.45],[.82,.64],[-.82,.64],[-1,.45]];
+    rings.push(profile.map(([u,v])=>uVolumeProject(p.map((value,j)=>value+normal[j]*u*width+side[j]*v*width))));
+  }
+  return rings;
+}
+
+function uVolumeDraw() {
+  const m=modeState;
+  if(m.size!==S||m.ground!==ground)m.dirty=true;
+  if(!m.dirty){ctx.drawImage(m.cache,0,0,S,S);return;}
+  ctx.fillStyle=PAPER;ctx.fillRect(0,0,S,S);
+  const faces=[];
+  for(const path of m.paths) {
+    if(path.length<2)continue;
+    const rings=uVolumeMesh(path);
+    for(let i=1;i<rings.length;i++) {
+      for(let j=0;j<8;j++) {
+        const k=(j+1)%8;
+        const vertices=[rings[i-1][j],rings[i-1][k],rings[i][k],rings[i][j]];
+        const z=vertices.reduce((sum,p)=>sum+p.z,0)/4;
+        faces.push({vertices,z,j});
+      }
+    }
+    for(const ring of [rings[0],rings.at(-1)])faces.push({vertices:ring,z:ring.reduce((s,p)=>s+p.z,0)/8,j:8});
+  }
+  faces.sort((a,b)=>a.z-b.z);
+  for(const face of faces) {
+    const v=face.vertices;
+    ctx.beginPath();v.forEach((p,i)=>ctx[i?'lineTo':'moveTo'](p.x*S,p.y*S));ctx.closePath();
+    ctx.fillStyle=PAPER;ctx.fill();
+    ctx.fillStyle=ink(face.j===8?0.94:0.65+0.28*Math.sin(face.j*1.9)**2);ctx.fill();
+    ctx.strokeStyle=ink(0.85);ctx.lineWidth=0.6;ctx.stroke();
+    ctx.beginPath();ctx.moveTo(v[0].x*S,v[0].y*S);ctx.lineTo(v[1].x*S,v[1].y*S);
+    ctx.strokeStyle=PAPER;ctx.lineWidth=Math.max(0.65,S*0.0014);ctx.stroke();
+  }
+  uText('ОБЪЁМНЫЙ РОСЧЕРК',0.055,0.105,0.016,MUTED);
+  uText(on('turn')?'Ведите, чтобы повернуть':'Нарисуйте свой росчерк',0.055,0.93,0.016,MUTED);
+  m.cache.width=m.cache.height=Math.round(S*dpr);
+  m.cache.getContext('2d').drawImage(canvas,0,0,m.cache.width,m.cache.height);
+  m.dirty=false;m.size=S;m.ground=ground;
+}
+
+function uVolumeDown() {
+  const m=modeState;
+  m.grab={x:pointer.x,y:pointer.y,angle:m.angle,tilt:m.tilt};
+  if(on('turn'))return;
+  if(m.sample){m.paths=[];m.sample=false;}
+  m.angle=0;m.tilt=0;
+  m.paths.push([]);
+  if(m.paths.length>5)m.paths.shift();
+  uVolumeAdd();
+}
+
+function uVolumeAdd() {
+  const m=modeState,path=m.paths.at(-1);
+  const x=(clamp(pointer.x,0.08,0.92)-0.5)*1.21;
+  const y=(0.5-clamp(pointer.y,0.15,0.85))*1.21;
+  const prev=path.at(-1);
+  if(prev&&Math.hypot(x-prev[0],y-prev[1])<0.004)return;
+  const steps=prev?Math.min(80,Math.ceil(Math.hypot(x-prev[0],y-prev[1])/0.006)):1;
+  for(let i=1;i<=steps;i++) {
+    const xx=prev?lerp(prev[0],x,i/steps):x,yy=prev?lerp(prev[1],y,i/steps):y;
+    path.push([xx,yy,0.10*Math.sin(path.length*0.035)]);
+  }
+  if(path.length>400)path.splice(0,path.length-400);
+  m.dirty=true;
+}
+
+function uVolumeMove() {
+  const m=modeState;
+  if(!pointer.down||!m.grab)return;
+  if(on('turn')) {
+    m.angle=m.grab.angle+(pointer.x-m.grab.x)*4;
+    m.tilt=clamp(m.grab.tilt+(pointer.y-m.grab.y)*2,-1.1,1.1);m.dirty=true;
+  } else uVolumeAdd();
+}
+
 const MODES = {
+  volume: {
+    label: 'росчерк',
+    note: 'Проведите линию: она становится объёмной лентой из сечений. Первый жест заменит образец, следующие добавят новые ленты. Включите «поворот рукой», чтобы рассмотреть их с другой стороны. «Скрутка» вращает сечение вдоль пути. Хранятся пять последних лент, каждая до 400 сечений. «Образец» возвращает исходную композицию.',
+    tools: [
+      { type: 'range', key: 'width', label: 'толщина', min: 0.025, max: 0.14, step: 0.005, value: 0.095 },
+      { type: 'range', key: 'twist', label: 'скрутка', min: 0, max: 3, step: 0.1, value: 1.1 },
+      { type: 'toggle', key: 'turn', label: 'поворот рукой', value: false },
+      { type: 'button', label: 'образец', action: uVolumeSample },
+      { type: 'button', label: 'очистить', action() { modeState.paths=[];modeState.sample=false;modeState.dirty=true; } },
+    ],
+    cursor: 'crosshair', setup: uVolumeSetup, draw: uVolumeDraw,
+    onDown: uVolumeDown, onMove: uVolumeMove,
+    onUp() { modeState.grab=null; },
+    onTool() { modeState.dirty=true;canvas.style.cursor=on('turn')?'grab':'crosshair'; },
+  },
   structure: {
     label: 'конструкция',
     note: 'Поверните конструкцию мышью или пальцем. Полупрозрачные оболочки открывают лестницы, кольца и арочные перекрытия внутри. «Сечение» снимает конструкцию справа налево, «раздвинуть» разделяет верхние и нижние слои. «Свет» регулирует плотность просвечивания. «Фон» переключает негатив.',
