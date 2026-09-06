@@ -16,6 +16,7 @@
 export const API = '/api';
 const TOKEN_KEY = 'alphabet.token';
 const QUEUE_KEY = 'alphabet.pending';
+const VISIT_KEY = 'alphabet.demo-visit';
 
 /* Локальная копия сайта живёт без Worker: боевой API не пустит её по CORS,
    а проверять связь игры с холстом надо. На localhost слой отвечает сам. */
@@ -109,7 +110,7 @@ export async function reportScore(letter, value) {
    с выходом на холст, а не подпись: клетку дали — значит есть что сделать,
    и путь туда должен быть в один клик. Видимость держится на стилях, а не на
    анимации — иначе при prefers-reduced-motion карточка не появится вовсе. */
-function award(earned) {
+function award(earned, title = 'рекорд побит') {
   const workspace = document.querySelector('.letter-workspace');
   if (!workspace) return;
   workspace.querySelector('.wall-prize')?.remove();
@@ -125,7 +126,7 @@ function award(earned) {
   card.className = 'wall-prize';
   card.dataset.letterLayer = '';
   card.innerHTML = `
-    <p class="wall-prize-title">рекорд побит</p>
+    <p class="wall-prize-title">${title}</p>
     <p class="wall-prize-note">начислено ${earned} ${form} на холсте Я</p>
     <div class="wall-prize-actions">
       <button type="button" data-go>поставить клетку</button>
@@ -138,6 +139,27 @@ function award(earned) {
   });
   card.querySelector('[data-later]').addEventListener('click', () => card.remove());
   workspace.append(card);
+}
+
+/* Приход за день: клетка за то, что человек открыл букву. Сервер сам следит,
+   чтобы это случалось раз в сутки, поэтому звать можно на каждом открытии.
+   Без имени звать некуда: клетку всё равно ставить некому, а вписавшись,
+   человек получит своё — холст зовёт эту же ручку сразу после имени. */
+export async function reportVisit(letter) {
+  if (!playerToken() && !DEMO) return null;
+  /* На стенде сервера нет, а правило «раз в сутки» проверить надо: местная
+     копия помнит день последнего прихода, иначе карточка вылезала бы на
+     каждое открытие и стенд врал бы про механику. */
+  if (DEMO) {
+    const today = new Date().toISOString().slice(0, 10);
+    if (readStore(VISIT_KEY, null) === today) return { earned: 0 };
+    writeStore(VISIT_KEY, today);
+    award(1, 'клетка за сегодня');
+    return { earned: 1 };
+  }
+  const result = await post('/visit', { letter });
+  if (result?.earned > 0) award(result.earned, 'клетка за сегодня');
+  return result;
 }
 
 /* Событие неигровой буквы — то, ради чего буква сделана. Сервер засчитает

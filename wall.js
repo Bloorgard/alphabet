@@ -16,8 +16,9 @@ import {
   playerToken,
   reportEvent,
   reportScore,
+  reportVisit,
   saveToken,
-} from './progress.js?v=3';
+} from './progress.js?v=5';
 
 const demo = {
   level: 0,
@@ -152,6 +153,9 @@ export async function joinPlayer(name) {
   const data = await response.json();
   saveToken(data.token);
   await flushPending();
+  /* Человек уже открыл сегодня букву — просто был безымянным. Отдаём клетку
+     за приход сразу, чтобы вписавшийся не ждал завтрашнего дня. */
+  await reportVisit('Я');
   return data;
 }
 

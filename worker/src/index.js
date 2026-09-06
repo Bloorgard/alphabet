@@ -186,6 +186,35 @@ async function event(request, env, player) {
   return json(request, env, { earned: claimed?.count ? 1 : 0, wallet: wallet?.balance || 0 });
 }
 
+/* Клетка за приход. Начисляется раз в сутки и за любую букву: человек
+   открыл сегодняшнюю — этого довольно. Ключ таблицы по дню делает второй
+   заход безвредным, повторные запросы просто ничего не меняют. */
+async function visit(request, env, player) {
+  const data = await body(request);
+  if (!validLetter(data?.letter)) return error(request, env, 'Некорректная буква');
+
+  const now = Date.now();
+  const day = dailyStart(now);
+  await env.DB.batch([
+    env.DB.prepare('INSERT OR IGNORE INTO visits (player_id, day, letter, created_at) VALUES (?, ?, ?, ?)')
+      .bind(player.id, day, data.letter, now),
+    env.DB.prepare(`
+      UPDATE wallet
+      SET earned = earned + 1
+      WHERE player_id = ? AND changes() = 1
+    `).bind(player.id),
+  ]);
+
+  const claimed = await env.DB.prepare('SELECT created_at FROM visits WHERE player_id = ? AND day = ?')
+    .bind(player.id, day).first();
+  const wallet = await env.DB.prepare('SELECT earned - spent AS balance FROM wallet WHERE player_id = ?')
+    .bind(player.id).first();
+  return json(request, env, {
+    earned: claimed?.created_at === now ? 1 : 0,
+    wallet: wallet?.balance || 0,
+  });
+}
+
 /* Своё состояние: кошелёк, имя, остаток суточного лимита. В публичном
    `/api/state` этому места нет — тот ответ общий и лежит в кэше 15 секунд,
    а кошелёк принадлежит одному человеку и обязан быть свежим. Без этой
@@ -320,6 +349,7 @@ export default {
       if (!player) return error(request, env, 'Нужен токен участника', 401);
       if (url.pathname === '/api/score') return await score(request, env, player);
       if (url.pathname === '/api/event') return await event(request, env, player);
+      if (url.pathname === '/api/visit') return await visit(request, env, player);
       if (url.pathname === '/api/name') return await rename(request, env, player);
       if (url.pathname === '/api/mark') return await mark(request, env, player);
       return error(request, env, 'Not found', 404);

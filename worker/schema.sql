@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS events (
   FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
 );
 
+/* Приход за день: клетка достаётся за то, что человек вообще заглянул
+   в буквы. Ключ по дню — начисление ровно одно в сутки, какую бы букву
+   и сколько бы раз он ни открыл. */
+CREATE TABLE IF NOT EXISTS visits (
+  player_id TEXT NOT NULL,
+  day INTEGER NOT NULL,
+  letter TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (player_id, day),
+  FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS wallet (
   player_id TEXT PRIMARY KEY,
   earned INTEGER NOT NULL DEFAULT 0 CHECK (earned >= 0),

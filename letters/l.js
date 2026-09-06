@@ -34,7 +34,7 @@
 
    Результат партии уходит в копилку холста Я. */
 
-import { reportScore } from '../progress.js?v=3';
+import { reportScore } from '../progress.js?v=5';
 
 const STEP = 1 / 60;
 const INK = '#f1ede5';

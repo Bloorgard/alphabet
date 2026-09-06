@@ -11,7 +11,7 @@
 // Сетка следа подстраивается под размер сцены (260–600), чтобы на узком
 // экране телефона считать меньше клеток, чем на широком мониторе.
 
-import { reportEvent } from '../progress.js?v=3';
+import { reportEvent } from '../progress.js?v=5';
 
 const STEP = 1 / 60;
 const SPEED = 0.006;
