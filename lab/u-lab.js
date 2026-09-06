@@ -1062,7 +1062,7 @@ function uTreeDraw() {
 function uForestSetup() {
   const m=modeState;
   Object.assign(m,{layers:[],view:{x:0,y:0},target:{x:0,y:0},grab:null});
-  let seed=21983;
+  let seed=num('seed');
   const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
   const grow=(layer,x,y,angle,length,width,depth)=>{
     const points=[{x,y,w:width}];
@@ -1079,7 +1079,7 @@ function uForestSetup() {
   };
   for(const [x,y,scale,alpha,parallax] of [[.7,1.15,.5,.09,.09],[.38,1.2,.6,.14,.15],[.93,1.1,.72,.25,.25],[.48,1.26,.77,.6,.43]]){
     const layer={branches:[],alpha,parallax};
-    grow(layer,x,y,-1.75,.34*scale,.045*scale,6);m.layers.push(layer);
+    grow(layer,x+(rnd()-.5)*.12,y+(rnd()-.5)*.1,-1.75+(rnd()-.5)*.35,.34*scale*(.85+rnd()*.3),.045*scale,6);m.layers.push(layer);
   }
   const front={branches:[],alpha:1,parallax:1};
   front.branches.push([{x:1.22,y:1.12,w:.29},{x:.87,y:.99,w:.24},{x:.59,y:.84,w:.185},{x:.37,y:.63,w:.145},{x:.23,y:.34,w:.10},{x:.10,y:-.13,w:.075}]);
@@ -1091,6 +1091,14 @@ function uForestSetup() {
   const edge={branches:[],alpha:1,parallax:1.28};
   grow(edge,1.17,-.18,2.0,.29,.075,5);
   m.layers.push(front,edge);
+  const bend=(rnd()-.5)*.12,lean=(rnd()-.5)*.1,thickness=.85+rnd()*.3;
+  const wobble=(rnd()-.5)*.04;
+  for(const layer of m.layers)for(const branch of layer.branches)for(const p of branch){
+    const oldX=p.x,oldY=p.y;
+    p.x=1-(oldX+bend*Math.sin(oldY*3)+lean*(1-oldY));
+    p.y=oldY+wobble*Math.sin(oldX*4);
+    if(layer===front||layer===edge)p.w*=thickness;
+  }
 }
 
 function uForestStep(){
@@ -1122,8 +1130,13 @@ function uForestDraw(){
 const MODES = {
   forest: {
     label: 'между ветвями',
-    note: 'Зажмите и медленно смещайте взгляд. Ближняя развилка движется сильнее дальних ветвей. Это пространственный эскиз по выбранной композиции: крупный фрагмент дерева вместо целой буквы в центре.',
-    tools: [{ type: 'button', label: 'исходный взгляд', action() { modeState.target={x:0,y:0}; } }],
+    note: 'Зажмите и медленно смещайте взгляд. Ближняя развилка движется сильнее дальних ветвей. «Другой лес» меняет ветвление и изгибы, сохраняя крупный ствол справа и открытый просвет слева. Номер варианта сохраняется в адресе.',
+    tools: [
+      { type: 'range', key: 'seed', label: 'вариант', min: 1, max: 99999, step: 1, value: 21983 },
+      { type: 'button', label: 'другой лес', action() { toolValues[slot('seed')]=1+Math.floor(Math.random()*99999);setMode('forest'); } },
+      { type: 'button', label: 'исходный взгляд', action() { modeState.target={x:0,y:0}; } },
+    ],
+    onTool() { uForestSetup(); },
     cursor: 'grab', setup: uForestSetup, step: uForestStep, draw: uForestDraw,
     onDown() { modeState.grab={x:pointer.x,y:pointer.y,vx:modeState.target.x,vy:modeState.target.y}; },
     onMove() { const g=modeState.grab;if(pointer.down&&g){modeState.target.x=clamp(g.vx+(pointer.x-g.x)*.5,-.22,.22);modeState.target.y=clamp(g.vy+(pointer.y-g.y)*.5,-.16,.16);} },
