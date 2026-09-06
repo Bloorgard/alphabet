@@ -1127,7 +1127,61 @@ function uForestDraw(){
   }
 }
 
+function uGeneratedTreeSetup(){
+  const m=modeState;
+  Object.assign(m,{layers:[],view:{x:0,y:0},target:{x:0,y:0},grab:null});
+  let seed=num('seed');
+  const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
+  const junction={x:.3+rnd()*.42,y:.32+rnd()*.34};
+  const angle=-1.32+(rnd()-.5)*.8;
+  const thickness=.09+rnd()*.10;
+  const layer={branches:[],alpha:1,parallax:1};
+  const branch=(start,dir,length,width,depth)=>{
+    const points=[{x:start.x-Math.cos(dir)*width*.3,y:start.y-Math.sin(dir)*width*.3,w:width}];
+    let x=start.x,y=start.y;
+    for(let i=1;i<=5;i++){
+      dir+=(rnd()-.5)*.32;
+      x+=Math.cos(dir)*length/5;y+=Math.sin(dir)*length/5;
+      points.push({x,y,w:width*(1-i*.11)});
+    }
+    layer.branches.push(points);
+    if(depth>0){
+      branch(points[5],dir+(rnd()-.5)*.4,length*(.62+rnd()*.18),width*.45,depth-1);
+      const p=points[2+Math.floor(rnd()*2)];
+      branch(p,dir+(rnd()<.5?-1:1)*(.5+rnd()*.6),length*(.45+rnd()*.25),p.w*.36,depth-1);
+    }
+  };
+  const trunk=[{x:junction.x+Math.cos(angle)*thickness*.45,y:junction.y+Math.sin(angle)*thickness*.45,w:thickness},{...junction,w:thickness}];
+  let x=junction.x,y=junction.y,dir=angle+Math.PI;
+  for(let i=1;i<=6;i++){
+    dir+=(rnd()-.5)*.25;
+    x+=Math.cos(dir)*.17;y+=Math.sin(dir)*.17;
+    trunk.push({x,y,w:thickness*(1+i*.14)});
+  }
+  layer.branches.push(trunk);
+  branch(junction,angle,.32+rnd()*.3,thickness*.9,5);
+  branch(junction,angle-(.65+rnd()*.6),.28+rnd()*.24,thickness*(.48+rnd()*.2),5);
+  if(rnd()>.35)branch(trunk[2],angle+1.15,.3+rnd()*.2,trunk[2].w*.35,4);
+  const zoom=.85+rnd()*.4;
+  for(const points of layer.branches)for(const p of points){p.x=junction.x+(p.x-junction.x)*zoom;p.y=junction.y+(p.y-junction.y)*zoom;p.w*=zoom;}
+  m.layers.push(layer);
+}
+
 const MODES = {
+  generated: {
+    label: 'дерево У',
+    note: 'Отдельный генератор: меняются положение развилки, направление ствола, толщина, длина плеч и приближение. Один штрих продолжается через развилку, второй отходит в сторону. Ведите по сцене для смещения кадра; номер варианта сохраняется в адресе.',
+    tools: [
+      { type: 'range', key: 'seed', label: 'вариант', min: 1, max: 99999, step: 1, value: 4317 },
+      { type: 'button', label: 'другое дерево', action() { toolValues[slot('seed')]=1+Math.floor(Math.random()*99999);setMode('generated'); } },
+      { type: 'button', label: 'исходный взгляд', action() { modeState.target={x:0,y:0}; } },
+    ],
+    cursor: 'grab', setup: uGeneratedTreeSetup, step: uForestStep, draw: uForestDraw,
+    onTool: uGeneratedTreeSetup,
+    onDown() { modeState.grab={x:pointer.x,y:pointer.y,vx:modeState.target.x,vy:modeState.target.y}; },
+    onMove() { const g=modeState.grab;if(pointer.down&&g){modeState.target.x=clamp(g.vx+(pointer.x-g.x)*.5,-.3,.3);modeState.target.y=clamp(g.vy+(pointer.y-g.y)*.5,-.25,.25);} },
+    onUp() { modeState.grab=null; },
+  },
   forest: {
     label: 'между ветвями',
     note: 'Зажмите и медленно смещайте взгляд. Ближняя развилка движется сильнее дальних ветвей. «Другой лес» меняет ветвление и изгибы, сохраняя крупный ствол справа и открытый просвет слева. Номер варианта сохраняется в адресе.',
