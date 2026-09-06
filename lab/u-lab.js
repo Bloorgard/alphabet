@@ -975,7 +975,106 @@ function uExposureDown() {
   m.held=true;m.stroke++;
 }
 
+function uTreeSetup() {
+  const m=modeState;
+  let seed=Math.floor(Math.random()*4294967296);
+  const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
+  const nodes=[];
+  const add=(x,y,parent)=>{const p=nodes[parent];nodes.push({x,y,parent,children:[],mass:1,length:p?p.length+Math.hypot(x-p.x,y-p.y):0});if(p)p.children.push(nodes.length-1);return nodes.length-1;};
+  let root=add(.55,1.02,-1);
+  const trunk=[[.54,.94],[.51,.85],[.515,.77],[.48,.67],[.47,.61]];
+  for(const [x,y] of trunk)root=add(x+(rnd()-.5)*.015,y,root);
+  let a=root,b=root;
+  for(const [x,y] of [[.42,.55],[.36,.49],[.31,.41]])a=add(x,y,a);
+  for(const [x,y] of [[.53,.53],[.58,.45],[.62,.36]])b=add(x,y,b);
+  let targets=[];
+  for(let i=0;i<900;i++) {
+    const angle=rnd()*Math.PI*2,r=Math.sqrt(rnd());
+    targets.push({x:.49+Math.cos(angle)*r*.4,y:.29+Math.sin(angle)*r*.245});
+  }
+  for(let round=0;round<95&&targets.length;round++) {
+    const sums=new Map(),remaining=[];
+    for(const t of targets) {
+      let nearest=-1,best=.15*.15;
+      for(let i=6;i<nodes.length;i++) {
+        const n=nodes[i],d=(n.x-t.x)**2+(n.y-t.y)**2;
+        if(d<best){best=d;nearest=i;}
+      }
+      if(best<.021*.021)continue;
+      remaining.push(t);
+      if(nearest<0)continue;
+      const n=nodes[nearest],d=Math.sqrt(best);
+      const sum=sums.get(nearest)||{x:0,y:0};
+      sum.x+=(t.x-n.x)/d;sum.y+=(t.y-n.y)/d;sums.set(nearest,sum);
+    }
+    targets=remaining;
+    let added=0;
+    for(const [parent,v] of sums) {
+      const n=nodes[parent],d=Math.hypot(v.x,v.y);
+      if(d<.001)continue;
+      const x=n.x+v.x/d*.014,y=n.y+v.y/d*.014;
+      if(n.children.some(i=>Math.hypot(nodes[i].x-x,nodes[i].y-y)<.01))continue;
+      add(x,y,parent);added++;
+    }
+    if(!added)break;
+  }
+  for(let i=nodes.length-1;i>0;i--)nodes[nodes[i].parent].mass+=nodes[i].mass;
+  const max=Math.max(...nodes.map(n=>n.length));
+  for(const n of nodes)n.width=.0012+Math.pow(n.mass/nodes[0].mass,.62)*.038;
+  const tips=nodes.filter(n=>!n.children.length&&n.y<.48);
+  const berries=tips.filter(()=>rnd()<.14).map(n=>({node:n,seeds:Array.from({length:5+Math.floor(rnd()*5)},()=>({x:(rnd()-.5)*.019,y:rnd()*.018,r:.0025+rnd()*.0018}))}));
+  Object.assign(m,{nodes,max,berries,growth:.22,grab:null});
+}
+
+function uTreeStep() {
+  if(on('growing')&&!modeState.grab)modeState.growth=Math.min(1,modeState.growth+STEP*.035);
+}
+
+function uTreeDraw() {
+  const m=modeState,reach=m.growth*m.max;
+  ctx.fillStyle=PAPER;ctx.fillRect(0,0,S,S);
+  for(let i=1;i<m.nodes.length;i++) {
+    const n=m.nodes[i],p=m.nodes[n.parent];
+    if(reach<p.length)continue;
+    const t=clamp((reach-p.length)/(n.length-p.length),0,1);
+    const x=lerp(p.x,n.x,t),y=lerp(p.y,n.y,t);
+    const maturity=.35+.65*clamp((reach-p.length)/.3,0,1);
+    const w=p.width*maturity,ww=lerp(p.width,n.width,t)*maturity;
+    const len=Math.hypot(x-p.x,y-p.y)||1,dx=-(y-p.y)/len,dy=(x-p.x)/len;
+    ctx.beginPath();ctx.moveTo((p.x+dx*w/2)*S,(p.y+dy*w/2)*S);
+    ctx.lineTo((x+dx*ww/2)*S,(y+dy*ww/2)*S);ctx.lineTo((x-dx*ww/2)*S,(y-dy*ww/2)*S);
+    ctx.lineTo((p.x-dx*w/2)*S,(p.y-dy*w/2)*S);ctx.closePath();ctx.fillStyle=INK;ctx.fill();
+    dot(p.x,p.y,INK,w*.48);
+    if(w>.009)line(p.x+dx*w*.17,p.y+dy*w*.17,x+dx*ww*.17,y+dy*ww*.17,paper(.18),.00065);
+  }
+  if(on('berries'))for(const bunch of m.berries) {
+    const n=bunch.node,ripe=clamp((reach-n.length-.015)/.055,0,1);
+    if(ripe<=0)continue;
+    for(const seed of bunch.seeds) {
+      line(n.x,n.y,n.x+seed.x,n.y+seed.y,ink(.5),.0006);
+      dot(n.x+seed.x,n.y+seed.y,RED,seed.r*ripe);
+    }
+  }
+  uText('У / РЯБИНА',.055,.08,.017,MUTED);
+  uText(m.growth>=1?'Дерево выросло · можно вырастить другое':'Ведите влево / вправо — время роста',.055,.96,.016,MUTED);
+}
+
 const MODES = {
+  tree: {
+    label: 'рябина',
+    note: 'Один плотный ствол и асимметричная развилка образуют У. Дальше ветви заполняют свободное пространство кроны алгоритмом space colonization; толщина зависит от числа потомков. Ягоды появляются после завершения ветвей. Ведите по сцене влево или вправо, чтобы промотать рост. «Расти» включает или останавливает время.',
+    tools: [
+      { type: 'toggle', key: 'growing', label: 'расти', value: true },
+      { type: 'toggle', key: 'berries', label: 'ягоды', value: true },
+      { type: 'button', label: 'сначала', action() { modeState.growth=0; } },
+      { type: 'button', label: 'взрослое', action() { modeState.growth=1; } },
+      { type: 'button', label: 'другое дерево', action: uTreeSetup },
+    ],
+    cursor: 'ew-resize', setup: uTreeSetup, step: uTreeStep, draw: uTreeDraw,
+    onDown() { modeState.grab={x:pointer.x,growth:modeState.growth}; },
+    onMove() { const g=modeState.grab;if(pointer.down&&g)modeState.growth=clamp(g.growth+(pointer.x-g.x)*1.5,0,1); },
+    onUp() { modeState.grab=null; },
+  },
   exposure: {
     label: 'выдержка',
     note: 'Зажмите и ведите светящийся разрез. Его прежние положения остаются в кадре и постепенно гаснут. Медленное движение собирает плотную оболочку, быстрое растягивает её. Первый жест заменяет образец, следующие добавляют свет. «Заморозить» останавливает и затухание, и рисование; для сохранения используйте «снимок».',
