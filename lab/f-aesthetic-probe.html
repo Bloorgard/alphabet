@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ф · возбудимая среда</title>
+<style>
+:root{color-scheme:light;--paper:#f1ede5;--ink:#161616;--muted:#77736d}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:12px/1.5 ui-monospace,monospace}
+main{width:min(780px,calc(100% - 32px),max(320px,calc(100svh - 300px)));margin:16px auto}header,nav,.tools,.bottom{display:flex;align-items:center;gap:18px;flex-wrap:wrap}header{justify-content:space-between;padding-bottom:14px;border-bottom:1px solid #16161630}h1{font-size:13px;font-weight:500;margin:0}a{color:inherit;text-underline-offset:4px}header a{color:var(--muted);text-decoration:none}button,select,input{font:inherit}button{color:inherit;background:none;border:0;padding:8px 0;cursor:pointer}button:hover{text-decoration:underline;text-underline-offset:4px}button[aria-pressed=true]{box-shadow:inset 0 -1px var(--ink)}button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible{outline:1px solid currentColor;outline-offset:4px}
+.stage{position:relative;margin:16px 0}canvas{display:block;width:100%;aspect-ratio:1;touch-action:none;cursor:crosshair}.tools{column-gap:20px;row-gap:2px}.bottom{justify-content:space-between;gap:8px;color:var(--muted);margin-top:8px}.hint{margin:0}.panel{padding:16px 0;border-bottom:1px solid #16161630;margin-bottom:16px}.panel[hidden]{display:none}.settings{display:flex;gap:20px;flex-wrap:wrap}.settings label{display:flex;align-items:center;gap:10px}.settings input{width:110px;accent-color:var(--ink)}select{background:transparent;color:inherit;border:1px solid #16161640;padding:5px}.explanation{max-width:650px;color:var(--muted);line-height:1.7;margin:18px 0 0}.status{font-variant-numeric:tabular-nums} @media(max-width:500px){main{margin:16px auto}header{gap:6px}nav{gap:18px}.stage{margin:12px -6px}.tools{gap:4px 18px}.settings{gap:14px}h1{width:100%}.bottom{align-items:flex-start}}
+body.membrane{--paper:#161616;--ink:#f1ede5;--muted:#918e87;color-scheme:dark}body.membrane header,body.membrane .panel{border-color:#f1ede530}body.membrane select{border-color:#f1ede540}
+#placement{display:inline-flex;gap:14px;flex-wrap:wrap}select,select option{background:var(--paper);color:var(--ink)}[hidden]{display:none!important}button:disabled{opacity:.35;cursor:default}
+
+.toolbar{position:sticky;top:0;z-index:3;background:var(--paper);padding:8px 0;border-bottom:1px solid color-mix(in srgb,var(--ink) 20%,transparent)}
+.transport,.instruments{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap}.transport{justify-content:space-between}.transport .group{display:flex;gap:16px;align-items:center}.instruments{padding-top:8px}button[data-brush]{padding:8px 12px;border:1px solid transparent}button[data-brush][aria-pressed=true]{background:var(--ink);color:var(--paper);box-shadow:none;border-color:var(--ink)}
+.stage{width:100%;margin:12px auto}.hint{min-height:3em;max-width:620px}.selection{position:absolute;z-index:2;background:var(--paper);color:var(--ink);border:1px solid var(--muted);padding:5px 10px;display:flex;gap:12px;align-items:center;box-shadow:0 2px 12px #0003;white-space:nowrap}.selection button{padding:4px}.scene-menu{margin-top:12px;border-bottom:1px solid var(--muted);padding-bottom:12px}.scene-menu .tools{gap:16px}input[type=checkbox]{accent-color:var(--ink)}.settings label{max-width:100%}.settings input[type=range]{width:90px}.cut-options{display:flex;align-items:center;gap:8px;font-size:11px}.save-note{font-size:11px;color:var(--muted)}
+@media(max-width:500px){.stage{margin:12px auto}.transport .group{gap:12px}.instruments{gap:6px}.instruments button{padding:8px}.toolbar{font-size:11px}.cut-options{width:100%}.selection{font-size:11px}header h1{width:auto}main{margin-top:10px}}
+.selection{flex-wrap:wrap;max-width:calc(100% - 8px);white-space:normal}.selection label{display:flex;gap:6px;align-items:center;font-size:11px}.selection input{width:90px;accent-color:var(--ink)}
+</style>
+</head>
+<body>
+<main>
+<header><h1>Ф / световая мембрана</h1><button id="scenes-toggle" aria-expanded="false" aria-controls="scenes">сцены</button><a href="index.html">полигоны ↗</a></header>
+<section id="scenes" class="scene-menu" hidden><nav class="tools" aria-label="Сцена"><button data-mode="membrane" aria-pressed="true">мембрана</button><button data-mode="rings" aria-pressed="false">чашка</button><button data-mode="spirals" aria-pressed="false">спирали</button><button data-mode="phi" aria-pressed="false">перегородка</button><button id="fresh">случайная композиция</button></nav><p class="save-note">Выбор сцены начинает новый опыт.</p></section>
+<div class="toolbar"><div class="transport"><div class="group"><button id="play">пауза</button><button id="reset">начать заново</button><button id="clear-waves">очистить волны</button><button id="undo" disabled>отменить</button></div><button id="save">снимок</button></div>
+<div class="instruments" role="group" aria-label="Инструменты"><button data-brush="select" aria-pressed="true">выбрать</button><button data-brush="add" aria-pressed="false">+ источник</button><button data-brush="cut" aria-pressed="false">+ гаситель</button><label id="cut-options" class="cut-options" hidden><input id="show-cut" type="checkbox">заливка гасителей</label></div></div>
+<div class="stage"><canvas id="c" width="960" height="960" aria-label="Среда. Выберите источник для перемещения или удаления. Инструменты расположены над сценой."></canvas><div id="selection" class="selection" hidden><span id="selection-label"></span><label id="blocker-size-label" hidden>ширина <input id="blocker-size" type="range" min="0.008" max="0.07" step="0.002" value="0.025"></label><button id="delete-source">удалить</button></div></div>
+<div class="bottom"><p id="hint" class="hint" aria-live="polite"></p><button id="toggle" aria-expanded="false" aria-controls="panel">вид и параметры (tab)</button></div>
+<div class="tools"><button id="remember">запомнить расстановку</button><span id="saved-note" class="save-note">«Начать заново» вернёт сохранённые источники и гасители.</span></div>
+<section id="panel" class="panel" hidden><div class="settings"><label>темп <input id="speed" type="range" min="0.3" max="2" step="0.1" value="1"></label><label>оттиск <select id="print"><option value="ribbon">лента</option><option value="edge" selected>тонкий фронт</option></select></label><label>затухание <input id="fade" type="range" min="0" max="4" step="0.1" value="1.2"><output id="fade-value">1.2</output></label><label>зерно <input id="grain-amount" type="range" min="0" max="1" step="0.1" value="1"></label><label><input id="inverse" type="checkbox">инверсия</label><button id="step">один кадр</button><span id="status" class="status"></span></div><p class="explanation">Волны распространяются, сталкиваются и гасят друг друга. За каждой — время восстановления среды. Гаситель постоянно подавляет среду внутри своей области. Его можно переместить, изменить ширину или удалить. После освобождения области среда восстанавливается; у оборванных фронтов могут возникнуть спирали. В «перегородке» стенка разделяет два очага; её можно перемещать рукой. Это качественная модель возбудимой среды <a href="https://www.dune-project.org/sphinx/content/sphinx/dune-fem/spiral_nb.html" target="_blank" rel="noreferrer">Баркли</a>, воспроизводящая волновое поведение реакции Белоусова—Жаботинского, а не расчёт её химического состава.</p></section>
+</main>
+<script>
+'use strict';
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+const N=320,COUNT=N*N,DT=.012,A=.75,B=.02,EPS=.02,DIFF=1/(.6*.6);
+let u=new Float32Array(COUNT),v=new Float32Array(COUNT),next=new Float32Array(COUNT);
+const cutUntil=new Float32Array(COUNT);
+const mask=new Uint8Array(COUNT),neighbors=new Int32Array(COUNT*8);
+const VIEW=960;
+const RES=Math.min(480,Math.max(320,Math.round(canvas.clientWidth)));
+const raster=document.createElement('canvas');raster.width=raster.height=RES;
+const rasterContext=raster.getContext('2d');
+const pixels=ctx.createImageData(RES,RES);
+const trail=new Float32Array(RES*RES);
+let trailTime=0;
+const fade=document.getElementById('fade');
+const gridAt=new Int32Array(RES),fraction=new Float32Array(RES);
+for(let x=0;x<RES;x++){const g=Math.max(0,Math.min(N-1.001,(x+.5)*N/RES-.5));gridAt[x]=Math.floor(g);fraction[x]=g-gridAt[x];}
+let mode='membrane',brush='select',running=true,time=0,debt=0,last=0,seed=4317,sources=[],wall=.5;
+const speed=document.getElementById('speed'),print=document.getElementById('print'),inverse=document.getElementById('inverse');
+let active=[];
+let selectedSource=null,hoverPoint=null;
+const savedScenes=new Map(),history=[];
+// Symmetric starting composition, aligned from the author's canvas on 8 September.
+const START_F={
+  sources:[{x:160/320,y:131/320,period:6.7,next:0}],
+  wall:.5,
+  blockers:[
+    {kind:'blocker',x:131/320,y:146/320,radius:.008,points:[{x:0,y:0},{x:58/320,y:0}]},
+    {kind:'blocker',x:160/320,y:154/320,radius:.008,points:[{x:0,y:0},{x:0,y:52/320}]},
+    {kind:'blocker',x:131/320,y:116/320,radius:.008,points:[{x:0,y:0},{x:58/320,y:0}]},
+    {kind:'blocker',x:160/320,y:56/320,radius:.008,points:[{x:0,y:0},{x:0,y:52/320}]},
+  ],
+};
+savedScenes.set('membrane',structuredClone(START_F));
+
+const grainAmount=document.getElementById('grain-amount');
+let blockers=[];
+const copyBlockers=()=>structuredClone(blockers);
+const showCut=document.getElementById('show-cut');
+const touches=new Map();
+const grain=new Float32Array(RES*RES);
+for(let i=0;i<grain.length;i++){let h=Math.imul(i+731,374761393);h=Math.imul(h^(h>>>13),1274126177);grain[i]=(h>>>0)/4294967296;}
+function projection(){for(let x=0;x<RES;x++){const p=(x+.5)/RES;const g=Math.max(0,Math.min(N-1.001,(mode==='membrane'?.12+p*.76:p)*N-.5));gridAt[x]=Math.floor(g);fraction[x]=g-gridAt[x];}}
+function screen(p){return mode==='membrane'?(p-.12)/.76*VIEW:p*VIEW;}
+function buildVessel(){
+  active=[];
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+    const px=(x+.5)/N,py=(y+.5)/N;
+    const inside=mode==='membrane'?x>0&&x<N-1&&y>0&&y<N-1:Math.hypot(px-.5,py-.5)<.465;
+    const barrier=mode==='phi'&&Math.abs(px-wall)<.009;
+    mask[y*N+x]=inside&&!barrier?1:0;
+    if(mask[y*N+x])active.push(y*N+x);else{u[y*N+x]=0;v[y*N+x]=0;next[y*N+x]=0;}
+  }
+  const offsets=[-1,1,-N,N,-N-1,-N+1,N-1,N+1];
+  for(const i of active)for(let k=0;k<8;k++)neighbors[i*8+k]=mask[i+offsets[k]]?i+offsets[k]:i;
+}
+function disk(x,y,r,excitation){
+  const cx=x*N,cy=y*N,rr=r*N;
+  for(let yy=Math.max(1,Math.floor(cy-rr));yy<Math.min(N-1,cy+rr);yy++)for(let xx=Math.max(1,Math.floor(cx-rr));xx<Math.min(N-1,cx+rr);xx++){
+    const i=yy*N+xx;if(!mask[i]||(xx-cx)**2+(yy-cy)**2>rr*rr)continue;
+    if(excitation){if(v[i]<.18&&cutUntil[i]<=time)u[i]=1;}else{u[i]=0;v[i]=.85;cutUntil[i]=time+2.8;}
+  }
+}
+// Nine-point Laplacian; impermeable vessel walls use the centre value.
+function step(){
+  for(const s of sources)if(time>=s.next){disk(s.x,s.y,.014,true);s.next+=s.period;}
+  for(let j=0;j<active.length;j++){
+    const i=active[j],q=i*8,a=u[i],b=v[i];
+    if(cutUntil[i]>time){next[i]=0;v[i]=.85;continue;}
+    const lap=(4*(u[neighbors[q]]+u[neighbors[q+1]]+u[neighbors[q+2]]+u[neighbors[q+3]])+u[neighbors[q+4]]+u[neighbors[q+5]]+u[neighbors[q+6]]+u[neighbors[q+7]]-20*a)/6;
+    next[i]=a+DT*(DIFF*lap+a*(1-a)*(a-(b+B)/A)/EPS);
+    v[i]=b+DT*(a-b);
+  }
+  const swap=u;u=next;next=swap;time+=DT;
+}
+function reset(warm=false){
+  selectedSource=null;
+  blockers=[];cutUntil.fill(0);
+  u.fill(0);v.fill(0);next.fill(0);trail.fill(0);trailTime=0;time=0;debt=0;wall=.5;touches.clear();projection();buildVessel();
+  let rng=seed;const random=()=>{rng=(Math.imul(rng,1664525)+1013904223)>>>0;return rng/4294967296;};
+  if(mode==='membrane'){
+    sources=[{x:.29+random()*.08,y:.34+random()*.09,period:6.7,next:0},{x:.69+random()*.08,y:.65+random()*.12,period:8.4,next:2}];
+  }else if(mode==='rings'){
+    sources=[[.32,.29,4.9],[.69,.45,4.5],[.39,.78,5.7],[.19,.57,6.3],[.73,.78,6.8]].map(([x,y,period],i)=>({x:x+(random()-.5)*.10,y:y+(random()-.5)*.10,period,next:i*.9}));
+  }else if(mode==='phi'){
+    sources=[{x:.28+random()*.08,y:.36+random()*.24,period:4.4+random()*.5,next:0},{x:.67+random()*.08,y:.43+random()*.22,period:5+random()*.5,next:1.1}];
+  }else{
+    sources=[];
+    // Two broken wave fronts: excited stripe beside a recovering half-plane.
+    const shift=(random()-.5)*.13,lean=(random()-.5)*.16;
+    for(const i of active){
+      const x=(i%N)/N,y=Math.floor(i/N)/N;
+      const left=x<.49,cy=(left?.39:.61)+shift+lean*(x-.5),cx=(left?.29:.70)+shift;
+      const direction=left?1:-1;
+      if((x-cx)*direction>0&&Math.abs(y-cy)<.018)u[i]=1;
+      if((x-cx)*direction>0&&(y-cy)*direction<0)v[i]=.65;
+    }
+  }
+  // Evolve the actual medium before the first view; no drawn rings or spirals.
+  if(savedScenes.has(mode)){const saved=savedScenes.get(mode);sources=saved.sources.map(s=>({...s}));wall=saved.wall;blockers=structuredClone(saved.blockers||[]);buildVessel();rebuildBlockers();}
+  else savedScenes.set(mode,{sources:sources.map(s=>({...s})),wall,blockers:copyBlockers()});
+  if(warm)for(let n=0;n<2400;n++)step();
+  syncUI();draw();
+}
+function draw(){
+  const inverted=mode==='membrane'?!inverse.checked:inverse.checked;
+  const ink=inverted?[241,237,229]:[22,22,22],paper=inverted?[22,22,22]:[241,237,229];
+  const d=pixels.data,edge=print.value==='edge';
+  const grainStrength=Number(grainAmount.value),showSuppression=showCut.checked;
+  const decay=Number(fade.value)>0?Math.exp(-(time-trailTime)/(2.8*Number(fade.value))):0;
+  trailTime=time;
+  for(let y=0;y<RES;y++){
+    const row=gridAt[y]*N,fy=fraction[y];
+    for(let x=0;x<RES;x++){
+      const i=row+gridAt[x],fx=fraction[x];
+      const upper=u[i]+fx*(u[i+1]-u[i]);
+      const lower=u[i+N]+fx*(u[i+N+1]-u[i+N]);
+      const value=upper+fy*(lower-upper);
+      let coverage;
+      if(edge){
+        const top=v[i]+fx*(v[i+1]-v[i]),bottom=v[i+N]+fx*(v[i+N+1]-v[i+N]);
+        const recovery=top+fy*(bottom-top);
+        coverage=Math.min((value-.35)/.06,(.13-recovery)/.012)+.5;
+      }else coverage=(value-.48)/.055+.5;
+      coverage=Math.max(0,Math.min(1,coverage));
+      const index=y*RES+x,k=index*4;
+      trail[index]=Math.max(coverage,trail[index]*decay);
+      coverage=Math.max(coverage,trail[index]*(mode==='membrane'?.5:.72));
+      if(mode==='membrane'){coverage=Math.max(0,Math.min(1,coverage+(grain[index]-.5)*(.025+Math.sqrt(coverage)*.22)*grainStrength));}
+      d[k]=paper[0]+coverage*(ink[0]-paper[0]);d[k+1]=paper[1]+coverage*(ink[1]-paper[1]);d[k+2]=paper[2]+coverage*(ink[2]-paper[2]);d[k+3]=255;
+      if(showSuppression&&cutUntil[i]>time){const amount=.2+.4*Math.min(1,(cutUntil[i]-time)/2.8);d[k]+=amount*(224-d[k]);d[k+1]+=amount*(33-d[k+1]);d[k+2]+=amount*(15-d[k+2]);}
+    }
+  }
+  rasterContext.putImageData(pixels,0,0);
+  ctx.drawImage(raster,0,0,VIEW,VIEW);
+  ctx.strokeStyle=`rgb(${ink.join(',')})`;ctx.lineWidth=1;
+  if(mode!=='membrane'){ctx.beginPath();ctx.arc(480,480,960*.465,0,Math.PI*2);ctx.stroke();}
+  {
+    ctx.strokeStyle=inverted?'#f1ede5':'#161616';ctx.lineWidth=2;
+    for(const [number,s] of sources.entries()){
+      ctx.save();ctx.translate(screen(s.x),screen(s.y));ctx.scale(VIEW/canvas.clientWidth,VIEW/canvas.clientWidth);
+      const foreground=inverted?'#f1ede5':'#161616',background=inverted?'#161616':'#f1ede5';
+      ctx.fillStyle=background;ctx.strokeStyle=foreground;ctx.lineWidth=1.2;
+      ctx.beginPath();ctx.arc(0,0,selectedSource===s?10:7,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(0,0,selectedSource===s?8:5,0,Math.PI*2);ctx.stroke();
+      ctx.font='12px monospace';ctx.strokeStyle=background;ctx.lineWidth=3;ctx.strokeText(String(number+1),10,-8);ctx.fillStyle=foreground;ctx.fillText(String(number+1),10,-8);ctx.restore();
+    }
+    for(const g of touches.values())if(g.cut&&showCut.checked){ctx.fillStyle='#e0210f';ctx.beginPath();ctx.arc(screen(g.x),screen(g.y),3,0,Math.PI*2);ctx.fill();}
+  }
+  for(const [index,b] of blockers.entries()){
+    ctx.save();ctx.strokeStyle=inverted?'#f1ede5':'#161616';ctx.lineWidth=(b===selectedSource?2:1)*VIEW/canvas.clientWidth;ctx.setLineDash([5*VIEW/canvas.clientWidth,4*VIEW/canvas.clientWidth]);ctx.lineCap='round';ctx.beginPath();b.points.forEach((p,k)=>ctx[k?'lineTo':'moveTo'](screen(b.x+p.x),screen(b.y+p.y)));if(b.points.length===1)ctx.arc(screen(b.x),screen(b.y),b.radius*VIEW/(mode==='membrane'?.76:1),0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);ctx.font=`${12*VIEW/canvas.clientWidth}px monospace`;ctx.fillStyle=ctx.strokeStyle;ctx.fillText(`×${index+1}`,screen(b.x)+10*VIEW/canvas.clientWidth,screen(b.y)-10*VIEW/canvas.clientWidth);ctx.restore();
+  }
+  if(brush==='cut'&&showCut.checked&&hoverPoint){ctx.strokeStyle='#e0210f';ctx.lineWidth=1.5;ctx.setLineDash([5,5]);ctx.beginPath();ctx.arc(screen(hoverPoint.x),screen(hoverPoint.y),.025*VIEW/(mode==='membrane'?.76:1),0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);}
+  if(mode==='phi'){
+    ctx.fillStyle=`rgb(${ink.join(',')})`;ctx.fillRect(wall*960-1,12,2,936);
+    ctx.beginPath();ctx.arc(wall*960,18,5,0,Math.PI*2);ctx.fill();
+  }
+  positionSelection();
+  document.getElementById('status').textContent=`t ${time.toFixed(1)}`;
+}
+function frame(ts){
+  if(running&&!document.hidden){
+    debt+=Math.min((ts-last)/1000,.05)*2.8*Number(speed.value);
+    let count=0;while(debt>=DT&&count<28){step();debt-=DT;count++;}
+    if(count===28)debt=0;
+    draw();
+  }
+  last=ts;requestAnimationFrame(frame);
+}
+function point(e){const r=canvas.getBoundingClientRect();const x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));return mode==='membrane'?{x:.12+x*.76,y:.12+y*.76}:{x,y};}
+function blockerDistance(b,p){
+  let distance=Infinity;
+  for(let k=0;k<b.points.length;k++){
+    const a=b.points[Math.max(0,k-1)],c=b.points[k],dx=c.x-a.x,dy=c.y-a.y;
+    const t=Math.max(0,Math.min(1,((p.x-b.x-a.x)*dx+(p.y-b.y-a.y)*dy)/(dx*dx+dy*dy||1)));
+    distance=Math.min(distance,Math.hypot(p.x-b.x-a.x-dx*t,p.y-b.y-a.y-dy*t));
+  }
+  return distance;
+}
+function rebuildBlockers(){
+  cutUntil.fill(0);
+  for(const b of blockers){
+    const r=b.radius;
+    for(let k=0;k<b.points.length;k++){
+      const a=b.points[Math.max(0,k-1)],c=b.points[k];
+      const x0=Math.max(0,Math.floor((b.x+Math.min(a.x,c.x)-r)*N)),x1=Math.min(N-1,Math.ceil((b.x+Math.max(a.x,c.x)+r)*N));
+      const y0=Math.max(0,Math.floor((b.y+Math.min(a.y,c.y)-r)*N)),y1=Math.min(N-1,Math.ceil((b.y+Math.max(a.y,c.y)+r)*N));
+      const dx=c.x-a.x,dy=c.y-a.y,length=dx*dx+dy*dy;
+      for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+        const px=x/N-b.x-a.x,py=y/N-b.y-a.y,t=Math.max(0,Math.min(1,(px*dx+py*dy)/(length||1)));
+        if((px-t*dx)**2+(py-t*dy)**2>r*r)continue;
+        const i=y*N+x;if(mask[i]){cutUntil[i]=Infinity;u[i]=0;v[i]=.85;}
+      }
+    }
+  }
+}
+function checkpoint(){
+  history.push({u:u.slice(),v:v.slice(),trail:trail.slice(),cut:cutUntil.slice(),time,trailTime,sources:sources.map(s=>({...s})),blockers:copyBlockers(),wall,saved:savedScenes.get(mode)});
+  if(history.length>8)history.shift();
+  document.getElementById('undo').disabled=false;
+}
+function validPoint(p){return !!mask[Math.min(N-1,Math.floor(p.y*N))*N+Math.min(N-1,Math.floor(p.x*N))];}
+canvas.addEventListener('pointerdown',e=>{
+  const p=point(e);hoverPoint=p;
+  if(brush==='add'){
+    if(!validPoint(p))return;
+    checkpoint();const source={...p,period:6.7,next:time};sources.push(source);selectedSource=source;setBrush('select');syncUI();draw();return;
+  }
+  if(brush==='cut'){
+    if(!validPoint(p))return;
+    if(!touches.size)checkpoint();const blocker={...p,kind:'blocker',radius:.025,points:[{x:0,y:0}]};blockers.push(blocker);selectedSource=blocker;
+    touches.set(e.pointerId,{...p,cut:true,blocker});canvas.setPointerCapture(e.pointerId);rebuildBlockers();syncUI();draw();return;
+  }
+  const radius=24/canvas.getBoundingClientRect().width*(mode==='membrane'?.76:1);
+  const source=sources.find(s=>Math.hypot(s.x-p.x,s.y-p.y)<radius&&!Array.from(touches.values()).some(g=>g.source===s))||blockers.find(b=>blockerDistance(b,p)<b.radius+radius*.4&&!Array.from(touches.values()).some(g=>g.source===b));
+  selectedSource=source||null;
+  if(source||mode==='phi'&&Math.abs(p.x-wall)<radius){touches.set(e.pointerId,{...p,source,wall:!source,moved:false});canvas.setPointerCapture(e.pointerId);}
+  syncUI();draw();
+});
+canvas.addEventListener('pointermove',e=>{
+  const p=point(e);hoverPoint=p;const g=touches.get(e.pointerId);
+  if(g){
+    if(g.cut){if(Math.hypot(p.x-g.x,p.y-g.y)>.002){g.blocker.points.push({x:p.x-g.blocker.x,y:p.y-g.blocker.y});rebuildBlockers();}}
+    else if(Math.hypot(p.x-g.x,p.y-g.y)>.001){
+      if(!g.moved){checkpoint();g.moved=true;}
+      if(g.wall){wall=Math.max(.24,Math.min(.76,p.x));buildVessel();}
+      else if(g.source.kind==='blocker'){g.source.x+=p.x-g.x;g.source.y+=p.y-g.y;rebuildBlockers();}
+      else if(validPoint(p))Object.assign(g.source,p);
+    }
+    Object.assign(g,p);
+  }
+  if(!running)draw();
+});
+canvas.addEventListener('pointerleave',()=>{hoverPoint=null;draw();});
+function release(e){if(e.pointerType==='touch')hoverPoint=null;const g=touches.get(e.pointerId);touches.delete(e.pointerId);if(g?.cut&&!touches.size)setBrush('select');draw();}
+canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);canvas.addEventListener('lostpointercapture',release);
+function positionSelection(){
+  const box=document.getElementById('selection');box.hidden=!selectedSource||brush!=='select';
+  if(box.hidden)return;
+  const r=canvas.getBoundingClientRect(),x=screen(selectedSource.x)/VIEW*r.width,y=screen(selectedSource.y)/VIEW*r.height;
+  box.style.left=Math.max(4,Math.min(r.width-box.offsetWidth-4,x+18))+'px';
+  box.style.top=Math.max(4,Math.min(r.height-box.offsetHeight-4,y+18))+'px';
+  document.getElementById('selection-label').textContent=selectedSource.kind==='blocker'?`гаситель ${blockers.indexOf(selectedSource)+1}`:`источник ${sources.indexOf(selectedSource)+1}`;
+}
+function syncUI(){
+  document.getElementById('play').textContent=running?'пауза':'запустить';
+  document.getElementById('undo').disabled=!history.length;
+  document.getElementById('cut-options').hidden=brush!=='cut'&&!blockers.length;
+  document.getElementById('blocker-size-label').hidden=selectedSource?.kind!=='blocker';
+  if(selectedSource?.kind==='blocker')document.getElementById('blocker-size').value=selectedSource.radius;
+  document.getElementById('hint').textContent=brush==='add'?'Коснитесь сцены — появится один постоянный источник. Затем вернётся выбор.':brush==='cut'?'Нарисуйте гаситель: точку или полосу. Он действует, пока вы его не удалите. После жеста вернётся выбор.':selectedSource?.kind==='blocker'?'Тяните полосу, меняйте ширину или удалите гаситель. Удаление освобождает среду, но не возвращает погашенные волны.':selectedSource?'Тяните выбранную точку. «Удалить» уберёт источник, но оставит его волны.':mode==='phi'?'Выберите источник или потяните перегородку. Пустое место снимает выделение.':'Выберите и тяните точку. Чтобы спокойно расставить источники, нажмите «пауза».';
+  positionSelection();
+}
+function setBrush(value){brush=value;touches.clear();document.querySelectorAll('[data-brush]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.brush===value));canvas.style.cursor=value==='select'?'default':'crosshair';syncUI();draw();}
+document.querySelectorAll('[data-brush]').forEach(b=>b.onclick=()=>setBrush(b.dataset.brush));
+document.getElementById('delete-source').onclick=()=>{if(!selectedSource)return;checkpoint();for(const [id,g] of touches)if(g.source===selectedSource)touches.delete(id);if(selectedSource.kind==='blocker'){blockers.splice(blockers.indexOf(selectedSource),1);rebuildBlockers();}else sources.splice(sources.indexOf(selectedSource),1);selectedSource=null;syncUI();draw();};
+document.getElementById('undo').onclick=()=>{
+  const snapshot=history.pop();if(!snapshot)return;
+  u.set(snapshot.u);v.set(snapshot.v);trail.set(snapshot.trail);cutUntil.set(snapshot.cut);time=snapshot.time;trailTime=snapshot.trailTime;sources=snapshot.sources;blockers=snapshot.blockers;wall=snapshot.wall;savedScenes.set(mode,snapshot.saved);buildVessel();touches.clear();selectedSource=null;debt=0;running=false;syncUI();draw();
+  document.getElementById('hint').textContent='Действие отменено. Возвращён кадр перед ним; нажмите «запустить», чтобы продолжить.';
+};
+const blockerSize=document.getElementById('blocker-size');
+let sizing=false;
+blockerSize.oninput=()=>{if(selectedSource?.kind!=='blocker')return;if(!sizing){checkpoint();sizing=true;}selectedSource.radius=Number(blockerSize.value);rebuildBlockers();draw();};
+blockerSize.onchange=()=>{sizing=false;};
+document.getElementById('clear-waves').onclick=()=>{checkpoint();u.fill(0);v.fill(0);next.fill(0);trail.fill(0);rebuildBlockers();for(const source of sources)source.next=time;draw();};
+function play(){running=!running;debt=0;syncUI();}
+document.getElementById('play').onclick=play;
+document.getElementById('reset').onclick=()=>{checkpoint();setBrush('select');reset();};
+document.getElementById('remember').onclick=()=>{checkpoint();savedScenes.set(mode,{sources:sources.map((s,i)=>({...s,next:i*.8})),wall,blockers:copyBlockers()});document.getElementById('saved-note').textContent='Расстановка запомнена для этой сцены до закрытия страницы.';};
+function changeScene(value,randomize=false){
+  mode=value;if(randomize){seed=1+Math.floor(Math.random()*99999);savedScenes.delete(mode);}
+  history.length=0;selectedSource=null;document.body.classList.toggle('membrane',mode==='membrane');
+  document.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===mode));
+  document.querySelector('h1').textContent='Ф / '+({membrane:'световая мембрана',rings:'чашка',spirals:'спирали',phi:'перегородка'}[mode]);
+  reset(true);setBrush('select');document.getElementById('scenes').hidden=true;document.getElementById('scenes-toggle').setAttribute('aria-expanded',false);document.getElementById('saved-note').textContent='«Начать заново» вернёт источники и гасители этой сцены.';
+}
+document.getElementById('fresh').onclick=()=>changeScene(mode,true);
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>changeScene(b.dataset.mode));
+document.getElementById('scenes-toggle').onclick=()=>{const menu=document.getElementById('scenes');menu.hidden=!menu.hidden;document.getElementById('scenes-toggle').setAttribute('aria-expanded',!menu.hidden);};
+showCut.onchange=draw;
+const panel=document.getElementById('panel'),toggle=document.getElementById('toggle');
+toggle.onclick=()=>{panel.hidden=!panel.hidden;toggle.setAttribute('aria-expanded',!panel.hidden);};
+document.getElementById('step').onclick=()=>{if(running)play();for(let n=0;n<4;n++)step();draw();};
+grainAmount.oninput=draw;
+print.onchange=()=>{trail.fill(0);draw();};inverse.onchange=draw;
+fade.oninput=()=>{document.getElementById('fade-value').value=fade.value;draw();};
+document.getElementById('save').onclick=()=>{draw();const a=document.createElement('a');a.download=`f-${mode}-${seed}-${Math.round(time)}.png`;a.href=canvas.toDataURL();a.click();};
+document.addEventListener('keydown',e=>{if(e.target.closest('input,textarea,select')||e.repeat)return;if(e.key==='Tab'){e.preventDefault();toggle.click();}if(e.code==='Space'&&e.target===document.body){e.preventDefault();play();}});
+document.body.classList.add('membrane');
+
+reset(true);syncUI();requestAnimationFrame(ts=>{last=ts;requestAnimationFrame(frame);});
+</script>
+</body>
+</html>
