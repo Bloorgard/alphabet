@@ -108,7 +108,7 @@ export function mountF(workspace) {
     for (let yy = Math.max(1, Math.floor(cy - r)); yy < Math.min(N - 1, Math.ceil(cy + r)); yy++) {
       for (let xx = Math.max(1, Math.floor(cx - r)); xx < Math.min(N - 1, Math.ceil(cx + r)); xx++) {
         const i = yy * N + xx;
-        if (!mask[i] || (xx - cx) ** 2 + (yy - cy) ** 2 > r * r) continue;
+        if (!mask[i] || (xx + .5 - cx) ** 2 + (yy + .5 - cy) ** 2 > r * r) continue;
         if (excitation) { if (!cut[i] && v[i] < .18) u[i] = 1; }
         else { cut[i] = 1; u[i] = 0; v[i] = .85; }
       }
@@ -127,7 +127,7 @@ export function mountF(workspace) {
         const maxY = Math.min(N - 1, Math.ceil((blocker.y + Math.max(start.y, end.y) + blocker.radius) * N));
         const dx = end.x - start.x, dy = end.y - start.y, length = dx * dx + dy * dy;
         for (let y = minY; y <= maxY; y++) for (let x = minX; x <= maxX; x++) {
-          const px = x / N - blocker.x - start.x, py = y / N - blocker.y - start.y;
+          const px = (x + .5) / N - blocker.x - start.x, py = (y + .5) / N - blocker.y - start.y;
           const t = clamp((px * dx + py * dy) / (length || 1), 0, 1);
           if ((px - t * dx) ** 2 + (py - t * dy) ** 2 <= blocker.radius ** 2) cut[y * N + x] = 1;
         }
