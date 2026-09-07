@@ -5,9 +5,11 @@ const INK = '#161616';
 const PAPER = '#f1ede5';
 const RED = '#e0210f';
 
-const N = 180;
+const N = 320;
 const COUNT = N * N;
 const DT = .012;
+const SUBSTEPS = 4;
+const WARM = 1200;
 const A = .75;
 const B = .02;
 const EPS = .02;
@@ -17,12 +19,12 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 // Отобранная в полигоне симметричная композиция. Источник ровно в центре;
 // четыре световые маски задают две чаши и центральный стержень Ф.
 const START = {
-  source: { x: .5, y: .5, period: 6.7, next: 0 },
+  source: { x: 160 / 320, y: 160 / 320, period: 6.7, next: 0 },
   blockers: [
-    { x: 131 / 320, y: 146 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 58 / 320, y: 0 }] },
-    { x: 160 / 320, y: 154 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 0, y: 52 / 320 }] },
-    { x: 131 / 320, y: 116 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 58 / 320, y: 0 }] },
-    { x: 160 / 320, y: 56 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 0, y: 52 / 320 }] },
+    { x: 131 / 320, y: 175 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 58 / 320, y: 0 }] },
+    { x: 160 / 320, y: 183 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 0, y: 52 / 320 }] },
+    { x: 131 / 320, y: 145 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 58 / 320, y: 0 }] },
+    { x: 160 / 320, y: 85 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 0, y: 52 / 320 }] },
   ],
 };
 
@@ -40,14 +42,14 @@ export function mountF(workspace) {
     showMasks: false, fade: 1.2, grain: true, touched: false,
   };
   const pointer = { x: 0, y: 0, down: false };
-  const u = new Float32Array(COUNT);
+  let u = new Float32Array(COUNT);
   const v = new Float32Array(COUNT);
-  const next = new Float32Array(COUNT);
-  const previous = new Float32Array(COUNT);
+  let next = new Float32Array(COUNT);
   const cut = new Uint8Array(COUNT);
   const mask = new Uint8Array(COUNT);
   const neighbors = new Int32Array(COUNT * 8);
-  const RENDER = 360;
+  let active = new Int32Array(0);
+  const RENDER = 480;
   const renderCanvas = document.createElement('canvas');
   renderCanvas.width = renderCanvas.height = RENDER;
   const renderContext = renderCanvas.getContext('2d');
@@ -90,12 +92,15 @@ export function mountF(workspace) {
   }
 
   function buildVessel() {
+    const inside = [];
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const i = y * N + x;
       mask[i] = x > 0 && x < N - 1 && y > 0 && y < N - 1 ? 1 : 0;
+      if (mask[i]) inside.push(i);
     }
+    active = Int32Array.from(inside);
     const offsets = [-1, 1, -N, N, -N - 1, -N + 1, N - 1, N + 1];
-    for (let i = 0; i < COUNT; i++) for (let k = 0; k < 8; k++) neighbors[i * 8 + k] = mask[i + offsets[k]] ? i + offsets[k] : i;
+    for (const i of active) for (let k = 0; k < 8; k++) neighbors[i * 8 + k] = mask[i + offsets[k]] ? i + offsets[k] : i;
   }
 
   function disk(x, y, radius, excitation) {
@@ -140,20 +145,20 @@ export function mountF(workspace) {
     time = 0; trailTime = 0; debt = 0;
     buildVessel();
     rebuildBlockers();
-    for (let i = 0; i < 1900; i++) step();
+    for (let i = 0; i < WARM; i++) step();
   }
 
   function step() {
     if (time >= state.source.next) { disk(state.source.x, state.source.y, .014, true); state.source.next += state.source.period; }
-    for (let i = 0; i < COUNT; i++) {
-      if (!mask[i]) continue;
+    for (let j = 0; j < active.length; j++) {
+      const i = active[j];
       if (cut[i]) { next[i] = 0; v[i] = .85; continue; }
       const q = i * 8, value = u[i], recovery = v[i];
       const lap = (4 * (u[neighbors[q]] + u[neighbors[q + 1]] + u[neighbors[q + 2]] + u[neighbors[q + 3]]) + u[neighbors[q + 4]] + u[neighbors[q + 5]] + u[neighbors[q + 6]] + u[neighbors[q + 7]] - 20 * value) / 6;
       next[i] = value + DT * (DIFF * lap + value * (1 - value) * (value - (recovery + B) / A) / EPS);
       v[i] = recovery + DT * (value - recovery);
     }
-    previous.set(u); u.set(next); next.set(previous);
+    const swap = u; u = next; next = swap;
     time += DT;
   }
 
@@ -269,7 +274,7 @@ export function mountF(workspace) {
   function onKey(event) { if (event.target.closest('input, textarea, select')) return; if (event.key === 'Tab') { event.preventDefault(); toggle.click(); } if (event.code === 'Space') { event.preventDefault(); pause.click(); } }
   function frame(now) {
     debt = Math.min(.1, debt + (now - last) / 1000); last = now;
-    while (!state.paused && debt >= STEP) { step(); debt -= STEP; }
+    while (!state.paused && debt >= STEP) { for (let k = 0; k < SUBSTEPS; k++) step(); debt -= STEP; }
     draw(); frameId = requestAnimationFrame(frame);
   }
   const observer = new ResizeObserver(resize);
