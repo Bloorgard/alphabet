@@ -297,8 +297,8 @@ export function mountF(workspace) {
     }
     return { x: .5, y: .5 };
   }
-  function addSource() {
-    const source = { ...freeSpot(), period: 6.7, next: time };
+  function addSource(spot) {
+    const source = { x: clamp(spot.x, .15, .85), y: clamp(spot.y, .15, .85), period: 6.7, next: time };
     state.sources.push(source);
     state.selected = source;
     updatePanel();
@@ -335,9 +335,8 @@ export function mountF(workspace) {
   function onDoubleClick(event) {
     track(event);
     const item = sourceAt(pointer) || blockerAt(pointer);
-    if (!item) return;
-    state.selected = item;
-    removeSelected();
+    if (item) { state.selected = item; removeSelected(); return; }
+    addSource(pointer);
   }
   function onMove(event) {
     track(event);
@@ -357,7 +356,7 @@ export function mountF(workspace) {
 
   const hint = document.createElement('div');
   hint.className = 'workspace-hint'; hint.dataset.letterLayer = '';
-  hint.textContent = 'тяните излучатели и разделители · двойной клик по ним удаляет · касание пустого места — импульс · С очищает волны';
+  hint.textContent = 'тяните излучатели и разделители · касание пустого места — импульс, двойное — новый излучатель · двойной клик по объекту удаляет · С очищает волны';
   const panel = document.createElement('div');
   panel.className = 'sketch-panel'; panel.dataset.letterLayer = ''; panel.hidden = true;
   const pause = document.createElement('button');
@@ -369,7 +368,7 @@ export function mountF(workspace) {
   clear.addEventListener('click', clearWaves);
   const addEmitter = document.createElement('button');
   addEmitter.type = 'button'; addEmitter.className = 'sketch-action'; addEmitter.textContent = '+ излучатель';
-  addEmitter.addEventListener('click', addSource);
+  addEmitter.addEventListener('click', () => addSource(freeSpot()));
   const addDivider = document.createElement('button');
   addDivider.type = 'button'; addDivider.className = 'sketch-action'; addDivider.textContent = '+ разделитель';
   addDivider.addEventListener('click', addBlocker);
