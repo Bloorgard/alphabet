@@ -39,7 +39,7 @@ export function mountF(workspace) {
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const state = {
-    sources: [], blockers: [], paused: false, selected: null, dragging: null,
+    sources: [], blockers: [], paused: false, selected: null, dragging: null, drawing: null,
     marks: true, fade: 1.2, grain: true, touched: false,
   };
   const pointer = { x: 0, y: 0, down: false };
@@ -328,7 +328,7 @@ export function mountF(workspace) {
     const handle = handleAt(pointer);
     if (handle === null) state.selected = sourceAt(pointer) || blockerAt(pointer);
     state.dragging = state.selected ? { x: pointer.x, y: pointer.y, item: state.selected, handle } : null;
-    if (!state.selected) disk(pointer.x, pointer.y, .014, true);
+    state.drawing = state.selected ? null : { x: pointer.x, y: pointer.y, blocker: null };
     updatePanel();
     report();
   }
@@ -343,6 +343,24 @@ export function mountF(workspace) {
     // Потерянный pointerup оставлял протяжку висеть, и выбранное продолжало
     // ехать за любым движением мыши. Кнопка отпущена — значит, тянуть нечего.
     if (pointer.down && event.pointerType === 'mouse' && !event.buttons) onUp();
+    const drawing = state.drawing;
+    if (pointer.down && drawing) {
+      const dx = pointer.x - drawing.x, dy = pointer.y - drawing.y;
+      if (!drawing.blocker && Math.hypot(dx, dy) > .02) {
+        drawing.blocker = { x: drawing.x, y: drawing.y, radius: BAR, points: [{ x: 0, y: 0 }, { x: dx, y: dy }] };
+        state.blockers.push(drawing.blocker);
+        state.selected = drawing.blocker;
+        updatePanel();
+      }
+      if (drawing.blocker) {
+        const end = drawing.blocker.points[1];
+        end.x = clamp(pointer.x, .12, .88) - drawing.blocker.x;
+        end.y = clamp(pointer.y, .12, .88) - drawing.blocker.y;
+        rebuildBlockers();
+      }
+      report();
+      return;
+    }
     const drag = state.dragging;
     if (!pointer.down || !drag) return;
     const dx = pointer.x - drag.x, dy = pointer.y - drag.y;
@@ -352,11 +370,18 @@ export function mountF(workspace) {
     drag.x = pointer.x; drag.y = pointer.y;
     report();
   }
-  function onUp() { pointer.down = false; state.dragging = null; }
+  // Короткое касание пустого места остаётся импульсом; протяжка от него уже
+  // стала разделителем, и вспышка в начале линии не нужна.
+  function onUp() {
+    if (state.drawing && !state.drawing.blocker) disk(state.drawing.x, state.drawing.y, .014, true);
+    state.drawing = null;
+    pointer.down = false;
+    state.dragging = null;
+  }
 
   const hint = document.createElement('div');
   hint.className = 'workspace-hint'; hint.dataset.letterLayer = '';
-  hint.textContent = 'тяните излучатели и разделители · касание пустого места — импульс, двойное — новый излучатель · двойной клик по объекту удаляет · С очищает волны';
+  hint.textContent = 'по пустому месту: касание — импульс, двойное — излучатель, протяжка — разделитель · объекты тянутся, двойной клик по ним удаляет · С очищает волны';
   const panel = document.createElement('div');
   panel.className = 'sketch-panel'; panel.dataset.letterLayer = ''; panel.hidden = true;
   const pause = document.createElement('button');
