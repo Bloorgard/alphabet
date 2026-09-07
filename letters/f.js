@@ -3,7 +3,6 @@ import { reportEvent } from '../progress.js?v=5';
 const STEP = 1 / 60;
 const INK = '#161616';
 const PAPER = '#f1ede5';
-const RED = '#e0210f';
 
 const N = 320;
 const COUNT = N * N;
@@ -15,16 +14,18 @@ const B = .02;
 const EPS = .02;
 const DIFF = 1 / (.6 * .6);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+// Полуширина разделителя: тоньше — и волна начинает просачиваться сквозь него.
+const BAR = .005;
 
 // Отобранная в полигоне симметричная композиция. Излучатель ровно в центре;
 // четыре разделителя задают две чаши и центральный стержень Ф.
 const START = {
   sources: [{ x: 160 / 320, y: 160 / 320, period: 6.7, next: 0 }],
   blockers: [
-    { x: 131 / 320, y: 175 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 58 / 320, y: 0 }] },
-    { x: 160 / 320, y: 183 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 0, y: 52 / 320 }] },
-    { x: 131 / 320, y: 145 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 58 / 320, y: 0 }] },
-    { x: 160 / 320, y: 85 / 320, radius: .008, points: [{ x: 0, y: 0 }, { x: 0, y: 52 / 320 }] },
+    { x: 131 / 320, y: 175 / 320, radius: BAR, points: [{ x: 0, y: 0 }, { x: 58 / 320, y: 0 }] },
+    { x: 160 / 320, y: 183 / 320, radius: BAR, points: [{ x: 0, y: 0 }, { x: 0, y: 52 / 320 }] },
+    { x: 131 / 320, y: 145 / 320, radius: BAR, points: [{ x: 0, y: 0 }, { x: 58 / 320, y: 0 }] },
+    { x: 160 / 320, y: 85 / 320, radius: BAR, points: [{ x: 0, y: 0 }, { x: 0, y: 52 / 320 }] },
   ],
 };
 
@@ -39,7 +40,7 @@ export function mountF(workspace) {
   const ctx = canvas.getContext('2d');
   const state = {
     sources: [], blockers: [], paused: false, selected: null, dragging: null,
-    showMasks: false, fade: 1.2, grain: true, touched: false,
+    marks: true, fade: 1.2, grain: true, touched: false,
   };
   const pointer = { x: 0, y: 0, down: false };
   let u = new Float32Array(COUNT);
@@ -209,13 +210,13 @@ export function mountF(workspace) {
         const p = 22 + coverage * 219;
         const k = index * 4;
         data[k] = p; data[k + 1] = p - coverage * 4; data[k + 2] = p - coverage * 11; data[k + 3] = 255;
-        if (state.showMasks && cut[i]) { data[k] = 160; data[k + 1] = 37; data[k + 2] = 23; }
       }
     }
     renderContext.putImageData(image, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, ox, oy);
     ctx.drawImage(renderCanvas, 0, 0, S, S);
     ctx.lineCap = 'round';
+    if (!state.marks) return;
     for (const blocker of state.blockers) {
       const selected = blocker === state.selected;
       ctx.strokeStyle = selected ? PAPER : 'rgba(241,237,229,.52)';
@@ -304,7 +305,7 @@ export function mountF(workspace) {
   }
   function addBlocker() {
     const spot = freeSpot();
-    const blocker = { x: spot.x - .06, y: spot.y, radius: .008, points: [{ x: 0, y: 0 }, { x: .12, y: 0 }] };
+    const blocker = { x: spot.x - .06, y: spot.y, radius: BAR, points: [{ x: 0, y: 0 }, { x: .12, y: 0 }] };
     state.blockers.push(blocker);
     state.selected = blocker;
     rebuildBlockers();
@@ -340,6 +341,9 @@ export function mountF(workspace) {
   }
   function onMove(event) {
     track(event);
+    // Потерянный pointerup оставлял протяжку висеть, и выбранное продолжало
+    // ехать за любым движением мыши. Кнопка отпущена — значит, тянуть нечего.
+    if (pointer.down && event.pointerType === 'mouse' && !event.buttons) onUp();
     const drag = state.dragging;
     if (!pointer.down || !drag) return;
     const dx = pointer.x - drag.x, dy = pointer.y - drag.y;
@@ -353,7 +357,7 @@ export function mountF(workspace) {
 
   const hint = document.createElement('div');
   hint.className = 'workspace-hint'; hint.dataset.letterLayer = '';
-  hint.textContent = 'тяните излучатели и разделители · двойной клик по ним удаляет · касание пустого места — импульс';
+  hint.textContent = 'тяните излучатели и разделители · двойной клик по ним удаляет · касание пустого места — импульс · С очищает волны';
   const panel = document.createElement('div');
   panel.className = 'sketch-panel'; panel.dataset.letterLayer = ''; panel.hidden = true;
   const pause = document.createElement('button');
@@ -376,20 +380,20 @@ export function mountF(workspace) {
   const back = document.createElement('button');
   back.type = 'button'; back.className = 'sketch-action'; back.textContent = 'вернуть букву';
   back.addEventListener('click', restore);
-  const masks = document.createElement('button');
-  masks.type = 'button'; masks.className = 'sketch-switch'; masks.textContent = 'показывать свет'; masks.setAttribute('aria-pressed', 'false');
-  masks.addEventListener('click', () => { state.showMasks = !state.showMasks; masks.setAttribute('aria-pressed', String(state.showMasks)); });
+  const marks = document.createElement('button');
+  marks.type = 'button'; marks.className = 'sketch-switch'; marks.textContent = 'разметка'; marks.setAttribute('aria-pressed', 'true');
+  marks.addEventListener('click', () => { state.marks = !state.marks; marks.setAttribute('aria-pressed', String(state.marks)); });
   const noise = document.createElement('button');
   noise.type = 'button'; noise.className = 'sketch-switch'; noise.textContent = 'зерно'; noise.setAttribute('aria-pressed', 'true');
   noise.addEventListener('click', () => { state.grain = !state.grain; noise.setAttribute('aria-pressed', String(state.grain)); });
   const fadeLabel = document.createElement('label'); fadeLabel.textContent = 'память волн';
   const fade = document.createElement('input'); fade.type = 'range'; fade.min = '.3'; fade.max = '3'; fade.step = '.1'; fade.value = String(state.fade);
   fade.addEventListener('input', () => { state.fade = Number(fade.value); }); fadeLabel.append(fade);
-  panel.append(pause, clear, addEmitter, addDivider, remove, back, masks, noise, fadeLabel);
+  panel.append(pause, clear, addEmitter, addDivider, remove, back, marks, noise, fadeLabel);
   const toggle = document.createElement('button');
   toggle.type = 'button'; toggle.className = 'sketch-toggle'; toggle.dataset.letterLayer = ''; toggle.textContent = 'параметры (tab)'; toggle.setAttribute('aria-expanded', 'false');
   toggle.addEventListener('click', () => { panel.hidden = !panel.hidden; toggle.setAttribute('aria-expanded', String(!panel.hidden)); });
-  function onKey(event) { if (event.target.closest('input, textarea, select')) return; if (event.key === 'Tab') { event.preventDefault(); toggle.click(); } if (event.code === 'Space') { event.preventDefault(); pause.click(); } }
+  function onKey(event) { if (event.target.closest('input, textarea, select')) return; if (event.key === 'Tab') { event.preventDefault(); toggle.click(); } if (event.code === 'Space') { event.preventDefault(); pause.click(); } if (event.code === 'KeyC') { event.preventDefault(); clear.click(); } }
   function frame(now) {
     debt = Math.min(.1, debt + (now - last) / 1000); last = now;
     while (!state.paused && debt >= STEP) { for (let k = 0; k < SUBSTEPS; k++) step(); debt -= STEP; }
