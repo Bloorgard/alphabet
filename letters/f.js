@@ -14,8 +14,13 @@ const B = .02;
 const EPS = .02;
 const DIFF = 1 / (.6 * .6);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-// Полуширина разделителя: тоньше — и волна начинает просачиваться сквозь него.
-const BAR = .005;
+// Полуширина разделителя. Ниже .003 распознавание на глаз уже не отличить,
+// а косая линия перестаёт гарантированно перекрывать клетки и подтекает.
+const BAR = .003;
+// Маска среды двоичная по клеткам, и её край на косой линии лестничный.
+// Поверх растра кладём ту же полосу сглаженной — с запасом в полклетки,
+// ровно на столько маска и растекается при разметке. Среде это ничего не меняет.
+const BAND = BAR + .0016;
 
 // Отобранная в полигоне симметричная композиция. Излучатель ровно в центре;
 // четыре разделителя задают две чаши и центральный стержень Ф.
@@ -216,6 +221,14 @@ export function mountF(workspace) {
     ctx.setTransform(dpr, 0, 0, dpr, ox, oy);
     ctx.drawImage(renderCanvas, 0, 0, S, S);
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 2 * BAND / .76 * S;
+    for (const blocker of state.blockers) {
+      ctx.beginPath();
+      blocker.points.forEach((point, i) => (i ? ctx.lineTo : ctx.moveTo).call(ctx, screen(blocker.x + point.x), screen(blocker.y + point.y)));
+      ctx.stroke();
+    }
     if (!state.marks) return;
     for (const blocker of state.blockers) {
       const selected = blocker === state.selected;
