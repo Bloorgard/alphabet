@@ -96,6 +96,12 @@ export function mountH(workspace) {
     hyperRelease();
   }
 
+  function hyperClear() {
+    modeState.drag = null;
+    while (modeState.pins.length) hyperUnpin(0);
+    hyperRelease();
+  }
+
   function hyperRelease() {
     if (!modeState.hold) return;
     modeState.releases.push({ ...modeState.hold, age: 0 });
@@ -168,21 +174,17 @@ export function mountH(workspace) {
 
   const hyperMode = {
     label: 'гравюра',
-    note: 'Уровни x² − y²: две диагонали при нулевом уровне, гиперболы вокруг. Прижми полосы пальцем: вокруг касания накапливается деформация. Отпусти — она расправится волной. Чем дольше держишь, тем сильнее отклик. В режиме «закрепления» касание оставляет точку, потяни точку, чтобы переместить деформацию; короткое повторное касание снимает её волной. До восьми точек; девятая освобождает самую старую. Выключи «закрепления», чтобы вернуться к удержанию.',
+    note: 'Уровни x² − y²: две диагонали при нулевом уровне, гиперболы вокруг. Прижми полосы пальцем: вокруг касания накапливается деформация. Отпусти — она расправится волной. Чем дольше держишь, тем сильнее отклик. В режиме «пины» касание оставляет точку, потяни точку, чтобы переместить деформацию; короткое повторное касание снимает её волной. До восьми точек; девятая освобождает самую старую. Выключи «пины», чтобы вернуться к удержанию. Клавиша «с» снимает все пины разом.',
     tools: [
-      { type: 'range', key: 'density', label: 'частота', min: 2, max: 25, step: 1, value: 9 },
-      { type: 'range', key: 'width', label: 'толщина', min: 0.3, max: 30, step: 0.1, value: 30 },
-      { type: 'range', key: 'speed', label: 'течение', min: 0, max: 1, step: 0.05, value: 1 },
-      { type: 'range', key: 'reach', label: 'радиус', min: 0.06, max: 0.3, step: 0.01, value: 0.19 },
-      { type: 'range', key: 'force', label: 'сила', min: 0.3, max: 3, step: 0.1, value: 1.8 },
-      { type: 'toggle', key: 'pins', label: 'закрепления', value: true },
-      { type: 'toggle', key: 'echo', label: 'аберрация', value: false },
+      { type: 'range', key: 'density', label: 'частота', min: 2, max: 25, step: 1, value: 8 },
+      { type: 'range', key: 'width', label: 'толщина', min: 0.3, max: 30, step: 0.1, value: 1 },
+      { type: 'range', key: 'speed', label: 'течение', min: 0, max: 2, step: 0.05, value: 1 },
+      { type: 'range', key: 'reach', label: 'радиус щипка', min: 0.06, max: 0.3, step: 0.01, value: 0.18 },
+      { type: 'range', key: 'force', label: 'сила щипка', min: 0.3, max: 3, step: 0.1, value: 1.6 },
+      { type: 'toggle', key: 'pins', label: 'пины', value: false },
+      { type: 'toggle', key: 'echo', label: 'аберрация', value: true },
       { type: 'button', label: 'инверсия', action() { setGround(ground === 'ink' ? 'paper' : 'ink');  } },
-      { type: 'button', label: 'отпустить всё', action() {
-        modeState.drag = null;
-        while (modeState.pins.length) hyperUnpin(0);
-        hyperRelease();
-      } },
+      { type: 'button', label: 'отпустить всё (с)', action: hyperClear },
     ],
     setup: hyperSetup,
     step: hyperStep,
@@ -242,13 +244,12 @@ export function mountH(workspace) {
     onDown: hyperTouch,
     onMove: hyperMove,
     onUp: hyperUp,
-    cursor: 'crosshair',
   };
 
 
   const hint = document.createElement('div');
   hint.className = 'workspace-hint'; hint.dataset.letterLayer = '';
-  hint.textContent = 'касание — закрепить · потяни точку · короткое касание по точке — отпустить';
+  hint.textContent = 'прижми рисунок · удерживай · отпусти волной';
   const panel = document.createElement('div');
   panel.className = 'sketch-panel'; panel.dataset.letterLayer = ''; panel.hidden = true;
   panel.style.maxHeight = 'calc(100% - 64px)'; panel.style.overflowY = 'auto';
@@ -310,6 +311,8 @@ export function mountH(workspace) {
     if (event.target.closest('input, textarea, select') || event.target.isContentEditable) return;
     if (event.key === 'Tab') { event.preventDefault(); toggle.click(); }
     if (event.code === 'Space') { event.preventDefault(); pause.click(); }
+    const pressed = event.key.toLowerCase();
+    if (event.code === 'KeyC' || pressed === 'c' || pressed === 'с') hyperClear();
   }
   function resize() {
     W = workspace.clientWidth; H = workspace.clientHeight; S = Math.min(W, H);
@@ -322,7 +325,7 @@ export function mountH(workspace) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
     ctx.translate(ox, oy); hyperMode.draw(); frameId = requestAnimationFrame(frame);
   }
-  setGround('ink'); hyperSetup();
+  setGround('paper'); hyperSetup(); canvas.style.cursor = 'crosshair';
   workspace.append(hint, panel, toggle);
   const observer = new ResizeObserver(resize); observer.observe(workspace); resize();
   canvas.addEventListener('pointerdown', down); canvas.addEventListener('pointermove', move);
@@ -333,6 +336,6 @@ export function mountH(workspace) {
     canvas.removeEventListener('pointerdown', down); canvas.removeEventListener('pointermove', move);
     canvas.removeEventListener('pointerup', up); canvas.removeEventListener('pointercancel', up); canvas.removeEventListener('lostpointercapture', up);
     document.removeEventListener('keydown', key); hint.remove(); panel.remove(); toggle.remove();
-    delete workspace.dataset.ground; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height);
+    delete workspace.dataset.ground; canvas.style.cursor = ''; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
 }
