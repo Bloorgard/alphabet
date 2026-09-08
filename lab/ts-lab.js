@@ -772,23 +772,38 @@ function tsVolCorners(f) {
   });
 }
 
-/* Боковины кроются в два слоя: одна полупрозрачная краска пропустила бы
-   сквозь себя тело, которое уже лежит сзади. */
-function tsVolSkin() {
+/* Три роли сцены — поле, боковины, крышки — красятся независимо, и краска
+   для каждой берётся отсюда. Боковины идут чуть притушенными: в упор к
+   чернилам крышка перестала бы от них отличаться. */
+const TS_VOL_PAINTS = ['фон', 'чернила', 'красный'];
+
+function tsVolPaint(index, soft = false) {
+  if (index === 2) return RED;
+  if (index === 1) return soft ? ink(.86) : INK;
+  return PAPER;
+}
+
+/* Два слоя: притушенные чернила полупрозрачны и сами по себе пропустили бы
+   сквозь себя тело, лежащее сзади. Подложка всегда цвета фона, а не поля —
+   иначе боковины перекрашивались бы вслед за полем и «чернила» на красном
+   выходили бы розовыми. */
+function tsVolSkin(skin) {
   ctx.fillStyle = PAPER;
   ctx.fill();
-  ctx.fillStyle = ink(.86);
+  ctx.fillStyle = skin.wall;
   ctx.fill();
 }
 
-function tsVolSeam() {
-  ctx.strokeStyle = paper(.9);
+/* Ребро между гранями идёт цветом поля: это не контур тела, а просвет. */
+function tsVolSeam(skin) {
+  if (!skin.edges) return;
+  ctx.strokeStyle = skin.field;
   ctx.lineWidth = Math.max(1, S * .0016);
   ctx.lineJoin = 'miter';
   ctx.stroke();
 }
 
-function tsVolBox(f, caps) {
+function tsVolBox(f, skin) {
   const plan = tsVolCorners(f);
   const top = plan.map(([x, y]) => tsIsoPoint(x, y, f.h));
   const bot = plan.map(([x, y]) => tsIsoPoint(x, y, 0));
@@ -805,18 +820,18 @@ function tsVolBox(f, caps) {
     ctx.lineTo(bot[j][0], bot[j][1]);
     ctx.lineTo(bot[i][0], bot[i][1]);
     ctx.closePath();
-    tsVolSkin();
-    tsVolSeam();
+    tsVolSkin(skin);
+    tsVolSeam(skin);
   }
   ctx.beginPath();
   top.forEach(([X, Y], i) => (i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y)));
   ctx.closePath();
-  ctx.fillStyle = caps ? RED : paper();
+  ctx.fillStyle = skin.cap;
   ctx.fill();
-  tsVolSeam();
+  tsVolSeam(skin);
 }
 
-function tsVolDisc(f, caps) {
+function tsVolDisc(f, skin) {
   const n = 64;
   const top = [];
   const bot = [];
@@ -851,7 +866,7 @@ function tsVolDisc(f, caps) {
   ctx.beginPath();
   shell.forEach(([X, Y], i) => (i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y)));
   ctx.closePath();
-  tsVolSkin();
+  tsVolSkin(skin);
   /* Шов виден только на ближней стороне — иначе поворот круга нечем прочесть. */
   if (Math.cos(f.a) + Math.sin(f.a) > 0) {
     const sx = f.x + Math.cos(f.a) * f.r;
@@ -861,14 +876,14 @@ function tsVolDisc(f, caps) {
     ctx.beginPath();
     ctx.moveTo(a[0], a[1]);
     ctx.lineTo(b[0], b[1]);
-    tsVolSeam();
+    tsVolSeam(skin);
   }
   ctx.beginPath();
   top.forEach(([X, Y], i) => (i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y)));
   ctx.closePath();
-  ctx.fillStyle = caps ? RED : paper();
+  ctx.fillStyle = skin.cap;
   ctx.fill();
-  tsVolSeam();
+  tsVolSeam(skin);
 }
 
 function tsVolInside(f, px, py) {
@@ -981,12 +996,23 @@ function tsVolGrid() {
 
 function tsVolDraw() {
   const m = modeState;
-  const caps = on('caps');
+  const field = num('field');
+  const skin = {
+    field: tsVolPaint(field),
+    wall: tsVolPaint(num('walls'), true),
+    cap: tsVolPaint(num('caps')),
+    edges: on('edges'),
+  };
+  /* Поле в цвет фона канвас и так отдаёт сквозь себя — заливаем только чужое. */
+  if (field !== 0) {
+    ctx.fillStyle = skin.field;
+    ctx.fillRect(0, 0, S, S);
+  }
   if (m.sel >= 0) tsVolGrid();
   const order = m.figs.map((f, i) => i).sort((a, b) => tsVolDepth(m.figs[a]) - tsVolDepth(m.figs[b]));
   for (const i of order) {
     const f = m.figs[i];
-    if (f.kind === 'box') tsVolBox(f, caps); else tsVolDisc(f, caps);
+    if (f.kind === 'box') tsVolBox(f, skin); else tsVolDisc(f, skin);
   }
   const f = m.figs[m.sel];
   if (f) {
@@ -1066,9 +1092,12 @@ const MODES = {
   },
   formwork: {
     label: 'опалубка', cursor: 'grab',
-    note: 'Квадраты и круги стоят на общей плоскости и вытянуты в высоту. Нажмите на тело — оно возьмётся: ручка над крышкой поднимает, ручка на ободе крутит вокруг своей оси, само тело таскается по полю. «Крышки» гасят верхние грани в цвет фона: остаются одни боковины, и объём читается как штрих, а не как коробка. Ц собрана из четырёх тел — две стойки, перекладина и хвост; «заново» возвращает её. Проекция изометрическая, без перспективы и без света.',
+    note: 'Квадраты и круги стоят на общей плоскости и вытянуты в высоту. Нажмите на тело — оно возьмётся: ручка над крышкой поднимает, ручка на ободе крутит вокруг своей оси, само тело таскается по полю. Поле, боковины и крышки красятся порознь: крышка в цвет поля гасит верх, и объём читается как штрих, а не как коробка. «Обводка» убирает просветы между гранями — тела сливаются в один силуэт. Ц собрана из четырёх тел: две стойки, перекладина и хвост. Проекция изометрическая, без перспективы и без света.',
     tools: [
-      { type: 'toggle', key: 'caps', label: 'крышки', value: true },
+      { type: 'pick', key: 'caps', label: 'крышки', options: TS_VOL_PAINTS, value: 2 },
+      { type: 'pick', key: 'walls', label: 'боковины', options: TS_VOL_PAINTS, value: 1 },
+      { type: 'pick', key: 'field', label: 'поле', options: TS_VOL_PAINTS, value: 0 },
+      { type: 'toggle', key: 'edges', label: 'обводка', value: true },
       { type: 'button', label: 'квадрат', action: () => tsVolAdd('box') },
       { type: 'button', label: 'круг', action: () => tsVolAdd('disc') },
       { type: 'button', label: 'убрать', action: tsVolDrop },
