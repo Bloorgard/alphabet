@@ -538,8 +538,132 @@ const slimeMode = {
   },
 };
 
+/* ---------- соты: тот же physarum, но в режиме мелкой регулярной сетки ---------- */
+
+/* Референсы (плагин Physarum для After Effects, снимки настоящей слизи)
+   держат мелкие соты по двум причинам разом, не одной: плотность агентов
+   там — заметная доля всех клеток поля (не единицы процентов, как у нас
+   в «слизи»), и угол сенсора/поворота — единицы градусов, а не наши
+   0.5-0.7 рад (30-40°). У слизи ради буквы был выбран противоположный
+   полюс: редкое поле и крутой поворот — оттуда и петли вместо сот, замкнутый
+   контур сам себя держит, и больше исследовать нечего, сеть застывает. Этот
+   режим сознательно без буквы вообще — сравниваем чистый физариум сам с
+   собой на разной плотности и остроте поворота, не путая с шаговым сносом. */
+
+const MESH_G = 260;
+
+function meshSetup() {
+  meshSetGrid();
+}
+
+function meshSetGrid() {
+  modeState.trail = new Float32Array(MESH_G * MESH_G);
+  modeState.next = new Float32Array(MESH_G * MESH_G);
+  const count = Math.round(num('agents'));
+  modeState.agents = [];
+  for (let i = 0; i < count; i += 1) {
+    modeState.agents.push({ x: Math.random(), y: Math.random(), heading: Math.random() * Math.PI * 2 });
+  }
+  if (!modeState.offscreen) modeState.offscreen = document.createElement('canvas');
+  modeState.offscreen.width = MESH_G;
+  modeState.offscreen.height = MESH_G;
+  modeState.offCtx = modeState.offscreen.getContext('2d');
+  modeState.imageData = modeState.offCtx.createImageData(MESH_G, MESH_G);
+}
+
+function meshSense(x, y, heading, offset, dist) {
+  const sx = slimeWrap(x + Math.cos(heading + offset) * dist);
+  const sy = slimeWrap(y + Math.sin(heading + offset) * dist);
+  const gx = clamp(Math.floor(sx * MESH_G), 0, MESH_G - 1);
+  const gy = clamp(Math.floor(sy * MESH_G), 0, MESH_G - 1);
+  return modeState.trail[gy * MESH_G + gx];
+}
+
+function meshStep() {
+  const trail = modeState.trail;
+  const next = modeState.next;
+  const decay = num('decay');
+  const diffuse = 0.25;
+
+  for (let y = 0; y < MESH_G; y += 1) {
+    for (let x = 0; x < MESH_G; x += 1) {
+      const here = trail[y * MESH_G + x];
+      let sum = 0, n = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        const yy = y + oy;
+        if (yy < 0 || yy >= MESH_G) continue;
+        for (let ox = -1; ox <= 1; ox += 1) {
+          const xx = x + ox;
+          if (xx < 0 || xx >= MESH_G) continue;
+          sum += trail[yy * MESH_G + xx];
+          n += 1;
+        }
+      }
+      const blurred = sum / n;
+      next[y * MESH_G + x] = (here * (1 - diffuse) + blurred * diffuse) * (1 - decay);
+    }
+  }
+  modeState.trail = next;
+  modeState.next = trail;
+
+  const sensorAngle = num('meshAngle');
+  const turnSpeed = num('meshTurn');
+  const sensorDist = num('meshDist');
+  const speed = 0.004;
+
+  for (const a of modeState.agents) {
+    const left = meshSense(a.x, a.y, a.heading, sensorAngle, sensorDist);
+    const center = meshSense(a.x, a.y, a.heading, 0, sensorDist);
+    const right = meshSense(a.x, a.y, a.heading, -sensorAngle, sensorDist);
+
+    if (left > center && left > right) a.heading += turnSpeed;
+    else if (right > center && right > left) a.heading -= turnSpeed;
+    else if (center < left || center < right) a.heading += (Math.random() - 0.5) * turnSpeed;
+
+    a.x = slimeWrap(a.x + Math.cos(a.heading) * speed);
+    a.y = slimeWrap(a.y + Math.sin(a.heading) * speed);
+
+    const gx = clamp(Math.floor(a.x * MESH_G), 0, MESH_G - 1);
+    const gy = clamp(Math.floor(a.y * MESH_G), 0, MESH_G - 1);
+    const idx = gy * MESH_G + gx;
+    modeState.trail[idx] = Math.min(1, modeState.trail[idx] + 0.4);
+  }
+}
+
+function meshDraw() {
+  const [r, g, b] = labGrounds[ground].mark;
+  const data = modeState.imageData.data;
+  for (let i = 0; i < MESH_G * MESH_G; i += 1) {
+    data[i * 4] = r; data[i * 4 + 1] = g; data[i * 4 + 2] = b;
+    data[i * 4 + 3] = Math.min(255, Math.pow(clamp(modeState.trail[i], 0, 1), 0.6) * 255);
+  }
+  modeState.offCtx.putImageData(modeState.imageData, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(modeState.offscreen, 0, 0, MESH_G, MESH_G, 0, 0, S, S);
+  const density = (num('agents') / (MESH_G * MESH_G)).toFixed(3);
+  drawStatus(`${modeState.agents.length} агентов · плотность ${density}/клетку`);
+}
+
+const MESH_TOOLS = [
+  { type: 'range', key: 'agents', label: 'агенты', min: 500, max: 60000, step: 500, value: 20000 },
+  { type: 'range', key: 'meshAngle', label: 'угол сенсора', min: 0.02, max: 1.2, step: 0.02, value: 0.14 },
+  { type: 'range', key: 'meshDist', label: 'нюх', min: 0.005, max: 0.05, step: 0.002, value: 0.018 },
+  { type: 'range', key: 'meshTurn', label: 'поворот', min: 0.02, max: 0.5, step: 0.01, value: 0.12 },
+  { type: 'range', key: 'decay', label: 'угасание', min: 0.02, max: 0.3, step: 0.01, value: 0.12 },
+];
+
+const meshMode = {
+  label: 'соты',
+  note: 'Чистый physarum без буквы, без забора, без сноса — только плотность и острота поворота. На референсах (плагин для After Effects, реальная слизь на листе) сенсор смотрит на единицы градусов вперёд, а не на треть оборота, и агентов на клетку в разы больше, чем в «слизи». При такой плотности и мягком повороте сеть не запирается в пару петель — ей физически есть, с кем делить территорию, и она дробится на мелкие соты вместо того, чтобы застыть.',
+  tools: MESH_TOOLS,
+  setup: meshSetup,
+  step: meshStep,
+  draw: meshDraw,
+  onTool(key) { if (key === 'agents') meshSetGrid(); },
+};
+
 startLab({
   title: 'Т · рост из точки',
-  modes: { slime: slimeMode, grow: growMode, dla: dlaMode },
+  modes: { slime: slimeMode, mesh: meshMode, grow: growMode, dla: dlaMode },
   start: 'slime',
 });
