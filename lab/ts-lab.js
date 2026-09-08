@@ -773,8 +773,9 @@ function tsVolCorners(f) {
 }
 
 /* Три роли сцены — поле, боковины, крышки — красятся независимо, и краска
-   для каждой берётся отсюда. Боковины идут чуть притушенными: в упор к
-   чернилам крышка перестала бы от них отличаться. */
+   для каждой берётся отсюда. Боковины идут притушенными, пока горит «свет»:
+   это вся светотень сцены — разница в тоне внутри одного цвета. Погасить —
+   и крышку от боковины отделяет только обводка, а без неё ничего. */
 const TS_VOL_PAINTS = ['фон', 'чернила', 'красный'];
 
 function tsVolPaint(index, soft = false) {
@@ -1000,7 +1001,7 @@ function tsVolLayOut() {
   const field = num('field');
   const skin = {
     field: tsVolPaint(field),
-    wall: tsVolPaint(num('walls'), true),
+    wall: tsVolPaint(num('walls'), on('light')),
     cap: tsVolPaint(num('caps')),
     edges: on('edges'),
   };
@@ -1037,7 +1038,9 @@ function tsVolDraw() {
 /* ---------- рельеф: сетка столбов ---------- */
 
 /* Поле — квадратная сетка на той же плоскости, что и опалубка. Клетка никуда
-   не едет, у неё есть только высота: поле столбов, а не набор тел. */
+   не едет, у неё есть только высота: поле столбов, а не набор тел.
+   Два режима делят весь код и различаются одним флагом `full`: у рельефа
+   сетка ограничена ромбом посреди кадра, у настила расстелена во всё поле. */
 const TS_REL_SPAN = 1.4;
 const TS_REL_MAX = 6;
 
@@ -1054,96 +1057,156 @@ const TS_REL_GLYPH = [
   '......X',
 ];
 
-function tsRelBuild() {
+/* Клетки живут в словаре, а не в массиве: у настила номер клетки уходит в
+   минус и за край, и заранее известной решётки у него нет. */
+function tsRelKey(i, j) { return (i + 512) * 1024 + (j + 512); }
+
+function tsRelAt(i, j) { return modeState.h.get(tsRelKey(i, j)) || 0; }
+
+function tsRelAngle() { return (num('turn') * Math.PI) / 180; }
+
+function tsRelBuild(full) {
   const m = modeState;
+  m.full = full;
   m.n = Math.round(num('grid'));
   m.cell = TS_REL_SPAN / m.n;
-  m.h = new Float32Array(m.n * m.n);
-  m.drag = -1;
+  m.h = new Map();
+  m.top = 0;
+  m.drag = null;
   if (m.n < TS_REL_GLYPH.length) return;
   const off = Math.floor((m.n - TS_REL_GLYPH.length) / 2);
+  m.top = m.cell;
   TS_REL_GLYPH.forEach((row, j) => {
     for (let i = 0; i < row.length; i++) {
       /* Строки глифа кладутся поперёк и справа налево: при повороте на 45°
          сетка встаёт по экрану, и буква должна читаться прямо и в свою
          сторону, а не лёжа на боку и не зеркально. */
-      if (row[row.length - 1 - i] === 'X') m.h[(i + off) * m.n + j + off] = m.cell;
+      if (row[row.length - 1 - i] === 'X') m.h.set(tsRelKey(i + off, j + off), m.cell);
     }
   });
 }
 
-/* Клетки как тела: дальше их рисует и щупает та же пара функций, что и
-   опалубку — квадрат со стороной клетки, повёрнутый вместе со всем полем. */
-function tsRelBodies() {
+/* Сколько клеток покрыть. У настила это углы кадра, снятые с плоскости и
+   развёрнутые обратно в свою сетку; высоту учитываем отдельным набором углов,
+   иначе столб, стоящий ниже нижнего края, пропал бы вместе со своей клеткой. */
+function tsRelRange() {
   const m = modeState;
-  const a = (num('turn') * Math.PI) / 180;
+  if (!m.full) return { i0: 0, i1: m.n - 1, j0: 0, j1: m.n - 1 };
+  const a = tsRelAngle();
   const cos = Math.cos(a);
   const sin = Math.sin(a);
+  let i0 = Infinity;
+  let i1 = -Infinity;
+  let j0 = Infinity;
+  let j1 = -Infinity;
+  for (const z of [0, m.top]) {
+    for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const [px, py] = tsIsoPlan(sx, sy, z);
+      const i = (px * cos + py * sin) / m.cell + m.n / 2 - .5;
+      const j = (py * cos - px * sin) / m.cell + m.n / 2 - .5;
+      i0 = Math.min(i0, i); i1 = Math.max(i1, i);
+      j0 = Math.min(j0, j); j1 = Math.max(j1, j);
+    }
+  }
+  return { i0: Math.floor(i0) - 1, i1: Math.ceil(i1) + 1, j0: Math.floor(j0) - 1, j1: Math.ceil(j1) + 1 };
+}
+
+/* Клетки как тела: дальше их рисует и щупает та же пара функций, что и
+   опалубку — квадрат со стороной клетки, повёрнутый вместе со всем полем. */
+function tsRelBody(i, j, cos, sin) {
+  const m = modeState;
+  const lx = (i + .5 - m.n / 2) * m.cell;
+  const ly = (j + .5 - m.n / 2) * m.cell;
+  return {
+    kind: 'box', a: tsRelAngle(), at: tsRelKey(i, j),
+    x: lx * cos - ly * sin, y: lx * sin + ly * cos,
+    w: m.cell / 2, d: m.cell / 2, h: tsRelAt(i, j),
+  };
+}
+
+function tsRelColumns() {
+  const a = tsRelAngle();
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  const box = tsRelRange();
   const out = [];
-  for (let j = 0; j < m.n; j++) {
-    for (let i = 0; i < m.n; i++) {
-      const lx = (i + .5 - m.n / 2) * m.cell;
-      const ly = (j + .5 - m.n / 2) * m.cell;
-      out.push({
-        kind: 'box', a, at: j * m.n + i,
-        x: lx * cos - ly * sin, y: lx * sin + ly * cos,
-        w: m.cell / 2, d: m.cell / 2, h: m.h[j * m.n + i],
-      });
+  for (let j = box.j0; j <= box.j1; j++) {
+    for (let i = box.i0; i <= box.i1; i++) {
+      if (tsRelAt(i, j) > 1e-4) out.push(tsRelBody(i, j, cos, sin));
     }
   }
   return out;
 }
 
+/* Пол щупать перебором незачем: точка кадра снимается на плоскость и сразу
+   даёт свою клетку. Перебираем только столбы — они закрывают пол за собой. */
 function tsRelPick(sx, sy) {
-  const near = tsRelBodies().sort((p, q) => tsVolDepth(q) - tsVolDepth(p));
-  for (const body of near) {
+  const m = modeState;
+  for (const body of tsRelColumns().sort((p, q) => tsVolDepth(q) - tsVolDepth(p))) {
     const steps = Math.max(1, Math.round(body.h / body.w));
     for (let k = 0; k <= steps; k++) {
       const [px, py] = tsIsoPlan(sx, sy, (body.h * k) / steps);
       if (tsVolInside(body, px, py)) return body.at;
     }
   }
-  return -1;
+  const a = tsRelAngle();
+  const [px, py] = tsIsoPlan(sx, sy, 0);
+  const i = Math.round((px * Math.cos(a) + py * Math.sin(a)) / m.cell + m.n / 2 - .5);
+  const j = Math.round((py * Math.cos(a) - px * Math.sin(a)) / m.cell + m.n / 2 - .5);
+  const box = tsRelRange();
+  if (i < box.i0 || i > box.i1 || j < box.j0 || j > box.j1) return null;
+  return tsRelKey(i, j);
 }
 
-function tsRelSetup() { tsRelBuild(); }
+function tsRelSetup() { tsRelBuild(false); }
 
-function tsRelTool(key) { if (key === 'grid') tsRelBuild(); }
+function tsRelWideSetup() { tsRelBuild(true); }
+
+function tsRelTool(key) { if (key === 'grid') tsRelBuild(modeState.full); }
 
 function tsRelDown() {
   const m = modeState;
   m.drag = tsRelPick(pointer.x, pointer.y);
-  if (m.drag < 0) return;
-  m.from = m.h[m.drag];
+  if (m.drag === null) return;
+  m.from = m.h.get(m.drag) || 0;
   m.gy = pointer.y;
 }
 
 function tsRelMove() {
   const m = modeState;
-  if (m.drag < 0 || !pointer.down) return;
-  m.h[m.drag] = clamp(m.from + (m.gy - pointer.y) / TS_ISO.k, 0, TS_REL_MAX * m.cell);
+  if (m.drag === null || !pointer.down) return;
+  const raised = clamp(m.from + (m.gy - pointer.y) / TS_ISO.k, 0, TS_REL_MAX * m.cell);
+  m.h.set(m.drag, raised);
+  m.top = Math.max(m.top, raised);
 }
 
-function tsRelUp() { modeState.drag = -1; }
+function tsRelUp() { modeState.drag = null; }
 
 function tsRelDraw() {
   const skin = tsVolLayOut();
-  const bodies = tsRelBodies();
-  /* Пол кладётся весь и сразу: клетки лежат в одной плоскости и не спорят за
-     порядок, а стоящая впереди клетка столб позади никогда не закрывает. */
-  for (const body of bodies) {
-    ctx.beginPath();
-    tsVolCorners(body).forEach(([x, y], k) => {
-      const [X, Y] = tsIsoPoint(x, y, 0);
-      if (k) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
-    });
-    ctx.closePath();
-    ctx.fillStyle = skin.field;
-    ctx.fill();
-    tsVolSeam(skin);
+  const a = tsRelAngle();
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  const box = tsRelRange();
+  /* Весь пол — один путь на заливку и один на обводку. Клетки лежат в одной
+     плоскости, не спорят за порядок и намотаны одинаково, а тысяча отдельных
+     fill() у настила стоила бы кадра. */
+  ctx.beginPath();
+  for (let j = box.j0; j <= box.j1; j++) {
+    for (let i = box.i0; i <= box.i1; i++) {
+      tsVolCorners(tsRelBody(i, j, cos, sin)).forEach(([x, y], k) => {
+        const [X, Y] = tsIsoPoint(x, y, 0);
+        if (k) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+      });
+      ctx.closePath();
+    }
   }
-  bodies
-    .filter((body) => body.h > 1e-4)
+  ctx.fillStyle = skin.field;
+  ctx.fill();
+  tsVolSeam(skin);
+  /* Столб, стоящий впереди, закрывает то, что за ним: порядок по глубине.
+     Пол при этом всегда снизу — клетка перед столбом его не заслоняет. */
+  tsRelColumns()
     .sort((p, q) => tsVolDepth(p) - tsVolDepth(q))
     .forEach((body) => tsVolBox(body, skin));
   tsHint('потяните клетку вверх · поворот и сетка в панели');
@@ -1214,12 +1277,13 @@ const MODES = {
   },
   formwork: {
     label: 'опалубка', cursor: 'grab',
-    note: 'Квадраты и круги стоят на общей плоскости и вытянуты в высоту. Нажмите на тело — оно возьмётся: ручка над крышкой поднимает, ручка на ободе крутит вокруг своей оси, само тело таскается по полю. Поле, боковины и крышки красятся порознь: крышка в цвет поля гасит верх, и объём читается как штрих, а не как коробка. «Обводка» убирает просветы между гранями — тела сливаются в один силуэт. Ц собрана из четырёх тел: две стойки, перекладина и хвост. Проекция изометрическая, без перспективы и без света.',
+    note: 'Квадраты и круги стоят на общей плоскости и вытянуты в высоту. Нажмите на тело — оно возьмётся: ручка над крышкой поднимает, ручка на ободе крутит вокруг своей оси, само тело таскается по полю. Поле, боковины и крышки красятся порознь: крышка в цвет поля гасит верх, и объём читается как штрих, а не как коробка. «Свет» гасит разницу в тоне между крышкой и боковиной, «обводка» убирает просветы между гранями — тела сливаются в один силуэт. Ц собрана из четырёх тел: две стойки, перекладина и хвост. Проекция изометрическая, без перспективы и без света.',
     tools: [
       { type: 'pick', key: 'caps', label: 'крышки', options: TS_VOL_PAINTS, value: 2 },
       { type: 'pick', key: 'walls', label: 'боковины', options: TS_VOL_PAINTS, value: 1 },
       { type: 'pick', key: 'field', label: 'поле', options: TS_VOL_PAINTS, value: 0 },
       { type: 'toggle', key: 'edges', label: 'обводка', value: true },
+      { type: 'toggle', key: 'light', label: 'свет', value: true },
       { type: 'button', label: 'квадрат', action: () => tsVolAdd('box') },
       { type: 'button', label: 'круг', action: () => tsVolAdd('disc') },
       { type: 'button', label: 'убрать', action: tsVolDrop },
@@ -1230,17 +1294,34 @@ const MODES = {
   },
   relief: {
     label: 'рельеф', cursor: 'ns-resize',
-    note: 'Поле разбито на квадратные клетки. Клетку нельзя сдвинуть — у неё есть только высота: потяните вверх, и она вырастет столбом, потяните вниз, и она вернётся в пол. Ползунок «поворот» крутит всё поле вокруг вертикали, «сетка» меняет частоту клеток и начинает рельеф заново. Цвет разложен так же, как в опалубке: поле, боковины и крышки порознь, «обводка» убирает просветы. Стартовый рельеф — Ц, положенная на поле плашмя: изометрия её мнёт, и буква собирается только с одного угла поворота.',
+    note: 'Поле разбито на квадратные клетки. Клетку нельзя сдвинуть — у неё есть только высота: потяните вверх, и она вырастет столбом, потяните вниз, и она вернётся в пол. Ползунок «поворот» крутит всё поле вокруг вертикали, «сетка» меняет частоту клеток и начинает рельеф заново. Цвет разложен так же, как в опалубке: поле, боковины и крышки порознь, «свет» гасит разницу в тоне между крышкой и боковиной, «обводка» убирает просветы. Стартовый рельеф — Ц, положенная на поле плашмя: изометрия её мнёт, и буква собирается только с одного угла поворота.',
     tools: [
       { type: 'pick', key: 'caps', label: 'крышки', options: TS_VOL_PAINTS, value: 1 },
       { type: 'pick', key: 'walls', label: 'боковины', options: TS_VOL_PAINTS, value: 1 },
       { type: 'pick', key: 'field', label: 'поле', options: TS_VOL_PAINTS, value: 2 },
       { type: 'toggle', key: 'edges', label: 'обводка', value: true },
+      { type: 'toggle', key: 'light', label: 'свет', value: true },
       { type: 'range', key: 'turn', label: 'поворот', min: 0, max: 90, step: 1, value: 0 },
       { type: 'range', key: 'grid', label: 'сетка', min: 5, max: 13, step: 1, value: 9 },
       { type: 'button', label: 'заново', action: () => setMode(current) },
     ],
     setup: tsRelSetup, draw: tsRelDraw, onTool: tsRelTool,
+    onDown: tsRelDown, onMove: tsRelMove, onUp: tsRelUp,
+  },
+  decking: {
+    label: 'настил', cursor: 'ns-resize',
+    note: 'То же поле столбов, но сетка расстелена во всё поле, а не лежит ромбом посреди кадра: края нет, клетки уходят за границу с четырёх сторон. Потяните клетку вверх — она вырастет столбом, вниз — вернётся в пол. «Поворот» крутит настил вокруг вертикали, «сетка» меняет размер клетки и начинает заново. Цвет разобран так же: поле, боковины и крышки порознь, «свет» гасит разницу в тоне между крышкой и боковиной, «обводка» убирает просветы. Стартовый рельеф — та же Ц плашмя.',
+    tools: [
+      { type: 'pick', key: 'caps', label: 'крышки', options: TS_VOL_PAINTS, value: 1 },
+      { type: 'pick', key: 'walls', label: 'боковины', options: TS_VOL_PAINTS, value: 1 },
+      { type: 'pick', key: 'field', label: 'поле', options: TS_VOL_PAINTS, value: 2 },
+      { type: 'toggle', key: 'edges', label: 'обводка', value: true },
+      { type: 'toggle', key: 'light', label: 'свет', value: true },
+      { type: 'range', key: 'turn', label: 'поворот', min: 0, max: 90, step: 1, value: 0 },
+      { type: 'range', key: 'grid', label: 'сетка', min: 5, max: 13, step: 1, value: 9 },
+      { type: 'button', label: 'заново', action: () => setMode(current) },
+    ],
+    setup: tsRelWideSetup, draw: tsRelDraw, onTool: tsRelTool,
     onDown: tsRelDown, onMove: tsRelMove, onUp: tsRelUp,
   },
 };
@@ -1249,7 +1330,7 @@ canvas.addEventListener('pointercancel', () => {
   pointer.down = false;
   if (current === 'drawing') tsDrawRelease();
   else if (current === 'formwork') tsVolUp();
-  else if (current === 'relief') tsRelUp();
+  else if (current === 'relief' || current === 'decking') tsRelUp();
   else tsRelease();
   if (current === 'bite') { modeState.charge = 0; modeState.closing = 0; }
 });
