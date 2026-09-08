@@ -794,10 +794,11 @@ function tsVolSkin(skin) {
   ctx.fill();
 }
 
-/* Ребро между гранями идёт цветом поля: это не контур тела, а просвет. */
+/* Ребро между гранями — просвет до фона, а не контур тела, и цвет берёт у
+   фона, а не у поля: на красном поле красная обводка пропала бы. */
 function tsVolSeam(skin) {
   if (!skin.edges) return;
-  ctx.strokeStyle = skin.field;
+  ctx.strokeStyle = paper(.9);
   ctx.lineWidth = Math.max(1, S * .0016);
   ctx.lineJoin = 'miter';
   ctx.stroke();
@@ -994,8 +995,8 @@ function tsVolGrid() {
   }
 }
 
-function tsVolDraw() {
-  const m = modeState;
+/* Разбор палитры общий на опалубку и рельеф: у них один набор переключателей. */
+function tsVolLayOut() {
   const field = num('field');
   const skin = {
     field: tsVolPaint(field),
@@ -1008,6 +1009,12 @@ function tsVolDraw() {
     ctx.fillStyle = skin.field;
     ctx.fillRect(0, 0, S, S);
   }
+  return skin;
+}
+
+function tsVolDraw() {
+  const m = modeState;
+  const skin = tsVolLayOut();
   if (m.sel >= 0) tsVolGrid();
   const order = m.figs.map((f, i) => i).sort((a, b) => tsVolDepth(m.figs[a]) - tsVolDepth(m.figs[b]));
   for (const i of order) {
@@ -1025,6 +1032,121 @@ function tsVolDraw() {
     tsHandle(spin[0] / S, spin[1] / S, m.drag === 'spin');
   }
   tsHint(m.sel < 0 ? 'нажмите на тело · оно возьмётся' : 'тело таскает · верхняя ручка поднимает · боковая крутит');
+}
+
+/* ---------- рельеф: сетка столбов ---------- */
+
+/* Поле — квадратная сетка на той же плоскости, что и опалубка. Клетка никуда
+   не едет, у неё есть только высота: поле столбов, а не набор тел. */
+const TS_REL_SPAN = 1.4;
+const TS_REL_MAX = 6;
+
+/* Ц лежит на поле плашмя. Изометрия её мнёт, и с большинства углов это просто
+   рельеф — буква собирается только с одного поворота. Поворот и есть то,
+   чем её ищут. */
+const TS_REL_GLYPH = [
+  'X.....X',
+  'X.....X',
+  'X.....X',
+  'X.....X',
+  'X.....X',
+  'XXXXXXX',
+  '......X',
+];
+
+function tsRelBuild() {
+  const m = modeState;
+  m.n = Math.round(num('grid'));
+  m.cell = TS_REL_SPAN / m.n;
+  m.h = new Float32Array(m.n * m.n);
+  m.drag = -1;
+  if (m.n < TS_REL_GLYPH.length) return;
+  const off = Math.floor((m.n - TS_REL_GLYPH.length) / 2);
+  TS_REL_GLYPH.forEach((row, j) => {
+    for (let i = 0; i < row.length; i++) {
+      /* Строки глифа кладутся поперёк и справа налево: при повороте на 45°
+         сетка встаёт по экрану, и буква должна читаться прямо и в свою
+         сторону, а не лёжа на боку и не зеркально. */
+      if (row[row.length - 1 - i] === 'X') m.h[(i + off) * m.n + j + off] = m.cell;
+    }
+  });
+}
+
+/* Клетки как тела: дальше их рисует и щупает та же пара функций, что и
+   опалубку — квадрат со стороной клетки, повёрнутый вместе со всем полем. */
+function tsRelBodies() {
+  const m = modeState;
+  const a = (num('turn') * Math.PI) / 180;
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  const out = [];
+  for (let j = 0; j < m.n; j++) {
+    for (let i = 0; i < m.n; i++) {
+      const lx = (i + .5 - m.n / 2) * m.cell;
+      const ly = (j + .5 - m.n / 2) * m.cell;
+      out.push({
+        kind: 'box', a, at: j * m.n + i,
+        x: lx * cos - ly * sin, y: lx * sin + ly * cos,
+        w: m.cell / 2, d: m.cell / 2, h: m.h[j * m.n + i],
+      });
+    }
+  }
+  return out;
+}
+
+function tsRelPick(sx, sy) {
+  const near = tsRelBodies().sort((p, q) => tsVolDepth(q) - tsVolDepth(p));
+  for (const body of near) {
+    const steps = Math.max(1, Math.round(body.h / body.w));
+    for (let k = 0; k <= steps; k++) {
+      const [px, py] = tsIsoPlan(sx, sy, (body.h * k) / steps);
+      if (tsVolInside(body, px, py)) return body.at;
+    }
+  }
+  return -1;
+}
+
+function tsRelSetup() { tsRelBuild(); }
+
+function tsRelTool(key) { if (key === 'grid') tsRelBuild(); }
+
+function tsRelDown() {
+  const m = modeState;
+  m.drag = tsRelPick(pointer.x, pointer.y);
+  if (m.drag < 0) return;
+  m.from = m.h[m.drag];
+  m.gy = pointer.y;
+}
+
+function tsRelMove() {
+  const m = modeState;
+  if (m.drag < 0 || !pointer.down) return;
+  m.h[m.drag] = clamp(m.from + (m.gy - pointer.y) / TS_ISO.k, 0, TS_REL_MAX * m.cell);
+}
+
+function tsRelUp() { modeState.drag = -1; }
+
+function tsRelDraw() {
+  const skin = tsVolLayOut();
+  const bodies = tsRelBodies();
+  /* Пол кладётся весь и сразу: клетки лежат в одной плоскости и не спорят за
+     порядок, а стоящая впереди клетка столб позади никогда не закрывает. */
+  for (const body of bodies) {
+    ctx.beginPath();
+    tsVolCorners(body).forEach(([x, y], k) => {
+      const [X, Y] = tsIsoPoint(x, y, 0);
+      if (k) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = skin.field;
+    ctx.fill();
+    tsVolSeam(skin);
+  }
+  bodies
+    .filter((body) => body.h > 1e-4)
+    .sort((p, q) => tsVolDepth(p) - tsVolDepth(q))
+    .forEach((body) => tsVolBox(body, skin));
+  tsHint('потяните клетку вверх · поворот и сетка в панели');
 }
 
 const MODES = {
@@ -1106,12 +1228,28 @@ const MODES = {
     setup: tsVolSetup, draw: tsVolDraw,
     onDown: tsVolDown, onMove: tsVolMove, onUp: tsVolUp,
   },
+  relief: {
+    label: 'рельеф', cursor: 'ns-resize',
+    note: 'Поле разбито на квадратные клетки. Клетку нельзя сдвинуть — у неё есть только высота: потяните вверх, и она вырастет столбом, потяните вниз, и она вернётся в пол. Ползунок «поворот» крутит всё поле вокруг вертикали, «сетка» меняет частоту клеток и начинает рельеф заново. Цвет разложен так же, как в опалубке: поле, боковины и крышки порознь, «обводка» убирает просветы. Стартовый рельеф — Ц, положенная на поле плашмя: изометрия её мнёт, и буква собирается только с одного угла поворота.',
+    tools: [
+      { type: 'pick', key: 'caps', label: 'крышки', options: TS_VOL_PAINTS, value: 1 },
+      { type: 'pick', key: 'walls', label: 'боковины', options: TS_VOL_PAINTS, value: 1 },
+      { type: 'pick', key: 'field', label: 'поле', options: TS_VOL_PAINTS, value: 2 },
+      { type: 'toggle', key: 'edges', label: 'обводка', value: true },
+      { type: 'range', key: 'turn', label: 'поворот', min: 0, max: 90, step: 1, value: 0 },
+      { type: 'range', key: 'grid', label: 'сетка', min: 5, max: 13, step: 1, value: 9 },
+      { type: 'button', label: 'заново', action: () => setMode(current) },
+    ],
+    setup: tsRelSetup, draw: tsRelDraw, onTool: tsRelTool,
+    onDown: tsRelDown, onMove: tsRelMove, onUp: tsRelUp,
+  },
 };
 
 canvas.addEventListener('pointercancel', () => {
   pointer.down = false;
   if (current === 'drawing') tsDrawRelease();
   else if (current === 'formwork') tsVolUp();
+  else if (current === 'relief') tsRelUp();
   else tsRelease();
   if (current === 'bite') { modeState.charge = 0; modeState.closing = 0; }
 });
