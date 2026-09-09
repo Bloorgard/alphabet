@@ -142,6 +142,26 @@ function renderTools(mode) {
     const value = key in toolValues ? toolValues[key] : tool.value;
     toolValues[key] = value;
 
+    /* Выбор из нескольких: кнопка перебирает варианты по кругу и держит
+       в подписи имя текущего. Значение — индекс, в адрес уходит числом. */
+    if (tool.type === 'pick') {
+      const button = document.createElement('button');
+      button.type = 'button';
+      const paint = () => {
+        const pick = tool.options[toolValues[key]] || tool.options[0];
+        button.textContent = `${tool.label} · ${pick}`;
+      };
+      paint();
+      button.addEventListener('click', () => {
+        toolValues[key] = ((toolValues[key] | 0) + 1) % tool.options.length;
+        paint();
+        mode.onTool?.(tool.key);
+        labWriteHash();
+      });
+      labToolsBar.append(button);
+      continue;
+    }
+
     if (tool.type === 'toggle') {
       const button = document.createElement('button');
       button.type = 'button';

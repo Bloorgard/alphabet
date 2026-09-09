@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lab.css" id="lab-css">
+<script>
+  const labStamp = Date.now();
+  document.getElementById('lab-css').href = `lab.css?t=${labStamp}`;
+</script>
+</head>
+<body class="lab">
+<header>
+  <div class="identity">
+    <a class="back" href="index.html">полигоны</a>
+    <b id="identity"></b>
+    <div class="variant" id="variant" hidden aria-label="Вариант буквы"></div>
+  </div>
+  <nav class="modes" id="modes" aria-label="Механика"></nav>
+  <div class="globals" id="globals"></div>
+</header>
+
+<main class="stage-wrap">
+  <div class="stage" id="stage"><canvas id="c"></canvas></div>
+</main>
+
+<footer>
+  <div class="tools" id="tools"></div>
+  <span id="note"></span>
+</footer>
+
+<script>
+  document.body.append(Object.assign(document.createElement('script'), { src: `lab.js?t=${labStamp}` }));
+</script>
+</body>
+</html>
