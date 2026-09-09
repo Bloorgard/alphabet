@@ -21,6 +21,7 @@ import { mountT } from './letters/t.js?v=1';
 import { mountU } from './letters/u.js?v=2';
 import { mountF } from './letters/f.js?v=15';
 import { mountH } from './letters/h.js?v=3';
+import { mountTs } from './letters/ts.js?v=1';
 import { mountYa } from './letters/ya.js?v=22';
 import { reportVisit } from './progress.js?v=5';
 import { mountCredit } from './wall.js?v=12';
@@ -60,6 +61,7 @@ const READY = new Map([
   ['У', mountU],
   ['Ф', mountF],
   ['Х', mountH],
+  ['Ц', mountTs],
   ['Я', mountYa]
 ]);
 
