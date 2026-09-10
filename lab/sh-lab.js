@@ -42,7 +42,6 @@ const SH_SUCK_REACH = 0.45;
 
 const shRand = (min, max) => min + Math.random() * (max - min);
 const shTeeth = () => [modeState.rig - SH_SPACING, modeState.rig, modeState.rig + SH_SPACING];
-const shFilled = (index) => modeState.rings.filter((r) => r.pinned?.tooth === index).length;
 const shFlat = (ring) => Math.max(Math.abs(Math.cos(ring.phase + SH_CAM)), SH_FLAT);
 
 function shSeed() {
@@ -105,27 +104,32 @@ function shHitTooth(ring) {
   const list = shTeeth();
   for (let i = 0; i < list.length; i += 1) {
     const dx = ring.x - list[i];
+    if (Math.abs(dx) >= SH_RING_R + SH_THICK / 2) continue;
+    const axial = Math.abs(dx) <= num('catch');
     const flat = Math.abs(Math.cos(ring.phase)) <= num('phase');
-    /* Соосное кольцо зубец не задевает: снизу оно проходит по нему свободно,
-       сверху — насаживается. Отбивать надо только то, что идёт краем. */
-    if (Math.abs(dx) <= num('catch') && (ring.vy <= 0 || !flat || shFilled(i) >= num('slots'))) {
-      return false;
-    }
-    if (Math.abs(dx) <= num('catch') && ring.vy > 0 && flat && shFilled(i) < num('slots')) {
+
+    /* Надеться можно только через кончик: кольцо должно накрыть его сверху,
+       идя вниз и почти плашмя. На середине зубца надеваться неоткуда —
+       там кольцо либо уже надето, либо бьётся о стержень. */
+    const atTip = Math.abs(ring.y - SH_TOP) < SH_RING_R;
+    if (axial && flat && ring.vy > 0 && atTip) {
       ring.pinned = { tooth: i };
       ring.vx = 0;
       ring.spin = 0;
       ring.phase = Math.PI / 2;
       return true;
     }
-    if (Math.abs(dx) < SH_RING_R + SH_THICK / 2) {
-      const push = Math.sign(dx || 1);
-      ring.vx = push * Math.max(Math.abs(ring.vx), Math.abs(ring.vy) * 0.6) * 0.7;
-      ring.vy *= 0.6;
-      ring.spin += push * 2;
-      ring.x = list[i] + push * (SH_RING_R + SH_THICK / 2);
-      return false;
-    }
+
+    /* Снизу вверх соосное кольцо идёт по зубцу свободно — оно на него надето
+       ровно настолько, насколько это вообще возможно, не будучи надетым. */
+    if (axial && ring.vy <= 0) return false;
+
+    const push = Math.sign(dx || 1);
+    ring.vx = push * Math.max(Math.abs(ring.vx), Math.abs(ring.vy) * 0.6) * 0.7;
+    ring.vy *= 0.6;
+    ring.spin += push * 2;
+    if (!axial) ring.x = list[i] + push * (SH_RING_R + SH_THICK / 2);
+    return false;
   }
   return false;
 }
@@ -155,18 +159,27 @@ function shStack(ring) {
   ring.vy -= ring.vy * SH_STACK_DRAG * STEP;
   ring.y += ring.vy * STEP;
 
-  const below = modeState.rings.filter((r) => r !== ring && r.pinned?.tooth === ring.pinned.tooth);
-  let floor = SH_BOTTOM - SH_THICK / 2 - SH_SLOT_H / 2;
-  for (const other of below) {
-    if (other.y > ring.y) floor = Math.min(floor, other.y - SH_SLOT_H);
-  }
-  if (ring.y > floor) { ring.y = floor; ring.vy = 0; }
+}
 
-  /* Кончик зубца — единственный выход: соскочило через него, и кольцо снова
-     в воде, со всей набранной скоростью. */
-  if (ring.y < SH_TOP - SH_RING_R * 0.4) {
-    ring.pinned = null;
-    ring.spin = (Math.random() - 0.5) * 6;
+/* Стопка разбирается снизу вверх: каждое следующее кольцо ложится на
+   предыдущее, а не сквозь него. Сравнение по одному кольцу тут не работает —
+   кольца с одинаковой высотой не видят друг друга и слипаются. */
+function shPile() {
+  for (let tooth = 0; tooth < 3; tooth += 1) {
+    const stack = modeState.rings
+      .filter((r) => r.pinned?.tooth === tooth)
+      .sort((a, b) => b.y - a.y);
+    let floor = SH_BOTTOM - SH_THICK / 2 - SH_SLOT_H / 2;
+    for (const ring of stack) {
+      if (ring.y > floor) { ring.y = floor; ring.vy = Math.min(ring.vy, 0); }
+      floor = ring.y - SH_SLOT_H;
+      /* Кончик зубца — единственный выход: соскочило через него, и кольцо
+         снова в воде, со всей набранной скоростью. */
+      if (ring.y < SH_TOP - SH_RING_R * 0.4) {
+        ring.pinned = null;
+        ring.spin = (Math.random() - 0.5) * 6;
+      }
+    }
   }
 }
 
@@ -301,7 +314,6 @@ const MODES = {
       { type: 'range', key: 'cone', label: 'конус', min: 0.05, max: 0.6, step: 0.01, value: 0.22 },
       { type: 'range', key: 'catch', label: 'захват', min: 0.01, max: 0.12, step: 0.005, value: 0.045 },
       { type: 'range', key: 'phase', label: 'допуск фазы', min: 0.1, max: 1, step: 0.05, value: 0.5 },
-      { type: 'range', key: 'slots', label: 'на зубец', min: 1, max: 6, step: 1, value: 3 },
       { type: 'range', key: 'fall', label: 'оседание', min: 0.05, max: 0.6, step: 0.01, value: 0.26 },
       { type: 'range', key: 'suck', label: 'приток', min: 0, max: 3, step: 0.1, value: 1.2 },
       { type: 'range', key: 'speed', label: 'ход Ш', min: 0.5, max: 6, step: 0.1, value: 2.6 },
@@ -323,6 +335,7 @@ const MODES = {
       modeState.rig += clamp(gap * 0.22, -limit, limit);
       shPuff();
       for (const ring of modeState.rings) shSwim(ring);
+      shPile();
       shCrowd();
     },
     draw() {
