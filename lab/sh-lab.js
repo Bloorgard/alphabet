@@ -118,8 +118,10 @@ function shHitTooth(ring) {
     }
 
     /* Удар о кончик отбрасывает кольцо вверх, а не гасит на месте: иначе оно
-       зависает над зубцом, каждый кадр теряя остаток хода. */
-    if (axial && ring.vy > 0) {
+       зависает над зубцом, каждый кадр теряя остаток хода. Ниже кончика этой
+       ветки быть не должно — там соосное кольцо просто вытесняется наружу,
+       иначе оно подпрыгивает на месте до конца раунда. */
+    if (axial && ring.vy > 0 && atTip) {
       ring.vy = -Math.abs(ring.vy) * 0.45;
       ring.vx += (Math.random() - 0.5) * 0.5;
       ring.spin += (Math.random() - 0.5) * 5;
@@ -155,7 +157,10 @@ function shPlough(ring) {
   if (Math.abs(dx) >= edge) return;
   const push = Math.sign(dx || 1);
   const want = modeState.rig + push * edge;
-  ring.x += (want - ring.x) * 0.3;
+  ring.x += (want - ring.x) * 0.6;
+  /* Толчок вдогонку: без него зажатое соседями кольцо доезжает до края
+     перекладины и остаётся лежать на ней. */
+  ring.vx += push * 0.25 * STEP * 60 * STEP;
 }
 
 /* Приток к работающему соплу: у дна вода идёт к струе, и кольцо, лёгшее в
@@ -380,10 +385,15 @@ const MODES = {
 
       /* Надетое кольцо продевается по-настоящему: дальняя половина уходит под
          зубец, ближняя ложится поверх. */
+      /* Дно лежит за полозьями: улёгшееся кольцо уходит под букву, а не
+         ложится ей на спину. Вытеснить его наружу удаётся не всегда —
+         прижатому к стенке деваться некуда, — а глубина решает это разом. */
+      const lying = (r) => !r.pinned && r.y > SH_BOTTOM - SH_THICK;
+      for (const ring of modeState.rings) if (lying(ring)) shDrawRing(ring, null);
       for (const ring of modeState.rings) if (ring.pinned) shDrawRing(ring, 'back');
       shDrawRig();
       for (const ring of modeState.rings) if (ring.pinned) shDrawRing(ring, 'front');
-      for (const ring of modeState.rings) if (!ring.pinned) shDrawRing(ring, null);
+      for (const ring of modeState.rings) if (!ring.pinned && !lying(ring)) shDrawRing(ring, null);
 
       const done = modeState.rings.filter((r) => r.pinned).length;
       drawStatus(`надето · ${done} / ${modeState.rings.length}`);
