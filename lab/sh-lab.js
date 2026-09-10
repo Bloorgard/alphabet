@@ -37,6 +37,7 @@ const SH_BUBBLE_RATE = 26;
 
 const SH_SLOT_H = 0.055;
 const SH_STACK_DRAG = 3.2; /* трение кольца о зубец */
+const SH_SWIPE = 0.5;      /* с какой боковой прытью зубец уже не нанизывает */
 const SH_SUCK_BAND = 0.09; /* полоса у дна, где чувствуется приток к соплу */
 const SH_SUCK_REACH = 0.45;
 
@@ -50,6 +51,7 @@ function shSeed() {
   modeState.target = 0.5;
   modeState.bubbles = [];
   modeState.time = 0;
+  modeState.rigV = 0;
   modeState.jets = SH_JETS.map((x, i) => ({ x, on: false, phase: i * 2.1 }));
   modeState.rings = [];
   const prize = Math.floor(Math.random() * count);
@@ -110,10 +112,15 @@ function shHitTooth(ring) {
        идя вниз и почти плашмя. На середине зубца надеваться неоткуда —
        там кольцо либо уже надето, либо бьётся о стержень. */
     const atTip = Math.abs(ring.y - SH_TOP) < SH_RING_R * 1.6;
-    /* Порог по скорости не строгий: кольцо у кончика колеблется около нуля,
-       и требование «строго вниз» промахивалось мимо тех кадров, где оно
+    /* Надевание — насаживание, а не подсечка: зубец, проезжающий вбок, кольцо
+       не ловит. Без этого можно было поднять всю россыпь и собрать её разом,
+       быстро водя буквой из стороны в сторону.
+
+       Порог по вертикали при этом не строгий: кольцо у кончика колеблется
+       около нуля, и «строго вниз» промахивалось мимо тех кадров, где оно
        выглядит идеально лежащим. Вверх летящее так всё равно не пройдёт. */
-    if (axial && flat && ring.vy > -0.03 && atTip) {
+    const slip = Math.abs(ring.vx - modeState.rigV);
+    if (axial && flat && ring.vy > -0.03 && atTip && slip < SH_SWIPE) {
       ring.pinned = { tooth: i };
       /* Кольцо садится на стержень, а не остаётся висеть над кончиком: зона
          захвата шире зоны удержания, и без этой посадки оно тем же кадром
@@ -130,8 +137,9 @@ function shHitTooth(ring) {
        отскок вверх возвращал его на ту же точку, и оно дребезжало над зубцом
        до конца раунда, выглядя лежащим. Сторону задаёт то, куда оно уже шло. */
     if (axial && ring.vy > -0.03 && atTip) {
-      /* Промах по фазе уводит кольцо с оси немедленно: мягкий снос оно
-         отыгрывало назад вязкостью и снова оказывалось над кончиком. */
+      /* Промах — по фазе или по прыти — уводит кольцо с оси немедленно:
+         мягкий снос оно отыгрывало назад вязкостью и снова оказывалось
+         над кончиком. */
       const away = Math.sign(ring.vx || dx || (Math.random() - 0.5));
       ring.x = list[i] + away * (SH_RING_R + SH_THICK / 2);
       ring.vx = away * (Math.abs(ring.vx) + 0.35);
@@ -395,7 +403,9 @@ const MODES = {
       modeState.time += STEP;
       const gap = modeState.target - modeState.rig;
       const limit = num('speed') * STEP;
-      modeState.rig += clamp(gap * 0.22, -limit, limit);
+      const move = clamp(gap * 0.22, -limit, limit);
+      modeState.rig += move;
+      modeState.rigV = move / STEP;
       shPuff();
       for (const ring of modeState.rings) shSwim(ring);
       shPile();
