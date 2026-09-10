@@ -98,9 +98,6 @@ function shBlow(ring) {
    плашмя — нанизалось и поехало вниз; попало краем — отбилось. */
 function shHitTooth(ring) {
   if (ring.y < SH_TOP - SH_RING_R || ring.y > SH_BOTTOM) return false;
-  /* Кольцо, улёгшееся на дне, зубцов не замечает: иначе салазки каждый кадр
-     подталкивали бы лежащих и сгребали их в кучки. */
-  if (Math.hypot(ring.vx, ring.vy) < 0.06) return false;
   const list = shTeeth();
   for (let i = 0; i < list.length; i += 1) {
     const dx = ring.x - list[i];
@@ -133,14 +130,32 @@ function shHitTooth(ring) {
        ровно настолько, насколько это вообще возможно, не будучи надетым. */
     if (axial && ring.vy <= 0) return false;
 
+    /* Косое кольцо не может делить место со стержнем — его вытесняет наружу.
+       Вытеснение плавное и без импульса: жёсткая расстановка сгоняла кольца
+       в кучки, а порог по скорости пропускал сквозь зубец медленных. */
     const push = Math.sign(dx || 1);
-    ring.vx = push * Math.max(Math.abs(ring.vx), Math.abs(ring.vy) * 0.6) * 0.7;
-    ring.vy *= 0.6;
-    ring.spin += push * 2;
-    if (!axial) ring.x = list[i] + push * (SH_RING_R + SH_THICK / 2);
+    const want = list[i] + push * (SH_RING_R + SH_THICK / 2);
+    ring.x += (want - ring.x) * 0.35;
+    if (Math.hypot(ring.vx, ring.vy) > 0.06) {
+      ring.vx = push * Math.max(Math.abs(ring.vx), Math.abs(ring.vy) * 0.6) * 0.7;
+      ring.vy *= 0.6;
+      ring.spin += push * 2;
+    }
     return false;
   }
   return false;
+}
+
+/* Перекладина — не линия на дне, а полозья: лежащее кольцо она не переезжает,
+   а сдвигает в сторону, как ковш. Без этого кольца ложатся поверх буквы. */
+function shPlough(ring) {
+  if (ring.y < SH_BOTTOM - SH_THICK) return;
+  const dx = ring.x - modeState.rig;
+  const edge = SH_HALF + SH_RING_R * 0.55;
+  if (Math.abs(dx) >= edge) return;
+  const push = Math.sign(dx || 1);
+  const want = modeState.rig + push * edge;
+  ring.x += (want - ring.x) * 0.3;
 }
 
 /* Приток к работающему соплу: у дна вода идёт к струе, и кольцо, лёгшее в
@@ -202,6 +217,7 @@ function shSwim(ring) {
     return;
   }
   if (shHitTooth(ring)) return;
+  shPlough(ring);
   shSuck(ring);
   shBlow(ring);
   /* Вес за вычетом всплытия: делённый на вязкость, он и есть скорость
