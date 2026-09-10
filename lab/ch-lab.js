@@ -105,19 +105,51 @@ function chSlack(w) {
 
 /* ---------- гвоздики ---------- */
 
+/* Гвоздик за кадр проходит несколько клеток, поэтому в индекс он ложится не
+   точкой, а всем своим путём от прошлого кадра: иначе быстрый пронос ни разу
+   не попадает под проверку и канат остаётся стоять на месте. */
 function chPinIndex() {
   const cell = chCell();
   const index = new Map();
-  const put = (x, y, id) => {
+  const memory = modeState.pinPrev || new Map();
+  const next = new Map();
+
+  const put = (x, y, pin) => {
     const key = `${Math.floor(x / cell)},${Math.floor(y / cell)}`;
     if (!index.has(key)) index.set(key, []);
-    index.get(key).push({ x, y, id });
+    const bucket = index.get(key);
+    if (!bucket.includes(pin)) bucket.push(pin);
   };
+
+  const add = (key, x, y, id) => {
+    const was = memory.get(key) || { x, y };
+    const pin = { x, y, px: was.x, py: was.y, id };
+    next.set(key, { x, y });
+    const steps = Math.ceil(Math.hypot(x - was.x, y - was.y) / cell);
+    for (let i = 0; i <= steps; i += 1) {
+      const t = steps === 0 ? 0 : i / steps;
+      put(lerp(was.x, x, t), lerp(was.y, y, t), pin);
+    }
+  };
+
   for (const w of modeState.wires) {
-    put(w.rt.ax, w.rt.ay, w.id);
-    if (chPinned(w)) put(chWorld(w.endX), chWorld(w.endY), w.id);
+    add(`${w.id}:start`, w.rt.ax, w.rt.ay, w.id);
+    /* Конец в руке ещё не приколот, но толкать чужие канаты должен: иначе
+       единственное движение, которое видно на экране, коллизий не замечает. */
+    if (w.rt.dragEnd) add(`${w.id}:tail`, w.rt.dragEnd.x, w.rt.dragEnd.y, w.id);
+    else if (chPinned(w)) add(`${w.id}:tail`, chWorld(w.endX), chWorld(w.endY), w.id);
   }
+  modeState.pinPrev = next;
   return index;
+}
+
+/* Расстояние до пути гвоздика, а не до его нынешнего места. */
+function chNearOnPath(point, pin) {
+  const dx = pin.x - pin.px;
+  const dy = pin.y - pin.py;
+  const span = dx * dx + dy * dy;
+  const t = span === 0 ? 0 : clamp(((point.x - pin.px) * dx + (point.y - pin.py) * dy) / span, 0, 1);
+  return Math.hypot(point.x - (pin.px + dx * t), point.y - (pin.py + dy * t));
 }
 
 function chResolvePins(w, index, clearance, correction, maxPush) {
@@ -134,14 +166,29 @@ function chResolvePins(w, index, clearance, correction, maxPush) {
         if (!bucket) continue;
         for (const pin of bucket) {
           if (pin.id === w.id) continue;
-          const dx = point.x - pin.x;
-          const dy = point.y - pin.y;
-          const distance = Math.hypot(dx, dy);
-          const overlap = clearance - distance;
-          if (distance < 1e-6 || overlap <= slop) continue;
+          if (chNearOnPath(point, pin) >= clearance - slop) continue;
+
+          /* Нормаль берётся от прошлого места гвоздика: у перпендикуляра к пути
+             произвольный знак, и пролетевший насквозь гвоздик толкал бы канат
+             назад, вместо того чтобы нести его перед собой. */
+          let nx = point.x - pin.px;
+          let ny = point.y - pin.py;
+          let length = Math.hypot(nx, ny);
+          if (length < 1e-6) {
+            nx = point.x - pin.x;
+            ny = point.y - pin.y;
+            length = Math.hypot(nx, ny);
+          }
+          if (length < 1e-6) continue;
+          nx /= length;
+          ny /= length;
+
+          const gap = (point.x - pin.x) * nx + (point.y - pin.y) * ny;
+          const overlap = clearance - gap;
+          if (overlap <= slop) continue;
           const push = Math.min(overlap * correction, maxPush);
-          point.x += (dx / distance) * push;
-          point.y += (dy / distance) * push;
+          point.x += nx * push;
+          point.y += ny * push;
         }
       }
     }
@@ -415,11 +462,13 @@ const MODES = {
       modeState.drag = null;
       modeState.paint = null;
       modeState.size = S;
+      modeState.pinPrev = new Map();
       chLetter();
     },
 
     onTool(key) {
       if (key === 'grid') chRescale();
+      if (key === 'collide') modeState.pinPrev = new Map();
       if (key === 'tool') canvas.style.cursor = num('tool') === 1 ? 'default' : 'crosshair';
     },
 
@@ -448,6 +497,9 @@ const MODES = {
       } else {
         const tip = wire.rt.points[wire.rt.points.length - 1];
         wire.rt.dragEnd = { x: tip.x, y: tip.y };
+        /* Прошлое положение конца нужно индексу с первого же кадра: рывок
+           бывает быстрее, чем шаг физики, и без памяти путь выйдет нулевым. */
+        modeState.pinPrev.set(`${wire.id}:tail`, { x: tip.x, y: tip.y });
         modeState.drag = { wire, part };
       }
     },
