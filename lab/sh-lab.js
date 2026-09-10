@@ -9,7 +9,7 @@
 
 const SH_THICK = 0.06;
 const SH_SPACING = 0.22;
-const SH_TOP = 0.34;
+const SH_TOP = 0.44;
 const SH_BOTTOM = 0.84;
 const SH_HALF = SH_SPACING + SH_THICK / 2;
 
@@ -29,7 +29,10 @@ const SH_JETS = [0.25, 0.5, 0.75];
 const SH_KEYS = ['KeyQ', 'KeyW', 'KeyE'];
 const SH_JET_SPIN = 7;
 const SH_JET_CONE = 0.055;
-const SH_JET_REACH = 0.62;
+/* Струя добивает до самого верха сцены: кольцо должно уходить заметно выше
+   кончиков Ш, иначе ловля вырождается в подбрасывание на ладонь. */
+const SH_JET_REACH = 0.9;
+const SH_WOBBLE = 2.3;     /* частота рыскания струи */
 const SH_BUBBLE_RATE = 26;
 
 const SH_SLOT_H = 0.055;
@@ -48,7 +51,8 @@ function shSeed() {
   modeState.rig = 0.5;
   modeState.target = 0.5;
   modeState.bubbles = [];
-  modeState.jets = SH_JETS.map((x) => ({ x, on: false }));
+  modeState.time = 0;
+  modeState.jets = SH_JETS.map((x, i) => ({ x, on: false, phase: i * 2.1 }));
   modeState.rings = [];
   const prize = Math.floor(Math.random() * count);
   for (let i = 0; i < count; i += 1) {
@@ -71,17 +75,24 @@ function shSeed() {
    момент — тем больший, чем сильнее оно идёт мимо оси. */
 function shBlow(ring) {
   const force = num('force');
+  const swirl = num('swirl');
   for (const jet of modeState.jets) {
     if (!jet.on) continue;
     const up = SH_BOTTOM - ring.y;
     if (up < 0 || up > SH_JET_REACH) continue;
+    /* Струя не столб, а живая вода: ось рыскает, и чем выше, тем сильнее —
+       поэтому одно и то же нажатие никогда не даёт один и тот же полёт. */
+    const axis = jet.x + Math.sin(modeState.time * SH_WOBBLE + jet.phase) * swirl * 0.35 * up;
     const width = SH_JET_CONE + up * num('cone');
-    const off = (ring.x - jet.x) / width;
+    const off = (ring.x - axis) / width;
     if (Math.abs(off) > 1) continue;
     const fade = (1 - Math.abs(off)) * (1 - up / SH_JET_REACH);
     ring.vy -= force * fade * STEP;
     ring.vx += off * force * 0.5 * fade * STEP;
     ring.spin += off * SH_JET_SPIN * fade * STEP;
+    /* Завихрение достаётся кольцу россыпью: свой толчок и свой момент. */
+    ring.vx += (Math.random() - 0.5) * swirl * fade * 3 * STEP;
+    ring.spin += (Math.random() - 0.5) * swirl * fade * 26 * STEP;
   }
 }
 
@@ -97,6 +108,11 @@ function shHitTooth(ring) {
   for (let i = 0; i < list.length; i += 1) {
     const dx = ring.x - list[i];
     const flat = Math.abs(Math.cos(ring.phase)) <= num('phase');
+    /* Соосное кольцо зубец не задевает: снизу оно проходит по нему свободно,
+       сверху — насаживается. Отбивать надо только то, что идёт краем. */
+    if (Math.abs(dx) <= num('catch') && (ring.vy <= 0 || !flat || shFilled(i) >= num('slots'))) {
+      return false;
+    }
     if (Math.abs(dx) <= num('catch') && ring.vy > 0 && flat && shFilled(i) < num('slots')) {
       ring.pinned = { tooth: i, slot: shFilled(i) };
       ring.slide = ring.y;
@@ -261,7 +277,8 @@ const MODES = {
       + 'если идёт вниз почти плашмя: ловят не кольцо, а фазу его оборота.',
     tools: [
       { type: 'range', key: 'rings', label: 'колец', min: 3, max: 15, step: 1, value: 9 },
-      { type: 'range', key: 'force', label: 'струя', min: 1, max: 8, step: 0.2, value: 3.4 },
+      { type: 'range', key: 'force', label: 'струя', min: 1, max: 20, step: 0.5, value: 9 },
+      { type: 'range', key: 'swirl', label: 'завихрение', min: 0, max: 2, step: 0.05, value: 0.7 },
       { type: 'range', key: 'cone', label: 'конус', min: 0.05, max: 0.6, step: 0.01, value: 0.22 },
       { type: 'range', key: 'catch', label: 'захват', min: 0.01, max: 0.12, step: 0.005, value: 0.045 },
       { type: 'range', key: 'phase', label: 'допуск фазы', min: 0.1, max: 1, step: 0.05, value: 0.5 },
@@ -281,6 +298,7 @@ const MODES = {
     },
     step() {
       if (modeState.rings.length !== num('rings')) shSeed();
+      modeState.time += STEP;
       const gap = modeState.target - modeState.rig;
       const limit = num('speed') * STEP;
       modeState.rig += clamp(gap * 0.22, -limit, limit);
