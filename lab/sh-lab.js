@@ -16,8 +16,6 @@ const SH_HALF = SH_SPACING + SH_THICK / 2;
 const SH_RING_R = 0.058;
 const SH_RING_LINE = 0.011;
 
-const SH_GRAVITY = 0.62;
-const SH_BUOYANCY = 0.44;
 const SH_DRAG_Y = 1.9;
 const SH_DRAG_X = 1.1;
 const SH_SPIN_DRAG = 0.9;
@@ -35,6 +33,9 @@ const SH_JET_REACH = 0.62;
 const SH_BUBBLE_RATE = 26;
 
 const SH_SLOT_H = 0.055;
+const SH_SLIDE = 1.1;      /* скорость съезда надетого кольца к стопке */
+const SH_SUCK_BAND = 0.09; /* полоса у дна, где чувствуется приток к соплу */
+const SH_SUCK_REACH = 0.45;
 
 const shRand = (min, max) => min + Math.random() * (max - min);
 const shTeeth = () => [modeState.rig - SH_SPACING, modeState.rig, modeState.rig + SH_SPACING];
@@ -61,6 +62,7 @@ function shSeed() {
       tilt: shRand(-0.4, 0.4),
       prize: i === prize,
       pinned: null,
+      slide: 0,
     });
   }
 }
@@ -83,41 +85,67 @@ function shBlow(ring) {
   }
 }
 
-/* Мимо фазы — отскок в сторону: зубец отбивает кольцо, вставшее косо. */
-function shCatch(ring) {
-  if (ring.vy <= 0) return false;
+/* Зубец — тело на всей своей высоте, а не ловушка у самого дна: иначе кольцо
+   пролетает сквозь него и цепляется вдруг, задним числом. Накрыло сверху
+   плашмя — нанизалось и поехало вниз; попало краем — отбилось. */
+function shHitTooth(ring) {
+  if (ring.y < SH_TOP - SH_RING_R || ring.y > SH_BOTTOM) return false;
+  /* Кольцо, улёгшееся на дне, зубцов не замечает: иначе салазки каждый кадр
+     подталкивали бы лежащих и сгребали их в кучки. */
+  if (Math.hypot(ring.vx, ring.vy) < 0.06) return false;
   const list = shTeeth();
   for (let i = 0; i < list.length; i += 1) {
     const dx = ring.x - list[i];
-    if (Math.abs(dx) > num('catch')) continue;
-    const free = shFilled(i);
-    const rest = shSlotY(free);
-    if (ring.y < SH_TOP || ring.y < rest - SH_SLOT_H) return false;
-    if (free >= num('slots') || Math.abs(Math.cos(ring.phase)) > num('phase')) {
-      ring.vx += Math.sign(dx || 1) * 0.35;
-      ring.vy *= 0.5;
-      ring.spin += 3;
+    const flat = Math.abs(Math.cos(ring.phase)) <= num('phase');
+    if (Math.abs(dx) <= num('catch') && ring.vy > 0 && flat && shFilled(i) < num('slots')) {
+      ring.pinned = { tooth: i, slot: shFilled(i) };
+      ring.slide = ring.y;
+      ring.vx = 0;
+      ring.vy = 0;
+      ring.spin = 0;
+      ring.phase = Math.PI / 2;
+      return true;
+    }
+    if (Math.abs(dx) < SH_RING_R + SH_THICK / 2) {
+      const push = Math.sign(dx || 1);
+      ring.vx = push * Math.max(Math.abs(ring.vx), Math.abs(ring.vy) * 0.6) * 0.7;
+      ring.vy *= 0.6;
+      ring.spin += push * 2;
+      ring.x = list[i] + push * (SH_RING_R + SH_THICK / 2);
       return false;
     }
-    ring.pinned = { tooth: i, slot: free };
-    ring.vx = 0;
-    ring.vy = 0;
-    ring.spin = 0;
-    ring.phase = Math.PI / 2;
-    return true;
   }
   return false;
+}
+
+/* Приток к работающему соплу: у дна вода идёт к струе, и кольцо, лёгшее в
+   стороне, само подтягивается. Без этого дальние кольца поднять нечем. */
+function shSuck(ring) {
+  const up = SH_BOTTOM - ring.y;
+  if (up > SH_SUCK_BAND) return;
+  for (const jet of modeState.jets) {
+    if (!jet.on) continue;
+    const dx = jet.x - ring.x;
+    const far = Math.abs(dx);
+    if (far < SH_JET_CONE || far > SH_SUCK_REACH) continue;
+    ring.vx += Math.sign(dx) * num('suck') * (1 - far / SH_SUCK_REACH) * STEP;
+  }
 }
 
 function shSwim(ring) {
   if (ring.pinned) {
     ring.x = shTeeth()[ring.pinned.tooth];
-    ring.y = shSlotY(ring.pinned.slot);
+    const rest = shSlotY(ring.pinned.slot);
+    ring.slide = Math.min(rest, ring.slide + SH_SLIDE * STEP);
+    ring.y = ring.slide;
     return;
   }
-  if (shCatch(ring)) return;
+  if (shHitTooth(ring)) return;
+  shSuck(ring);
   shBlow(ring);
-  ring.vy += (SH_GRAVITY - SH_BUOYANCY) * STEP;
+  /* Вес за вычетом всплытия: делённый на вязкость, он и есть скорость
+     оседания — ею и правим, а не двумя числами по отдельности. */
+  ring.vy += num('fall') * SH_DRAG_Y * STEP;
   ring.vy -= ring.vy * SH_DRAG_Y * STEP;
   ring.vx -= ring.vx * SH_DRAG_X * STEP;
   ring.x += ring.vx * STEP;
@@ -136,6 +164,31 @@ function shSwim(ring) {
     ring.spin *= 0.8;
   }
   if (ring.y < SH_RING_R) { ring.y = SH_RING_R; ring.vy = Math.abs(ring.vy) * 0.3; }
+}
+
+/* Кольца не проходят друг сквозь друга: без этого струя сгоняет их в одну
+   точку и дальше они живут как одно кольцо. */
+function shCrowd() {
+  const list = modeState.rings;
+  for (let i = 0; i < list.length; i += 1) {
+    const a = list[i];
+    if (a.pinned) continue;
+    for (let j = i + 1; j < list.length; j += 1) {
+      const b = list[j];
+      if (b.pinned) continue;
+      const dx = b.x - a.x;
+      const dy = (b.y - a.y) * 2.2;   /* по вертикали кольца плоские */
+      const dist = Math.hypot(dx, dy);
+      const min = SH_RING_R * 1.7;
+      if (dist > min || dist === 0) continue;
+      const push = ((min - dist) / min) * 0.6 * STEP;
+      const nx = dx / dist;
+      a.x -= nx * push;
+      b.x += nx * push;
+      a.vx -= nx * push * 8;
+      b.vx += nx * push * 8;
+    }
+  }
 }
 
 function shPuff() {
@@ -163,13 +216,18 @@ function shPuff() {
 /* Кольцо — эллипс, а не сплюснутый круг: масштабировать канву значило бы
    заодно исказить толщину линии. Тёмный подбой кладётся первым и шире — он и
    есть та обводка, которой кольцо читается поверх белого зубца. */
+/* half: 'back' — дальняя дуга, 'front' — ближняя, иначе кольцо целиком.
+   Двумя дугами, а не полным эллипсом с накладкой: наложение и давало шов. */
 function shRingPath(ring, half) {
+  const from = half === 'front' ? 0 : Math.PI;
+  const to = half === 'front' ? Math.PI : Math.PI * 2;
   ctx.beginPath();
   ctx.ellipse(ring.x * S, ring.y * S, SH_RING_R * S, SH_RING_R * shFlat(ring) * S,
-    ring.tilt, 0, half ? Math.PI : Math.PI * 2);
+    ring.tilt, half ? from : 0, half ? to : Math.PI * 2);
 }
 
 function shDrawRing(ring, half) {
+  ctx.lineCap = 'butt';
   shRingPath(ring, half);
   ctx.strokeStyle = paper(1);
   ctx.lineWidth = (SH_RING_LINE + 0.008) * S;
@@ -208,6 +266,8 @@ const MODES = {
       { type: 'range', key: 'catch', label: 'захват', min: 0.01, max: 0.12, step: 0.005, value: 0.045 },
       { type: 'range', key: 'phase', label: 'допуск фазы', min: 0.1, max: 1, step: 0.05, value: 0.5 },
       { type: 'range', key: 'slots', label: 'на зубец', min: 1, max: 6, step: 1, value: 3 },
+      { type: 'range', key: 'fall', label: 'оседание', min: 0.05, max: 0.6, step: 0.01, value: 0.26 },
+      { type: 'range', key: 'suck', label: 'приток', min: 0, max: 3, step: 0.1, value: 1.2 },
       { type: 'range', key: 'speed', label: 'ход Ш', min: 0.5, max: 6, step: 0.1, value: 2.6 },
       { type: 'button', label: 'заново', action() { shSeed(); } },
     ],
@@ -226,6 +286,7 @@ const MODES = {
       modeState.rig += clamp(gap * 0.22, -limit, limit);
       shPuff();
       for (const ring of modeState.rings) shSwim(ring);
+      shCrowd();
     },
     draw() {
       ctx.strokeStyle = ink(0.5);
@@ -240,10 +301,10 @@ const MODES = {
 
       /* Надетое кольцо продевается по-настоящему: дальняя половина уходит под
          зубец, ближняя ложится поверх. */
-      for (const ring of modeState.rings) if (ring.pinned) shDrawRing(ring, false);
+      for (const ring of modeState.rings) if (ring.pinned) shDrawRing(ring, 'back');
       shDrawRig();
-      for (const ring of modeState.rings) if (ring.pinned) shDrawRing(ring, true);
-      for (const ring of modeState.rings) if (!ring.pinned) shDrawRing(ring, false);
+      for (const ring of modeState.rings) if (ring.pinned) shDrawRing(ring, 'front');
+      for (const ring of modeState.rings) if (!ring.pinned) shDrawRing(ring, null);
 
       const done = modeState.rings.filter((r) => r.pinned).length;
       drawStatus(`надето · ${done} / ${modeState.rings.length}`);
