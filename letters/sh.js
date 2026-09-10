@@ -48,6 +48,14 @@ const JET_SPREAD = 0.22;
 const JET_REACH = 0.62;
 const BUBBLE_RATE = 26;
 
+/* Ловля. Продевание требует совпасть и местом, и фазой: кольцо должно идти
+   вниз почти плашмя — ловят не кольцо, а его оборот. */
+const CATCH_X = 0.045;
+const CATCH_FLAT = 0.5;
+const SLOTS = 3;
+const SLOT_H = 0.055;
+const RIG_SPEED = 2.6;
+
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const rand = (min, max) => min + Math.random() * (max - min);
 
@@ -71,6 +79,8 @@ export function mountSh(workspace) {
   let bubbles = [];
 
   const teeth = () => [rig.x - SPACING, rig.x, rig.x + SPACING];
+  const slotY = slot => BOTTOM - THICK / 2 - SLOT_H * (slot + 0.5);
+  const filled = index => rings.filter(r => r.pinned?.tooth === index).length;
 
   function seed() {
     rings = [];
@@ -111,7 +121,40 @@ export function mountSh(workspace) {
     }
   }
 
+  /* Кольцо садится, если идёт вниз, совпало с зубцом по горизонтали и его
+     плоскость достаточно близка к плашмя. Мимо фазы — отскок в сторону. */
+  function tryCatch(ring) {
+    if (ring.vy <= 0) return false;
+    const list = teeth();
+    for (let i = 0; i < list.length; i++) {
+      const dx = ring.x - list[i];
+      if (Math.abs(dx) > CATCH_X) continue;
+      const free = filled(i);
+      const rest = slotY(free);
+      if (ring.y < TOP || ring.y < rest - SLOT_H) return false;
+      if (free >= SLOTS || Math.abs(Math.cos(ring.phase)) > CATCH_FLAT) {
+        ring.vx += Math.sign(dx || 1) * 0.35;
+        ring.vy *= 0.5;
+        ring.spin += 3;
+        return false;
+      }
+      ring.pinned = { tooth: i, slot: free };
+      ring.vx = 0;
+      ring.vy = 0;
+      ring.spin = 0;
+      ring.phase = Math.PI / 2;
+      return true;
+    }
+    return false;
+  }
+
   function swim(ring) {
+    if (ring.pinned) {
+      ring.x = teeth()[ring.pinned.tooth];
+      ring.y = slotY(ring.pinned.slot);
+      return;
+    }
+    if (tryCatch(ring)) return;
     blow(ring);
     ring.vy += (GRAVITY - BUOYANCY) * STEP;
     ring.vy -= ring.vy * DRAG_Y * STEP;
@@ -176,7 +219,8 @@ export function mountSh(workspace) {
   }
 
   function step() {
-    rig.x += (rig.target - rig.x) * 0.2;
+    const gap = rig.target - rig.x;
+    rig.x += clamp(gap * 0.22, -RIG_SPEED * STEP, RIG_SPEED * STEP);
     puff();
     for (const ring of rings) swim(ring);
   }
@@ -184,17 +228,19 @@ export function mountSh(workspace) {
   /* Кольцо — эллипс, а не сплюснутый круг: масштабировать канву значило бы
      заодно исказить толщину линии. Тёмный подбой кладётся первым и шире —
      он и есть та обводка, которой кольцо читается поверх белого зубца. */
-  function ringPath(ring) {
+  function ringPath(ring, half) {
+    const from = half ? 0 : 0;
+    const to = half ? Math.PI : Math.PI * 2;
     ctx.beginPath();
-    ctx.ellipse(ring.x * S, ring.y * S, RING_R * S, RING_R * flatness(ring) * S, ring.tilt, 0, Math.PI * 2);
+    ctx.ellipse(ring.x * S, ring.y * S, RING_R * S, RING_R * flatness(ring) * S, ring.tilt, from, to);
   }
 
-  function drawRing(ring) {
-    ringPath(ring);
+  function drawRing(ring, half) {
+    ringPath(ring, half);
     ctx.strokeStyle = INK;
     ctx.lineWidth = (RING_LINE + 0.008) * S;
     ctx.stroke();
-    ringPath(ring);
+    ringPath(ring, half);
     ctx.strokeStyle = ring.prize ? RED : PAPER;
     ctx.lineWidth = RING_LINE * S;
     ctx.stroke();
@@ -234,8 +280,12 @@ export function mountSh(workspace) {
     ctx.fillRect(0, 0, W, H);
     ctx.translate(ox, oy);
     drawBubbles();
+    /* Надетое кольцо продевается по-настоящему: дальняя половина уходит под
+       зубец, ближняя ложится поверх. */
+    for (const ring of rings) if (ring.pinned) drawRing(ring, false);
     drawRig();
-    for (const ring of rings) drawRing(ring);
+    for (const ring of rings) if (ring.pinned) drawRing(ring, true);
+    for (const ring of rings) if (!ring.pinned) drawRing(ring, false);
   }
 
   function frame(now) {
