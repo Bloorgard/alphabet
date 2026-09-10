@@ -18,7 +18,38 @@ const TOP = 0.34;
 const BOTTOM = 0.84;
 const HALF = SPACING + THICK / 2;
 
+/* Кольца. Внутренний просвет заметно шире зубца — иначе продеть его точным
+   попаданием было бы делом случая, а не руки. */
+const RING_COUNT = 9;
+const RING_R = 0.058;
+const RING_LINE = 0.011;
+const FLOOR = BOTTOM;
+
+/* Вода. Тяжесть почти уравновешена всплытием, поэтому кольцо не падает,
+   а оседает; вязкость по горизонтали слабее, чтобы был снос вбок. */
+const GRAVITY = 0.62;
+const BUOYANCY = 0.44;
+const DRAG_Y = 1.9;
+const DRAG_X = 1.1;
+const SPIN_DRAG = 0.9;
+/* Взгляд на сцену не строго сбоку, а чуть сверху: наклон камеры и даёт
+   лежащему кольцу видимую толщину, а «ребро к зрителю» сдвигает с плашмя. */
+const CAM = Math.asin(0.38);
+const FLAT = 0.02;
+
+/* Струи. Сопла врезаны в дно и не ездят вместе с буквой: подгонять надо Ш
+   под воду, а не воду под Ш. Конус к верху шире и слабее. */
+const JETS = [0.25, 0.5, 0.75];
+const JET_KEYS = ['KeyQ', 'KeyW', 'KeyE'];
+const JET_FORCE = 3.4;
+const JET_SPIN = 7;
+const JET_CONE = 0.055;
+const JET_SPREAD = 0.22;
+const JET_REACH = 0.62;
+const BUBBLE_RATE = 26;
+
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const rand = (min, max) => min + Math.random() * (max - min);
 
 export function mountSh(workspace) {
   const canvas = workspace.querySelector('#letter-canvas');
@@ -35,8 +66,74 @@ export function mountSh(workspace) {
   let frameId = 0;
 
   const rig = { x: 0.5, target: 0.5 };
+  const jets = JETS.map(x => ({ x, on: false }));
+  let rings = [];
+  let bubbles = [];
 
   const teeth = () => [rig.x - SPACING, rig.x, rig.x + SPACING];
+
+  function seed() {
+    rings = [];
+    const prize = Math.floor(Math.random() * RING_COUNT);
+    for (let i = 0; i < RING_COUNT; i++) {
+      rings.push({
+        x: rand(RING_R + 0.02, 1 - RING_R - 0.02),
+        y: FLOOR - RING_LINE,
+        vx: 0,
+        vy: 0,
+        phase: Math.PI / 2,   /* плашмя: лежит на дне */
+        spin: 0,
+        tilt: rand(-0.4, 0.4),
+        prize: i === prize,
+        pinned: null,
+      });
+    }
+  }
+
+  /* Сплюснутость эллипса — это наклон плоскости кольца с поправкой на камеру:
+     фаза π/2 даёт кольцо плашмя, фаза 0 — стоймя, почти круг. */
+  const flatness = ring => Math.max(Math.abs(Math.cos(ring.phase + CAM)), FLAT);
+
+  /* Сила струи в точке: спадает и от оси конуса, и от высоты. Кольцо ловит
+     ещё и момент — от того, насколько мимо оси оно идёт. */
+  function blow(ring) {
+    for (const jet of jets) {
+      if (!jet.on) continue;
+      const up = FLOOR - ring.y;
+      if (up < 0 || up > JET_REACH) continue;
+      const width = JET_CONE + up * JET_SPREAD;
+      const off = (ring.x - jet.x) / width;
+      if (Math.abs(off) > 1) continue;
+      const fade = (1 - Math.abs(off)) * (1 - up / JET_REACH);
+      ring.vy -= JET_FORCE * fade * STEP;
+      ring.vx += off * JET_FORCE * 0.5 * fade * STEP;
+      ring.spin += off * JET_SPIN * fade * STEP;
+    }
+  }
+
+  function swim(ring) {
+    blow(ring);
+    ring.vy += (GRAVITY - BUOYANCY) * STEP;
+    ring.vy -= ring.vy * DRAG_Y * STEP;
+    ring.vx -= ring.vx * DRAG_X * STEP;
+    ring.x += ring.vx * STEP;
+    ring.y += ring.vy * STEP;
+    ring.phase += ring.spin * STEP;
+    ring.spin -= ring.spin * SPIN_DRAG * STEP;
+
+    const wall = RING_R;
+    if (ring.x < wall) { ring.x = wall; ring.vx = Math.abs(ring.vx) * 0.4; }
+    if (ring.x > 1 - wall) { ring.x = 1 - wall; ring.vx = -Math.abs(ring.vx) * 0.4; }
+    if (ring.y > FLOOR - RING_LINE) {
+      ring.y = FLOOR - RING_LINE;
+      ring.vy = 0;
+      /* На дне кольцо укладывается плашмя — доводим фазу до ближайшего π/2. */
+      const flat = Math.round((ring.phase - Math.PI / 2) / Math.PI) * Math.PI + Math.PI / 2;
+      ring.phase += (flat - ring.phase) * 0.12;
+      ring.spin *= 0.8;
+    }
+    if (ring.y < RING_R) { ring.y = RING_R; ring.vy = Math.abs(ring.vy) * 0.3; }
+  }
 
   function resize() {
     const rect = canvas.getBoundingClientRect();
@@ -56,8 +153,51 @@ export function mountSh(workspace) {
     pointer.y = (event.clientY - rect.top - oy) / S;
   }
 
+  function puff() {
+    for (const jet of jets) {
+      if (!jet.on) continue;
+      for (let i = 0; i < BUBBLE_RATE * STEP; i++) {
+        bubbles.push({
+          x: jet.x + rand(-JET_CONE, JET_CONE),
+          y: FLOOR - 0.005,
+          vx: rand(-0.05, 0.05),
+          vy: rand(-0.7, -0.45),
+          r: rand(0.003, 0.009),
+          life: 1,
+        });
+      }
+    }
+    for (const b of bubbles) {
+      b.x += (b.vx + Math.sin(b.y * 40) * 0.04) * STEP;
+      b.y += b.vy * STEP;
+      b.life -= STEP * 1.1;
+    }
+    bubbles = bubbles.filter(b => b.life > 0 && b.y > 0);
+  }
+
   function step() {
     rig.x += (rig.target - rig.x) * 0.2;
+    puff();
+    for (const ring of rings) swim(ring);
+  }
+
+  /* Кольцо — эллипс, а не сплюснутый круг: масштабировать канву значило бы
+     заодно исказить толщину линии. Тёмный подбой кладётся первым и шире —
+     он и есть та обводка, которой кольцо читается поверх белого зубца. */
+  function ringPath(ring) {
+    ctx.beginPath();
+    ctx.ellipse(ring.x * S, ring.y * S, RING_R * S, RING_R * flatness(ring) * S, ring.tilt, 0, Math.PI * 2);
+  }
+
+  function drawRing(ring) {
+    ringPath(ring);
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = (RING_LINE + 0.008) * S;
+    ctx.stroke();
+    ringPath(ring);
+    ctx.strokeStyle = ring.prize ? RED : PAPER;
+    ctx.lineWidth = RING_LINE * S;
+    ctx.stroke();
   }
 
   /* Буква собрана штрихами со скруглёнными торцами: круглые концы зубцов и
@@ -76,12 +216,26 @@ export function mountSh(workspace) {
     ctx.stroke();
   }
 
+  function drawBubbles() {
+    ctx.strokeStyle = PAPER;
+    ctx.lineWidth = 0.0025 * S;
+    for (const b of bubbles) {
+      ctx.globalAlpha = Math.min(1, b.life) * 0.5;
+      ctx.beginPath();
+      ctx.arc(b.x * S, b.y * S, b.r * S, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function draw() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = INK;
     ctx.fillRect(0, 0, W, H);
     ctx.translate(ox, oy);
+    drawBubbles();
     drawRig();
+    for (const ring of rings) drawRing(ring);
   }
 
   function frame(now) {
@@ -95,6 +249,19 @@ export function mountSh(workspace) {
     frameId = requestAnimationFrame(frame);
   }
 
+  function keyDown(event) {
+    const index = JET_KEYS.indexOf(event.code);
+    if (index < 0) return;
+    event.preventDefault();
+    jets[index].on = true;
+  }
+
+  function keyUp(event) {
+    const index = JET_KEYS.indexOf(event.code);
+    if (index < 0) return;
+    jets[index].on = false;
+  }
+
   function move(event) {
     track(event);
     rig.target = clamp(pointer.x, HALF, 1 - HALF);
@@ -103,14 +270,19 @@ export function mountSh(workspace) {
   const observer = new ResizeObserver(resize);
   observer.observe(workspace);
   resize();
+  seed();
 
   canvas.addEventListener('pointermove', move);
+  document.addEventListener('keydown', keyDown);
+  document.addEventListener('keyup', keyUp);
   frameId = requestAnimationFrame(frame);
 
   return () => {
     cancelAnimationFrame(frameId);
     observer.disconnect();
     canvas.removeEventListener('pointermove', move);
+    document.removeEventListener('keydown', keyDown);
+    document.removeEventListener('keyup', keyUp);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
