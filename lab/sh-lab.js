@@ -118,14 +118,14 @@ function shHitTooth(ring) {
       return true;
     }
 
-    /* Удар о кончик отбрасывает кольцо вверх, а не гасит на месте: иначе оно
-       зависает над зубцом, каждый кадр теряя остаток хода. Ниже кончика этой
-       ветки быть не должно — там соосное кольцо просто вытесняется наружу,
-       иначе оно подпрыгивает на месте до конца раунда. */
+    /* Косое кольцо с кончика соскальзывает вбок, а не подпрыгивает на месте:
+       отскок вверх возвращал его на ту же точку, и оно дребезжало над зубцом
+       до конца раунда, выглядя лежащим. Сторону задаёт то, куда оно уже шло. */
     if (axial && ring.vy > 0 && atTip) {
-      ring.vy = -Math.abs(ring.vy) * 0.45;
-      ring.vx += (Math.random() - 0.5) * 0.5;
-      ring.spin += (Math.random() - 0.5) * 5;
+      const away = Math.sign(ring.vx || dx || (Math.random() - 0.5));
+      ring.vx = away * (Math.abs(ring.vx) + 0.3);
+      ring.vy = -Math.abs(ring.vy) * 0.2;
+      ring.spin += away * 3;
       return false;
     }
 
@@ -229,8 +229,11 @@ function shSwim(ring) {
      там нечего, и повод залипания неважен. */
   const nearTip = Math.abs(ring.y - SH_TOP) < SH_RING_R * 1.6
     && shTeeth().some((t) => Math.abs(ring.x - t) < SH_RING_R);
-  ring.stall = nearTip && Math.hypot(ring.vx, ring.vy) < 0.07 ? ring.stall + STEP : 0;
-  if (ring.stall > 0.6) {
+  /* Считаем само пребывание у кончика, а не покой: дребезжащее кольцо по
+     мгновенной скорости живое, а на глаз лежит там же. За секунду с лишним
+     оно либо наделось, либо ему там нечего делать. */
+  ring.stall = nearTip ? ring.stall + STEP : 0;
+  if (ring.stall > 1.2) {
     ring.vx += (ring.x < 0.5 ? -1 : 1) * 0.35;
     ring.vy = 0.15;
     ring.spin += 2;
