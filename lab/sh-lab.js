@@ -64,6 +64,7 @@ function shSeed() {
       tilt: shRand(-0.4, 0.4),
       prize: i === prize,
       pinned: null,
+      stall: 0,
     });
   }
 }
@@ -108,7 +109,7 @@ function shHitTooth(ring) {
     /* Надеться можно только через кончик: кольцо должно накрыть его сверху,
        идя вниз и почти плашмя. На середине зубца надеваться неоткуда —
        там кольцо либо уже надето, либо бьётся о стержень. */
-    const atTip = Math.abs(ring.y - SH_TOP) < SH_RING_R;
+    const atTip = Math.abs(ring.y - SH_TOP) < SH_RING_R * 1.6;
     if (axial && flat && ring.vy > 0 && atTip) {
       ring.pinned = { tooth: i };
       ring.vx = 0;
@@ -218,8 +219,22 @@ function shPile() {
 
 function shSwim(ring) {
   if (ring.pinned) {
+    ring.stall = 0;
     shStack(ring);
     return;
+  }
+
+  /* Страховка от шляпы: кольцо, которое зависло у кончика и почти не движется,
+     сваливается с него само. Надеться оно уже не пытается — значит лежать ему
+     там нечего, и повод залипания неважен. */
+  const nearTip = Math.abs(ring.y - SH_TOP) < SH_RING_R * 1.6
+    && shTeeth().some((t) => Math.abs(ring.x - t) < SH_RING_R);
+  ring.stall = nearTip && Math.hypot(ring.vx, ring.vy) < 0.07 ? ring.stall + STEP : 0;
+  if (ring.stall > 0.6) {
+    ring.vx += (ring.x < 0.5 ? -1 : 1) * 0.35;
+    ring.vy = 0.15;
+    ring.spin += 2;
+    ring.stall = 0;
   }
   if (shHitTooth(ring)) return;
   shPlough(ring);
@@ -347,7 +362,7 @@ const MODES = {
       { type: 'range', key: 'swirl', label: 'завихрение', min: 0, max: 2, step: 0.05, value: 0.7 },
       { type: 'range', key: 'cone', label: 'конус', min: 0.05, max: 0.6, step: 0.01, value: 0.22 },
       { type: 'range', key: 'catch', label: 'захват', min: 0.01, max: 0.12, step: 0.005, value: 0.045 },
-      { type: 'range', key: 'phase', label: 'допуск фазы', min: 0.1, max: 1, step: 0.05, value: 0.5 },
+      { type: 'range', key: 'phase', label: 'допуск фазы', min: 0.1, max: 1, step: 0.05, value: 0.7 },
       { type: 'range', key: 'fall', label: 'оседание', min: 0.05, max: 0.6, step: 0.01, value: 0.26 },
       { type: 'range', key: 'suck', label: 'приток', min: 0, max: 3, step: 0.1, value: 1.2 },
       { type: 'range', key: 'speed', label: 'ход Ш', min: 0.5, max: 6, step: 0.1, value: 2.6 },
