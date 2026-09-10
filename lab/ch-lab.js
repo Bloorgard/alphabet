@@ -404,15 +404,15 @@ function chHit(includeBody = false) {
 
 /* ---------- заготовка ---------- */
 
-/* Ч из трёх канатов. Перекладина — единственная горизонталь буквы, и она же
-   единственное, чего верёвка держать не умеет: провисает всегда. */
+/* Ч рукописная, нарисованная руками в самой букве: короткий штрих, чаша и
+   длинный хвост, слабина которого свернулась в крюк. Слабина задана в клетках
+   сверх пролёта, поэтому заготовка переживает смену частоты сетки. */
 function chLetter() {
   modeState.wires = [];
   modeState.seq = 0;
   modeState.drag = null;
   modeState.paint = null;
-  const n = Math.ceil(num('grid'));
-  const unit = n / 20;
+  const unit = Math.ceil(num('grid')) / 20;
   const at = (v) => Math.round(v * unit);
   const put = (x, y, endX, endY, slack) => {
     modeState.seq += 1;
@@ -427,9 +427,9 @@ function chLetter() {
     modeState.wires.push(w);
     chSeed(w);
   };
-  put(6, 3, 6, 9, 0.4);
-  put(6, 9, 13, 9, 1.6);
-  put(13, 3, 13, 16, 0.4);
+  put(6, 4, 6, 8, 0.4);
+  put(6, 4, 12, 4, 6.4);
+  put(12, 4, 15, 14, 2.76);
   chSelect(null);
 }
 
