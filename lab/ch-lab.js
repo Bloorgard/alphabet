@@ -10,6 +10,7 @@ const CH_MAX_LENGTH = 48;
 const CH_CELL_REF = 44;      /* клетка исходника: к ней привязаны тяжесть и шаг */
 const CH_GRAVITY = 0.22;
 const CH_PASSES = 10;
+const CH_SUBSTEPS = 8;
 const CH_RELEASE = 90;       /* кадры мягкой гравитации после отпускания */
 
 const chCell = () => S / num('grid');
@@ -98,180 +99,137 @@ function chFit(factor) {
 }
 
 function chSlack(w) {
-  if (!chPinned(w)) return Infinity;
+  if (w.freeStart || !chPinned(w)) return Infinity;
   const span = Math.hypot(chWorld(w.endX) - chWorld(w.x), chWorld(w.endY) - chWorld(w.y));
   return w.length * chCell() - span;
 }
 
 /* ---------- гвоздики ---------- */
 
-/* Гвоздик за кадр проходит несколько клеток, поэтому в индекс он ложится не
-   точкой, а всем своим путём от прошлого кадра: иначе быстрый пронос ни разу
-   не попадает под проверку и канат остаётся стоять на месте. */
 function chPinIndex() {
   const cell = chCell();
   const index = new Map();
-  const memory = modeState.pinPrev || new Map();
-  const next = new Map();
-
-  const put = (x, y, pin) => {
-    const key = `${Math.floor(x / cell)},${Math.floor(y / cell)}`;
+  const add = (point, id) => {
+    const key = `${Math.floor(point.x / cell)},${Math.floor(point.y / cell)}`;
     if (!index.has(key)) index.set(key, []);
-    const bucket = index.get(key);
-    if (!bucket.includes(pin)) bucket.push(pin);
+    index.get(key).push({ x: point.x, y: point.y, id });
   };
-
-  const add = (key, x, y, id) => {
-    const was = memory.get(key) || { x, y };
-    const pin = { x, y, px: was.x, py: was.y, id };
-    next.set(key, { x, y });
-    const steps = Math.ceil(Math.hypot(x - was.x, y - was.y) / cell);
-    for (let i = 0; i <= steps; i += 1) {
-      const t = steps === 0 ? 0 : i / steps;
-      put(lerp(was.x, x, t), lerp(was.y, y, t), pin);
-    }
-  };
-
   for (const w of modeState.wires) {
-    add(`${w.id}:start`, w.rt.ax, w.rt.ay, w.id);
-    /* Конец в руке ещё не приколот, но толкать чужие канаты должен: иначе
-       единственное движение, которое видно на экране, коллизий не замечает. */
-    if (w.rt.dragEnd) add(`${w.id}:tail`, w.rt.dragEnd.x, w.rt.dragEnd.y, w.id);
-    else if (chPinned(w)) add(`${w.id}:tail`, chWorld(w.endX), chWorld(w.endY), w.id);
+    const p = w.rt.points;
+    if (!w.freeStart || w.rt.dragging) add(p[0], w.id);
+    if (chPinned(w) || w.rt.dragEnd) add(p[p.length - 1], w.id);
   }
-  modeState.pinPrev = next;
   return index;
 }
 
-/* Расстояние до пути гвоздика, а не до его нынешнего места. */
-function chNearOnPath(point, pin) {
-  const dx = pin.x - pin.px;
-  const dy = pin.y - pin.py;
-  const span = dx * dx + dy * dy;
-  const t = span === 0 ? 0 : clamp(((point.x - pin.px) * dx + (point.y - pin.py) * dy) / span, 0, 1);
-  return Math.hypot(point.x - (pin.px + dx * t), point.y - (pin.py + dy * t));
+function chFixed(w, i) {
+  return (i === 0 && (!w.freeStart || w.rt.dragging))
+    || (i === w.rt.points.length - 1 && (chPinned(w) || Boolean(w.rt.dragEnd)));
 }
 
-function chResolvePins(w, index, clearance, correction, maxPush) {
+/* Проверяем весь отрезок. Поправку делим по весам его концов, не сдвигая крепления. */
+function chResolvePins(w, index, clearance) {
   const cell = chCell();
-  const slop = cell * 0.04;
   const p = w.rt.points;
-  for (let i = 1; i < p.length - 1; i += 1) {
-    const point = p[i];
-    const cx = Math.floor(point.x / cell);
-    const cy = Math.floor(point.y / cell);
-    for (let gx = cx - 1; gx <= cx + 1; gx += 1) {
-      for (let gy = cy - 1; gy <= cy + 1; gy += 1) {
-        const bucket = index.get(`${gx},${gy}`);
-        if (!bucket) continue;
-        for (const pin of bucket) {
-          if (pin.id === w.id) continue;
-          if (chNearOnPath(point, pin) >= clearance - slop) continue;
-
-          /* Нормаль берётся от прошлого места гвоздика: у перпендикуляра к пути
-             произвольный знак, и пролетевший насквозь гвоздик толкал бы канат
-             назад, вместо того чтобы нести его перед собой. */
-          let nx = point.x - pin.px;
-          let ny = point.y - pin.py;
-          let length = Math.hypot(nx, ny);
-          if (length < 1e-6) {
-            nx = point.x - pin.x;
-            ny = point.y - pin.y;
-            length = Math.hypot(nx, ny);
-          }
-          if (length < 1e-6) continue;
-          nx /= length;
-          ny /= length;
-
-          const gap = (point.x - pin.x) * nx + (point.y - pin.y) * ny;
-          const overlap = clearance - gap;
-          if (overlap <= slop) continue;
-          const push = Math.min(overlap * correction, maxPush);
-          point.x += nx * push;
-          point.y += ny * push;
-        }
+  for (let i = 0; i < p.length - 1; i += 1) {
+    const a = p[i];
+    const b = p[i + 1];
+    const pins = new Set();
+    const x0 = Math.floor((Math.min(a.x, b.x) - clearance) / cell);
+    const x1 = Math.floor((Math.max(a.x, b.x) + clearance) / cell);
+    const y0 = Math.floor((Math.min(a.y, b.y) - clearance) / cell);
+    const y1 = Math.floor((Math.max(a.y, b.y) + clearance) / cell);
+    for (let x = x0; x <= x1; x += 1) {
+      for (let y = y0; y <= y1; y += 1) {
+        for (const pin of index.get(`${x},${y}`) || []) pins.add(pin);
       }
+    }
+    for (const pin of pins) {
+      if (pin.id === w.id) continue;
+      // Совпадающие крепления — общий узел, а не препятствие для своей ветви.
+      if ([0, p.length - 1].some(j => chFixed(w, j)
+        && Math.hypot(p[j].x - pin.x, p[j].y - pin.y) < cell * 0.05)) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const span = dx * dx + dy * dy;
+      const t = span ? clamp(((pin.x - a.x) * dx + (pin.y - a.y) * dy) / span, 0, 1) : 0;
+      let nx = lerp(a.x, b.x, t) - pin.x;
+      let ny = lerp(a.y, b.y, t) - pin.y;
+      let distance = Math.hypot(nx, ny);
+      if (distance >= clearance) continue;
+      if (distance < 1e-6) {
+        nx = -dy; ny = dx;
+        distance = Math.hypot(nx, ny) || 1;
+      }
+      nx /= distance; ny /= distance;
+      const wa = chFixed(w, i) ? 0 : 1;
+      const wb = chFixed(w, i + 1) ? 0 : 1;
+      const weight = wa * (1 - t) ** 2 + wb * t ** 2;
+      if (weight < 1e-6) continue;
+      const overlap = clearance - Math.hypot(lerp(a.x, b.x, t) - pin.x, lerp(a.y, b.y, t) - pin.y);
+      const push = Math.min(overlap / weight, cell * 0.4);
+      a.x += nx * push * wa * (1 - t);
+      a.y += ny * push * wa * (1 - t);
+      b.x += nx * push * wb * t;
+      b.y += ny * push * wb * t;
     }
   }
 }
 
 /* ---------- шаг ---------- */
 
-function chSimulate(w, index) {
-  const cell = chCell();
+function chAdvance(w) {
   const r = w.rt;
   const p = r.points;
-  const last = p.length - 1;
-  const collide = on('collide');
-
-  const follow = r.dragging ? 0.72 : 0.18;
-  r.ax += (r.tx - r.ax) * follow;
-  r.ay += (r.ty - r.ay) * follow;
-  if (!r.dragging && Math.hypot(r.tx - r.ax, r.ty - r.ay) < 0.1) {
-    r.ax = r.tx;
-    r.ay = r.ty;
-  }
-
+  const cell = chCell();
+  const move = (q, x, y) => {
+    const distance = Math.hypot(x - q.x, y - q.y);
+    const t = distance ? Math.min(1, cell * 0.2 / distance) : 1;
+    q.x = q.ox = lerp(q.x, x, t);
+    q.y = q.oy = lerp(q.y, y, t);
+  };
+  if (!w.freeStart || r.dragging) move(p[0], r.tx, r.ty);
   const end = r.dragEnd || (chPinned(w) ? { x: chWorld(w.endX), y: chWorld(w.endY) } : null);
-  p[0].x = p[0].ox = r.ax;
-  p[0].y = p[0].oy = r.ay;
-  if (end && last > 0) {
-    p[last].x = p[last].ox = end.x;
-    p[last].y = p[last].oy = end.y;
-  }
+  if (end) move(p[p.length - 1], end.x, end.y);
+  r.ax = p[0].x; r.ay = p[0].y;
 
-  /* Отпущенный конец иначе хлещет: гравитация возвращается не сразу. */
   const progress = r.release > 0 ? 1 - r.release / CH_RELEASE : 1;
-  const damping = r.release > 0 ? 0.88 + 0.05 * progress : (collide ? 0.78 : 0.94);
+  const damping = Math.pow(r.release > 0 ? 0.88 + 0.05 * progress : 0.94, 1 / CH_SUBSTEPS);
   const gravity = CH_GRAVITY * (cell / CH_CELL_REF) * num('weight')
-    * (r.release > 0 ? 0.68 + 0.32 * progress : 1);
-
-  for (let i = 1; i < p.length; i += 1) {
-    if (end && i === last) continue;
+    * (r.release > 0 ? 0.68 + 0.32 * progress : 1) / CH_SUBSTEPS ** 2;
+  for (let i = 0; i < p.length; i += 1) {
+    if (chFixed(w, i)) continue;
     const q = p[i];
     const vx = (q.x - q.ox) * damping;
-    const vy = (q.y - q.oy) * damping;
-    q.ox = q.x;
-    q.oy = q.y;
-    q.x += vx;
-    q.y += vy + gravity;
+    const vy = (q.y - q.oy) * damping + gravity;
+    const speed = Math.hypot(vx, vy);
+    const scale = speed ? Math.min(1, cell * 0.2 / speed) : 1;
+    q.ox = q.x; q.oy = q.y;
+    q.x += vx * scale; q.y += vy * scale;
   }
+}
 
-  const clearance = cell * 1.06;
+function chSimulate(w, index) {
+  const r = w.rt;
+  const p = r.points;
   for (let pass = 0; pass < CH_PASSES; pass += 1) {
-    p[0].x = r.ax;
-    p[0].y = r.ay;
-    if (end && last > 0) {
-      p[last].x = end.x;
-      p[last].y = end.y;
-    }
-    for (let i = 0; i < last; i += 1) {
+    for (let j = 0; j < p.length - 1; j += 1) {
+      const i = pass % 2 ? p.length - 2 - j : j;
       const a = p[i];
       const b = p[i + 1];
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const distance = Math.hypot(dx, dy) || 1;
-      const diff = (distance - r.step) / distance;
-      const fixedA = i === 0;
-      const fixedB = Boolean(end) && i + 1 === last;
-      if (fixedA && fixedB) continue;
-      if (fixedA) {
-        b.x -= dx * diff;
-        b.y -= dy * diff;
-      } else if (fixedB) {
-        a.x += dx * diff;
-        a.y += dy * diff;
-      } else {
-        a.x += dx * diff * 0.5;
-        a.y += dy * diff * 0.5;
-        b.x -= dx * diff * 0.5;
-        b.y -= dy * diff * 0.5;
-      }
+      const wa = chFixed(w, i) ? 0 : 1;
+      const wb = chFixed(w, i + 1) ? 0 : 1;
+      if (!wa && !wb) continue;
+      const diff = (distance - r.step) / distance / (wa + wb);
+      a.x += dx * diff * wa; a.y += dy * diff * wa;
+      b.x -= dx * diff * wb; b.y -= dy * diff * wb;
     }
-    if (collide) chResolvePins(w, index, clearance, 0.35, cell * 0.5);
+    if (index) chResolvePins(w, index, chCell() * 1.06);
   }
-  if (collide) chResolvePins(w, index, clearance, 0.65, cell * 0.35);
-  if (r.release > 0) r.release -= 1;
+  r.ax = p[0].x; r.ay = p[0].y;
 }
 
 /* ---------- рисование ---------- */
@@ -325,7 +283,7 @@ function chDrawWire(w) {
   const tip = p[p.length - 1];
   ctx.fillStyle = PAPER;
   ctx.beginPath();
-  ctx.arc(w.rt.ax, w.rt.ay, cell * 0.17, 0, Math.PI * 2);
+  ctx.arc(w.rt.ax, w.rt.ay, cell * (w.freeStart ? 0.1 : 0.17), 0, Math.PI * 2);
   ctx.fill();
   if (p.length > 1) {
     ctx.beginPath();
@@ -345,7 +303,7 @@ function chPointerCell() {
 }
 
 function chOccupied(x, y, exclude = null) {
-  return modeState.wires.some((w) => (w !== exclude && ((w.x === x && w.y === y)
+  return modeState.wires.some((w) => (w !== exclude && ((!w.freeStart && w.x === x && w.y === y)
     || (chPinned(w) && w.endX === x && w.endY === y))));
 }
 
@@ -412,6 +370,8 @@ function chHit() {
 function chLetter() {
   modeState.wires = [];
   modeState.seq = 0;
+  modeState.drag = null;
+  modeState.paint = null;
   const n = Math.ceil(num('grid'));
   const unit = n / 20;
   const at = (v) => Math.round(v * unit);
@@ -438,15 +398,15 @@ function chLetter() {
 const MODES = {
   wires: {
     label: 'канаты',
-    note: 'Кисть кладёт жгуты по клеткам: проведите по полю. Жгут висит на гвоздике '
-      + 'и провисает по своей длине. Курсором тяните гвоздик или конец жгута: конец, '
-      + 'отпущенный в свободной клетке, прикалывается и держит провис между двумя '
-      + 'точками. Красный — жгут, вытянутый в струну: слабины не осталось. '
-      + '«Коллизии» заставляют тела огибать чужие гвоздики. Заготовка «Ч» — три '
-      + 'каната: перекладина провисает, потому что горизонталь верёвке не даётся.',
-    cursor: 'crosshair',
+    note: 'Двойной клик по пустой клетке добавляет канат. Перетащите свободный конец, '
+      + 'чтобы закрепить его; простой клик крепления не создаёт. Двойной клик по '
+      + 'креплению снимает его, канат остаётся. На сенсорном экране — двойное касание. '
+      + 'Кисть добавляет канаты непрерывно. Красный — канат без слабины. '
+      + 'Коллизии огибают чужие крепления; пересечения самих канатов допускаются. '
+      + 'Тяжесть меняет ускорение падения, а установившийся провис задают длина и крепления.',
+    get cursor() { return num('tool') === 1 ? 'default' : 'crosshair'; },
     tools: [
-      { type: 'pick', key: 'tool', label: 'инструмент', options: ['кисть', 'курсор', 'ластик'], value: 0 },
+      { type: 'pick', key: 'tool', label: 'инструмент', options: ['кисть', 'курсор', 'ластик'], value: 1 },
       { type: 'range', key: 'len', label: 'длина', min: 1, max: 24, step: 0.5, value: 7 },
       { type: 'range', key: 'grid', label: 'сетка', min: 10, max: 40, step: 1, value: 20 },
       { type: 'range', key: 'weight', label: 'тяжесть', min: 0.2, max: 2, step: 0.1, value: 1 },
@@ -462,52 +422,35 @@ const MODES = {
       modeState.drag = null;
       modeState.paint = null;
       modeState.size = S;
-      modeState.pinPrev = new Map();
+      modeState.tap = null;
       chLetter();
     },
 
     onTool(key) {
       if (key === 'grid') chRescale();
-      if (key === 'collide') modeState.pinPrev = new Map();
       if (key === 'tool') canvas.style.cursor = num('tool') === 1 ? 'default' : 'crosshair';
     },
 
-    onDown() {
+    onDown(event) {
       const tool = num('tool');
       const cell = chPointerCell();
-
-      if (tool === 0) {
-        modeState.paint = { last: cell, mode: 'brush' };
-        chAdd(cell.x, cell.y, num('len'));
+      modeState.press = { x: pointer.x * S, y: pointer.y * S,
+        touch: event.pointerType === 'touch', moved: false, time: performance.now() };
+      if (tool === 0 || tool === 2) {
+        modeState.paint = { last: cell, mode: tool === 0 ? 'brush' : 'erase' };
+        if (tool === 0) chAdd(cell.x, cell.y, num('len'));
+        else chErase(cell.x, cell.y);
         return;
       }
-      if (tool === 2) {
-        modeState.paint = { last: cell, mode: 'erase' };
-        chErase(cell.x, cell.y);
-        return;
-      }
-
       const hit = chHit();
-      if (!hit) return;
-      const { wire, part } = hit;
-      wire.rt.release = 0;
-      if (part === 'start') {
-        wire.rt.dragging = true;
-        modeState.drag = { wire, part };
-      } else {
-        const tip = wire.rt.points[wire.rt.points.length - 1];
-        wire.rt.dragEnd = { x: tip.x, y: tip.y };
-        /* Прошлое положение конца нужно индексу с первого же кадра: рывок
-           бывает быстрее, чем шаг физики, и без памяти путь выйдет нулевым. */
-        modeState.pinPrev.set(`${wire.id}:tail`, { x: tip.x, y: tip.y });
-        modeState.drag = { wire, part };
-      }
+      if (hit) modeState.drag = { ...hit, moved: false };
     },
 
     onMove() {
       const px = pointer.x * S;
       const py = pointer.y * S;
-
+      const press = modeState.press;
+      if (press && Math.hypot(px - press.x, py - press.y) > 6) press.moved = true;
       if (modeState.paint) {
         const cell = chPointerCell();
         for (const c of chCellsBetween(modeState.paint.last, cell)) {
@@ -517,20 +460,23 @@ const MODES = {
         modeState.paint.last = cell;
         return;
       }
-
       const drag = modeState.drag;
-      if (!drag) return;
-      if (drag.part === 'start') {
-        drag.wire.rt.tx = px;
-        drag.wire.rt.ty = py;
+      if (!drag || !press?.moved) return;
+      const { wire, part } = drag;
+      drag.moved = true;
+      wire.rt.release = 0;
+      if (part === 'start') {
+        wire.rt.dragging = true;
+        wire.rt.tx = px; wire.rt.ty = py;
       } else {
-        drag.wire.rt.dragEnd = { x: px, y: py };
-        /* Длина дотягивается до разведённых концов, а не рвётся. */
-        const cell = chCell();
-        const need = Math.hypot(px - drag.wire.rt.ax, py - drag.wire.rt.ay) / cell;
-        if (need > drag.wire.length) {
-          drag.wire.length = Math.min(CH_MAX_LENGTH, need);
-          chResample(drag.wire);
+        wire.rt.dragEnd = { x: px, y: py };
+      }
+      const other = part === 'start' ? wire.rt.points[wire.rt.points.length - 1] : wire.rt.points[0];
+      if (part === 'tail' || chPinned(wire)) {
+        const need = Math.hypot(px - other.x, py - other.y) / chCell();
+        if (need > wire.length) {
+          wire.length = Math.min(CH_MAX_LENGTH, need);
+          chResample(wire);
         }
       }
     },
@@ -538,37 +484,55 @@ const MODES = {
     onUp() {
       modeState.paint = null;
       const drag = modeState.drag;
-      if (!drag) return;
+      const press = modeState.press;
       modeState.drag = null;
-
-      const { wire, part } = drag;
-      const limit = Math.ceil(num('grid'));
-      const cell = chPointerCell();
-      const inside = cell.x >= 0 && cell.y >= 0 && cell.x < limit && cell.y < limit;
-
-      if (part === 'start') {
-        wire.rt.dragging = false;
-        if (inside && !chOccupied(cell.x, cell.y, wire)) {
-          wire.x = cell.x;
-          wire.y = cell.y;
+      modeState.press = null;
+      if (drag?.moved) {
+        const { wire, part } = drag;
+        const limit = Math.ceil(num('grid'));
+        const cell = chPointerCell();
+        const inside = cell.x >= 0 && cell.y >= 0 && cell.x < limit && cell.y < limit;
+        const otherPinned = part === 'start' ? chPinned(wire) : !wire.freeStart;
+        const otherX = part === 'start' ? wire.endX : wire.x;
+        const otherY = part === 'start' ? wire.endY : wire.y;
+        const valid = inside && !chOccupied(cell.x, cell.y, wire)
+          && !(otherPinned && cell.x === otherX && cell.y === otherY);
+        if (part === 'start') {
+          wire.rt.dragging = false;
+          if (valid) { wire.x = cell.x; wire.y = cell.y; wire.freeStart = false; }
+          wire.rt.tx = chWorld(wire.x); wire.rt.ty = chWorld(wire.y);
+        } else {
+          wire.rt.dragEnd = null;
+          if (valid) { wire.endX = cell.x; wire.endY = cell.y; }
         }
-        wire.rt.tx = chWorld(wire.x);
-        wire.rt.ty = chWorld(wire.y);
-        if (chPinned(wire)) wire.length = Math.max(wire.length, chTailMinimum(wire, wire.endX, wire.endY));
-      } else {
-        wire.rt.dragEnd = null;
-        if (inside && !chOccupied(cell.x, cell.y, wire) && !(cell.x === wire.x && cell.y === wire.y)) {
-          wire.endX = cell.x;
-          wire.endY = cell.y;
-          wire.length = Math.max(wire.length, chTailMinimum(wire, cell.x, cell.y));
+        if (!wire.freeStart && chPinned(wire)) {
+          wire.length = Math.max(wire.length, chTailMinimum(wire, wire.endX, wire.endY));
         }
+        chResample(wire);
+        wire.rt.release = CH_RELEASE;
       }
-      chResample(wire);
-      wire.rt.release = CH_RELEASE;
+      if (press?.touch && !press.moved && performance.now() - press.time < 350) {
+        const tap = modeState.tap;
+        const now = performance.now();
+        if (tap && now - tap.time < 350 && Math.hypot(press.x - tap.x, press.y - tap.y) < 18) {
+          MODES.wires.onDouble();
+          modeState.touchDouble = now;
+          modeState.tap = null;
+        } else modeState.tap = { x: press.x, y: press.y, time: now };
+      } else modeState.tap = null;
     },
 
-    onDouble() {
+    onDouble(event) {
       if (num('tool') !== 1) return;
+      if (event && performance.now() - (modeState.touchDouble || -Infinity) < 500) return;
+      const hit = chHit();
+      if (hit) {
+        const { wire, part } = hit;
+        if (part === 'start') wire.freeStart = true;
+        else { delete wire.endX; delete wire.endY; }
+        wire.rt.release = CH_RELEASE;
+        return;
+      }
       const cell = chPointerCell();
       chAdd(cell.x, cell.y, num('len'));
     },
@@ -578,8 +542,12 @@ const MODES = {
         chFit(S / (modeState.size || S));
         modeState.size = S;
       }
-      const index = on('collide') ? chPinIndex() : null;
-      for (const w of modeState.wires) chSimulate(w, index);
+      for (let sub = 0; sub < CH_SUBSTEPS; sub += 1) {
+        for (const w of modeState.wires) chAdvance(w);
+        const index = on('collide') ? chPinIndex() : null;
+        for (const w of modeState.wires) chSimulate(w, index);
+      }
+      for (const w of modeState.wires) if (w.rt.release > 0) w.rt.release -= 1;
     },
 
     draw() {
