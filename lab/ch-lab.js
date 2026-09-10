@@ -47,32 +47,56 @@ function chSeed(w) {
 }
 
 function chResample(w) {
-  const cell = chCell();
-  const count = chCount(w.length);
   const p = w.rt.points;
-  w.rt.step = count > 1 ? (w.length * cell) / (count - 1) : 0;
-  if (p.length === count) return;
+  const count = Math.max(p.length, chCount(w.length));
+  // Добавляем узлы на самих отрезках: форма и обход креплений сохраняются.
+  while (p.length < count) {
+    let longest = 0;
+    let at = 1;
+    for (let i = 1; i < p.length; i += 1) {
+      const length = Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y);
+      if (length > longest) { longest = length; at = i; }
+    }
+    const a = p[at - 1];
+    const b = p[at];
+    p.splice(at, 0, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2,
+      ox: (a.ox + b.ox) / 2, oy: (a.oy + b.oy) / 2 });
+  }
+  w.rt.step = p.length > 1 ? (w.length * chCell()) / (p.length - 1) : 0;
+}
 
-  const lengths = [0];
-  let total = 0;
-  for (let i = 1; i < p.length; i += 1) {
-    total += Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y);
-    lengths.push(total);
-  }
-  const next = [];
-  for (let i = 0; i < count; i += 1) {
-    const target = count > 1 ? (total * i) / (count - 1) : 0;
-    let seg = 1;
-    while (seg < lengths.length - 1 && lengths[seg] < target) seg += 1;
-    const span = lengths[seg] - lengths[seg - 1] || 1;
-    const t = clamp((target - lengths[seg - 1]) / span, 0, 1);
-    const a = p[seg - 1];
-    const b = p[seg];
-    const x = lerp(a.x, b.x, t);
-    const y = lerp(a.y, b.y, t);
-    next.push({ x, y, ox: x, oy: y });
-  }
-  w.rt.points = next;
+function chMinimumLength(w) {
+  return !w.freeStart && chPinned(w) ? Math.max(1, chTailMinimum(w, w.endX, w.endY)) : 1;
+}
+
+function chSetLength(w, value) {
+  w.targetLength = Math.max(chMinimumLength(w), Math.min(CH_MAX_LENGTH, value));
+}
+
+function chAdjustLength(w) {
+  if (w.targetLength === undefined || w.rt.dragging || w.rt.dragEnd) return;
+  const target = Math.max(chMinimumLength(w), w.targetLength);
+  if (Math.abs(target - w.length) < 1e-6) return;
+  w.length += clamp(target - w.length, -0.12, 0.12);
+  chResample(w);
+}
+
+function chSyncLength() {
+  const w = modeState.selected;
+  const input = modeState.lengthInput;
+  const minimum = w ? Math.ceil(chMinimumLength(w) * 10) / 10 : 1;
+  const value = w ? Math.max(minimum, w.targetLength ?? w.length) : modeState.newLength;
+  input.min = minimum;
+  input.max = Math.max(CH_MAX_LENGTH, Math.ceil(value));
+  input.value = value.toFixed(1);
+  input.parentElement.firstChild.textContent = w ? `длина №${w.id}` : 'длина нового';
+  input.parentElement.querySelector('output').value = String(Number(input.value));
+  toolValues[slot('len')] = modeState.newLength;
+}
+
+function chSelect(w) {
+  modeState.selected = w;
+  chSyncLength();
 }
 
 /* Сетка сменила частоту — клетка стала другой, и длина в клетках значит другое:
@@ -315,12 +339,14 @@ function chAdd(x, y, length) {
   const w = { id: modeState.seq, x, y, length };
   modeState.wires.push(w);
   chSeed(w);
+  if (num('tool') === 1) chSelect(w);
   return true;
 }
 
 function chErase(x, y) {
   const before = modeState.wires.length;
   modeState.wires = modeState.wires.filter((w) => !(w.x === x && w.y === y));
+  if (!modeState.wires.includes(modeState.selected)) chSelect(null);
   return modeState.wires.length !== before;
 }
 
@@ -348,7 +374,7 @@ function chTailMinimum(w, endX, endY) {
   return Math.max(0.5, distance);
 }
 
-function chHit() {
+function chHit(includeBody = false) {
   const cell = chCell();
   const px = pointer.x * S;
   const py = pointer.y * S;
@@ -359,6 +385,19 @@ function chHit() {
     const tip = p[p.length - 1];
     if (p.length > 1 && Math.hypot(px - tip.x, py - tip.y) <= limit) return { wire: w, part: 'tail' };
     if (Math.hypot(px - w.rt.ax, py - w.rt.ay) <= limit) return { wire: w, part: 'start' };
+    if (includeBody) {
+      for (let j = 1; j < p.length; j += 1) {
+        const a = p[j - 1];
+        const b = p[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const span = dx * dx + dy * dy;
+        const t = span ? clamp(((px - a.x) * dx + (py - a.y) * dy) / span, 0, 1) : 0;
+        if (Math.hypot(px - lerp(a.x, b.x, t), py - lerp(a.y, b.y, t)) <= cell * 0.55) {
+          return { wire: w, part: 'body' };
+        }
+      }
+    }
   }
   return null;
 }
@@ -391,6 +430,7 @@ function chLetter() {
   put(6, 3, 6, 9, 0.4);
   put(6, 9, 13, 9, 1.6);
   put(13, 3, 13, 16, 0.4);
+  chSelect(null);
 }
 
 /* ---------- режим ---------- */
@@ -401,19 +441,22 @@ const MODES = {
     note: 'Двойной клик по пустой клетке добавляет канат. Перетащите свободный конец, '
       + 'чтобы закрепить его; простой клик крепления не создаёт. Двойной клик по '
       + 'креплению снимает его, канат остаётся. На сенсорном экране — двойное касание. '
-      + 'Кисть добавляет канаты непрерывно. Красный — канат без слабины. '
+      + 'Клик по канату выбирает его: ползунок длины меняет выбранный жгут на лету. '
+      + 'Клик по пустому месту снимает выбор, длина снова задаётся для новых жгутов. '
+      + 'Длина измеряется в клетках. Кисть добавляет канаты непрерывно. Красный — канат без слабины. '
       + 'Коллизии огибают чужие крепления; пересечения самих канатов допускаются. '
-      + 'Тяжесть меняет ускорение падения, а установившийся провис задают длина и крепления.',
+      + 'Тяжесть действует на все канаты на лету: меняет ускорение падения, '
+      + 'а установившийся провис задают длина и крепления.',
     get cursor() { return num('tool') === 1 ? 'default' : 'crosshair'; },
     tools: [
       { type: 'pick', key: 'tool', label: 'инструмент', options: ['кисть', 'курсор', 'ластик'], value: 1 },
-      { type: 'range', key: 'len', label: 'длина', min: 1, max: 24, step: 0.5, value: 7 },
+      { type: 'range', key: 'len', label: 'длина нового', min: 1, max: CH_MAX_LENGTH, step: 0.1, value: 7 },
       { type: 'range', key: 'grid', label: 'сетка', min: 10, max: 40, step: 1, value: 20 },
       { type: 'range', key: 'weight', label: 'тяжесть', min: 0.2, max: 2, step: 0.1, value: 1 },
       { type: 'toggle', key: 'net', label: 'сетка видна', value: true },
       { type: 'toggle', key: 'collide', label: 'коллизии', value: false },
       { type: 'button', label: 'Ч', action() { chLetter(); } },
-      { type: 'button', label: 'очистить', action() { modeState.wires = []; } },
+      { type: 'button', label: 'очистить', action() { modeState.wires = []; chSelect(null); } },
     ],
 
     setup() {
@@ -423,12 +466,22 @@ const MODES = {
       modeState.paint = null;
       modeState.size = S;
       modeState.tap = null;
+      modeState.newLength = num('len');
+      modeState.lengthInput = document.querySelector('#tools input[type=range]');
       chLetter();
     },
 
     onTool(key) {
+      if (key === 'len') {
+        if (modeState.selected) chSetLength(modeState.selected, num('len'));
+        else modeState.newLength = num('len');
+        chSyncLength();
+      }
       if (key === 'grid') chRescale();
-      if (key === 'tool') canvas.style.cursor = num('tool') === 1 ? 'default' : 'crosshair';
+      if (key === 'tool') {
+        canvas.style.cursor = num('tool') === 1 ? 'default' : 'crosshair';
+        chSelect(null);
+      }
     },
 
     onDown(event) {
@@ -438,12 +491,13 @@ const MODES = {
         touch: event.pointerType === 'touch', moved: false, time: performance.now() };
       if (tool === 0 || tool === 2) {
         modeState.paint = { last: cell, mode: tool === 0 ? 'brush' : 'erase' };
-        if (tool === 0) chAdd(cell.x, cell.y, num('len'));
+        if (tool === 0) chAdd(cell.x, cell.y, modeState.newLength);
         else chErase(cell.x, cell.y);
         return;
       }
-      const hit = chHit();
-      if (hit) modeState.drag = { ...hit, moved: false };
+      const hit = chHit(true);
+      chSelect(hit?.wire || null);
+      if (hit && hit.part !== 'body') modeState.drag = { ...hit, moved: false };
     },
 
     onMove() {
@@ -454,7 +508,7 @@ const MODES = {
       if (modeState.paint) {
         const cell = chPointerCell();
         for (const c of chCellsBetween(modeState.paint.last, cell)) {
-          if (modeState.paint.mode === 'brush') chAdd(c.x, c.y, num('len'));
+          if (modeState.paint.mode === 'brush') chAdd(c.x, c.y, modeState.newLength);
           else chErase(c.x, c.y);
         }
         modeState.paint.last = cell;
@@ -465,6 +519,7 @@ const MODES = {
       const { wire, part } = drag;
       drag.moved = true;
       wire.rt.release = 0;
+      delete wire.targetLength;
       if (part === 'start') {
         wire.rt.dragging = true;
         wire.rt.tx = px; wire.rt.ty = py;
@@ -479,6 +534,7 @@ const MODES = {
           chResample(wire);
         }
       }
+      chSyncLength();
     },
 
     onUp() {
@@ -510,6 +566,7 @@ const MODES = {
         }
         chResample(wire);
         wire.rt.release = CH_RELEASE;
+        chSyncLength();
       }
       if (press?.touch && !press.moved && performance.now() - press.time < 350) {
         const tap = modeState.tap;
@@ -525,16 +582,18 @@ const MODES = {
     onDouble(event) {
       if (num('tool') !== 1) return;
       if (event && performance.now() - (modeState.touchDouble || -Infinity) < 500) return;
-      const hit = chHit();
+      const hit = chHit(true);
       if (hit) {
         const { wire, part } = hit;
+        if (part === 'body') return;
         if (part === 'start') wire.freeStart = true;
         else { delete wire.endX; delete wire.endY; }
         wire.rt.release = CH_RELEASE;
+        chSelect(wire);
         return;
       }
       const cell = chPointerCell();
-      chAdd(cell.x, cell.y, num('len'));
+      chAdd(cell.x, cell.y, modeState.newLength);
     },
 
     step() {
@@ -542,6 +601,7 @@ const MODES = {
         chFit(S / (modeState.size || S));
         modeState.size = S;
       }
+      for (const w of modeState.wires) chAdjustLength(w);
       for (let sub = 0; sub < CH_SUBSTEPS; sub += 1) {
         for (const w of modeState.wires) chAdvance(w);
         const index = on('collide') ? chPinIndex() : null;
@@ -553,7 +613,16 @@ const MODES = {
     draw() {
       if (on('net')) chDrawGrid();
       for (const w of modeState.wires) chDrawWire(w);
-      drawStatus(`жгутов · ${modeState.wires.length}`);
+      if (modeState.selected) {
+        ctx.save();
+        chPath(modeState.selected.rt.points);
+        ctx.setLineDash([4, 5]);
+        ctx.strokeStyle = PAPER;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+      }
+      drawStatus(modeState.selected ? `выбран · ${modeState.selected.id}` : `жгутов · ${modeState.wires.length}`);
     },
   },
 };
