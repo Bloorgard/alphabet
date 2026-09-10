@@ -36,13 +36,12 @@ const SH_WOBBLE = 2.3;     /* частота рыскания струи */
 const SH_BUBBLE_RATE = 26;
 
 const SH_SLOT_H = 0.055;
-const SH_SLIDE = 1.1;      /* скорость съезда надетого кольца к стопке */
+const SH_STACK_DRAG = 3.2; /* трение кольца о зубец */
 const SH_SUCK_BAND = 0.09; /* полоса у дна, где чувствуется приток к соплу */
 const SH_SUCK_REACH = 0.45;
 
 const shRand = (min, max) => min + Math.random() * (max - min);
 const shTeeth = () => [modeState.rig - SH_SPACING, modeState.rig, modeState.rig + SH_SPACING];
-const shSlotY = (slot) => SH_BOTTOM - SH_THICK / 2 - SH_SLOT_H * (slot + 0.5);
 const shFilled = (index) => modeState.rings.filter((r) => r.pinned?.tooth === index).length;
 const shFlat = (ring) => Math.max(Math.abs(Math.cos(ring.phase + SH_CAM)), SH_FLAT);
 
@@ -66,7 +65,6 @@ function shSeed() {
       tilt: shRand(-0.4, 0.4),
       prize: i === prize,
       pinned: null,
-      slide: 0,
     });
   }
 }
@@ -114,10 +112,8 @@ function shHitTooth(ring) {
       return false;
     }
     if (Math.abs(dx) <= num('catch') && ring.vy > 0 && flat && shFilled(i) < num('slots')) {
-      ring.pinned = { tooth: i, slot: shFilled(i) };
-      ring.slide = ring.y;
+      ring.pinned = { tooth: i };
       ring.vx = 0;
-      ring.vy = 0;
       ring.spin = 0;
       ring.phase = Math.PI / 2;
       return true;
@@ -148,12 +144,35 @@ function shSuck(ring) {
   }
 }
 
+/* Надетое кольцо не приколото, а надето: оно ездит по зубцу. Струя гонит его
+   вверх, вес возвращает вниз, снизу подпирают соседи по стопке. Сорвётся
+   через кончик — снова свободное, и это цена за струю в занятый зубец. */
+function shStack(ring) {
+  const tooth = shTeeth()[ring.pinned.tooth];
+  ring.x = tooth;
+  ring.vy += num('fall') * SH_DRAG_Y * STEP;
+  shBlow(ring);
+  ring.vy -= ring.vy * SH_STACK_DRAG * STEP;
+  ring.y += ring.vy * STEP;
+
+  const below = modeState.rings.filter((r) => r !== ring && r.pinned?.tooth === ring.pinned.tooth);
+  let floor = SH_BOTTOM - SH_THICK / 2 - SH_SLOT_H / 2;
+  for (const other of below) {
+    if (other.y > ring.y) floor = Math.min(floor, other.y - SH_SLOT_H);
+  }
+  if (ring.y > floor) { ring.y = floor; ring.vy = 0; }
+
+  /* Кончик зубца — единственный выход: соскочило через него, и кольцо снова
+     в воде, со всей набранной скоростью. */
+  if (ring.y < SH_TOP - SH_RING_R * 0.4) {
+    ring.pinned = null;
+    ring.spin = (Math.random() - 0.5) * 6;
+  }
+}
+
 function shSwim(ring) {
   if (ring.pinned) {
-    ring.x = shTeeth()[ring.pinned.tooth];
-    const rest = shSlotY(ring.pinned.slot);
-    ring.slide = Math.min(rest, ring.slide + SH_SLIDE * STEP);
-    ring.y = ring.slide;
+    shStack(ring);
     return;
   }
   if (shHitTooth(ring)) return;
