@@ -38,6 +38,7 @@ const SH_BUBBLE_RATE = 26;
 const SH_SLOT_H = 0.055;
 const SH_STACK_DRAG = 3.2; /* трение кольца о зубец */
 const SH_SWIPE = 0.5;      /* с какой боковой прытью зубец уже не нанизывает */
+const SH_ALIGN_MAX = 1.2;  /* на какой скорости оседания выравнивание уже полное */
 const SH_SUCK_BAND = 0.09; /* полоса у дна, где чувствуется приток к соплу */
 const SH_SUCK_REACH = 0.45;
 
@@ -269,6 +270,17 @@ function shSwim(ring) {
   ring.vx -= ring.vx * SH_DRAG_X * STEP;
   ring.x += ring.vx * STEP;
   ring.y += ring.vy * STEP;
+  /* Оседающее кольцо разворачивается плашмя: плоскость встаёт поперёк потока,
+     как настоящая пластина в воде. Без этого фаза замирала где придётся, и
+     кольцо часто доходило до дна раскрытым к зрителю — а такое на штырь не
+     надеть, сколько ни целься. */
+  {
+    const flat = Math.round((ring.phase - Math.PI / 2) / Math.PI) * Math.PI + Math.PI / 2;
+    /* Падение доворачивает быстрее, но и висящее кольцо вода в конце концов
+       укладывает — иначе раскрытое так и зависает раскрытым. */
+    const grip = Math.min((Math.abs(ring.vy) + 0.12) / SH_ALIGN_MAX, 1);
+    ring.spin += (flat - ring.phase) * num('align') * grip * STEP * 60 * STEP;
+  }
   ring.phase += ring.spin * STEP;
   ring.spin -= ring.spin * SH_SPIN_DRAG * STEP;
 
@@ -386,6 +398,7 @@ const MODES = {
       { type: 'range', key: 'catch', label: 'захват', min: 0.01, max: 0.12, step: 0.005, value: 0.045 },
       { type: 'range', key: 'phase', label: 'допуск фазы', min: 0.1, max: 1, step: 0.05, value: 0.7 },
       { type: 'range', key: 'fall', label: 'оседание', min: 0.05, max: 0.6, step: 0.01, value: 0.26 },
+      { type: 'range', key: 'align', label: 'выравнивание', min: 0, max: 6, step: 0.2, value: 2.4 },
       { type: 'range', key: 'suck', label: 'приток', min: 0, max: 3, step: 0.1, value: 1.2 },
       { type: 'range', key: 'speed', label: 'ход Ш', min: 0.5, max: 6, step: 0.1, value: 2.6 },
       { type: 'button', label: 'заново', action() { shSeed(); } },
