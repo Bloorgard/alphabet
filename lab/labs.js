@@ -128,4 +128,8 @@ const LABS = [
     slug: 'ch', letter: 'Ч', title: 'канаты', tile: true, chosen: 'канаты',
     mechanics: ['канаты'],
   },
+  {
+    slug: 'sh', letter: 'Ш', title: 'кольца в воде', tile: true, chosen: 'кольца',
+    mechanics: ['кольца'],
+  },
 ];
