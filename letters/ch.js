@@ -5,18 +5,21 @@ import { reportEvent } from '../progress.js?v=5';
    конец можно приколоть во вторую клетку. Ч собрана из трёх канатов, и её
    перекладина — единственная горизонталь буквы, то есть ровно то, чего верёвка
    держать не умеет: она провисает всегда.
-   Физика перенесена из WIRES, авторской рисовалки жгутов. */
+   Физика перенесена из WIRES, авторской рисовалки жгутов; полигон — lab/ch.html. */
 
 const STEP = 1 / 60;
 const INK = '#161616';
 const PAPER = '#f1ede5';
 const RED = '#e0210f';
+const FAINT = 'rgba(22,22,22,.09)';
 const MAX_WIRES = 400;
 const MAX_LENGTH = 48;
 const CELL_REF = 44;      /* клетка исходника: к ней привязана тяжесть */
 const GRAVITY = 0.22;
 const PASSES = 10;
+const SUBSTEPS = 8;
 const RELEASE = 90;       /* кадры мягкой гравитации после отпускания */
+const TAP = 350;          /* окно двойного касания, мс */
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -35,7 +38,11 @@ export function mountCh(workspace) {
   let seq = 0;
   let drag = null;
   let paint = null;
-  let pinPrev = new Map();
+  let press = null;
+  let tap = null;
+  let touchDouble = -Infinity;
+  let selected = null;
+  let newLength = 7;
 
   const cellSize = () => S / num('grid');
   const world = value => (value + 0.5) * cellSize();
@@ -70,33 +77,186 @@ export function mountCh(workspace) {
     w.rt = { points, step, ax: x, ay: y, tx: x, ty: y, dragging: false, dragEnd: null, release: 0 };
   }
 
+  /* Узлы добавляются на самих отрезках: форма и обход креплений сохраняются. */
   function resample(w) {
-    const cell = cellSize();
-    const count = countOf(w.length);
     const p = w.rt.points;
-    w.rt.step = count > 1 ? (w.length * cell) / (count - 1) : 0;
-    if (p.length === count) return;
+    const count = Math.max(p.length, countOf(w.length));
+    while (p.length < count) {
+      let longest = 0;
+      let at = 1;
+      for (let i = 1; i < p.length; i += 1) {
+        const length = Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y);
+        if (length > longest) { longest = length; at = i; }
+      }
+      const a = p[at - 1];
+      const b = p[at];
+      p.splice(at, 0, {
+        x: (a.x + b.x) / 2, y: (a.y + b.y) / 2,
+        ox: (a.ox + b.ox) / 2, oy: (a.oy + b.oy) / 2,
+      });
+    }
+    w.rt.step = p.length > 1 ? (w.length * cellSize()) / (p.length - 1) : 0;
+  }
 
-    const lengths = [0];
-    let total = 0;
-    for (let i = 1; i < p.length; i += 1) {
-      total += Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y);
-      lengths.push(total);
+  /* ---------- длина ---------- */
+
+  /* Хвост нельзя приколоть дальше, чем позволяет длина: жгут дотягивается. */
+  function tailMinimum(w, endX, endY) {
+    return Math.max(0.5, Math.hypot(endX - w.x, endY - w.y));
+  }
+
+  function minimumLength(w) {
+    return !w.freeStart && pinned(w) ? Math.max(1, tailMinimum(w, w.endX, w.endY)) : 1;
+  }
+
+  function setLength(w, value) {
+    w.targetLength = clamp(value, minimumLength(w), MAX_LENGTH);
+  }
+
+  /* Длина подтягивается к заданной по чуть-чуть: скачок дёрнул бы канат. */
+  function adjustLength(w) {
+    if (w.targetLength === undefined || w.rt.dragging || w.rt.dragEnd) return;
+    const target = Math.max(minimumLength(w), w.targetLength);
+    if (Math.abs(target - w.length) < 1e-6) return;
+    w.length += clamp(target - w.length, -0.12, 0.12);
+    resample(w);
+  }
+
+  function slackOf(w) {
+    if (w.freeStart || !pinned(w)) return Infinity;
+    const span = Math.hypot(world(w.endX) - world(w.x), world(w.endY) - world(w.y));
+    return w.length * cellSize() - span;
+  }
+
+  /* ---------- гвоздики ---------- */
+
+  function pinIndex() {
+    const cell = cellSize();
+    const index = new Map();
+    const add = (point, id) => {
+      const key = `${Math.floor(point.x / cell)},${Math.floor(point.y / cell)}`;
+      if (!index.has(key)) index.set(key, []);
+      index.get(key).push({ x: point.x, y: point.y, id });
+    };
+    for (const w of wires) {
+      const p = w.rt.points;
+      if (!w.freeStart || w.rt.dragging) add(p[0], w.id);
+      if (pinned(w) || w.rt.dragEnd) add(p[p.length - 1], w.id);
     }
-    const next = [];
-    for (let i = 0; i < count; i += 1) {
-      const target = count > 1 ? (total * i) / (count - 1) : 0;
-      let seg = 1;
-      while (seg < lengths.length - 1 && lengths[seg] < target) seg += 1;
-      const span = lengths[seg] - lengths[seg - 1] || 1;
-      const t = clamp((target - lengths[seg - 1]) / span, 0, 1);
-      const a = p[seg - 1];
-      const b = p[seg];
-      const x = lerp(a.x, b.x, t);
-      const y = lerp(a.y, b.y, t);
-      next.push({ x, y, ox: x, oy: y });
+    return index;
+  }
+
+  function fixed(w, i) {
+    return (i === 0 && (!w.freeStart || w.rt.dragging))
+      || (i === w.rt.points.length - 1 && (pinned(w) || Boolean(w.rt.dragEnd)));
+  }
+
+  /* Проверяем весь отрезок, а не его концы: гвоздик не проскочит между узлами.
+     Поправку делим по весам концов, не сдвигая крепления. */
+  function resolvePins(w, index, clearance) {
+    const cell = cellSize();
+    const p = w.rt.points;
+    for (let i = 0; i < p.length - 1; i += 1) {
+      const a = p[i];
+      const b = p[i + 1];
+      const pins = new Set();
+      const x0 = Math.floor((Math.min(a.x, b.x) - clearance) / cell);
+      const x1 = Math.floor((Math.max(a.x, b.x) + clearance) / cell);
+      const y0 = Math.floor((Math.min(a.y, b.y) - clearance) / cell);
+      const y1 = Math.floor((Math.max(a.y, b.y) + clearance) / cell);
+      for (let x = x0; x <= x1; x += 1) {
+        for (let y = y0; y <= y1; y += 1) {
+          for (const pin of index.get(`${x},${y}`) || []) pins.add(pin);
+        }
+      }
+      for (const pin of pins) {
+        if (pin.id === w.id) continue;
+        /* Совпадающие крепления — общий узел, а не препятствие своей ветви. */
+        if ([0, p.length - 1].some(j => fixed(w, j)
+          && Math.hypot(p[j].x - pin.x, p[j].y - pin.y) < cell * 0.05)) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const span = dx * dx + dy * dy;
+        const t = span ? clamp(((pin.x - a.x) * dx + (pin.y - a.y) * dy) / span, 0, 1) : 0;
+        let nx = lerp(a.x, b.x, t) - pin.x;
+        let ny = lerp(a.y, b.y, t) - pin.y;
+        let distance = Math.hypot(nx, ny);
+        if (distance >= clearance) continue;
+        if (distance < 1e-6) {
+          nx = -dy; ny = dx;
+          distance = Math.hypot(nx, ny) || 1;
+        }
+        nx /= distance; ny /= distance;
+        const wa = fixed(w, i) ? 0 : 1;
+        const wb = fixed(w, i + 1) ? 0 : 1;
+        const weight = wa * (1 - t) ** 2 + wb * t ** 2;
+        if (weight < 1e-6) continue;
+        const overlap = clearance - distance;
+        const push = Math.min(overlap / weight, cell * 0.4);
+        a.x += nx * push * wa * (1 - t);
+        a.y += ny * push * wa * (1 - t);
+        b.x += nx * push * wb * t;
+        b.y += ny * push * wb * t;
+      }
     }
-    w.rt.points = next;
+  }
+
+  /* ---------- шаг ---------- */
+
+  /* Ничто не проходит за подшаг больше пятой доли клетки — этим, а не свипом,
+     держится непроницаемость: быстрый рывок дробится, а не пролетает насквозь. */
+  function advance(w) {
+    const r = w.rt;
+    const p = r.points;
+    const cell = cellSize();
+    const move = (q, x, y) => {
+      const distance = Math.hypot(x - q.x, y - q.y);
+      const t = distance ? Math.min(1, (cell * 0.2) / distance) : 1;
+      q.x = q.ox = lerp(q.x, x, t);
+      q.y = q.oy = lerp(q.y, y, t);
+    };
+    if (!w.freeStart || r.dragging) move(p[0], r.tx, r.ty);
+    const end = r.dragEnd || (pinned(w) ? { x: world(w.endX), y: world(w.endY) } : null);
+    if (end) move(p[p.length - 1], end.x, end.y);
+    r.ax = p[0].x; r.ay = p[0].y;
+
+    const progress = r.release > 0 ? 1 - r.release / RELEASE : 1;
+    const damping = (r.release > 0 ? 0.88 + 0.05 * progress : 0.94) ** (1 / SUBSTEPS);
+    const gravity = GRAVITY * (cell / CELL_REF) * num('weight')
+      * (r.release > 0 ? 0.68 + 0.32 * progress : 1) / SUBSTEPS ** 2;
+    for (let i = 0; i < p.length; i += 1) {
+      if (fixed(w, i)) continue;
+      const q = p[i];
+      const vx = (q.x - q.ox) * damping;
+      const vy = (q.y - q.oy) * damping + gravity;
+      const speed = Math.hypot(vx, vy);
+      const scale = speed ? Math.min(1, (cell * 0.2) / speed) : 1;
+      q.ox = q.x; q.oy = q.y;
+      q.x += vx * scale; q.y += vy * scale;
+    }
+  }
+
+  function simulate(w, index) {
+    const r = w.rt;
+    const p = r.points;
+    for (let pass = 0; pass < PASSES; pass += 1) {
+      for (let j = 0; j < p.length - 1; j += 1) {
+        const i = pass % 2 ? p.length - 2 - j : j;
+        const a = p[i];
+        const b = p[i + 1];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const distance = Math.hypot(dx, dy) || 1;
+        const wa = fixed(w, i) ? 0 : 1;
+        const wb = fixed(w, i + 1) ? 0 : 1;
+        if (!wa && !wb) continue;
+        const diff = (distance - r.step) / distance / (wa + wb);
+        a.x += dx * diff * wa; a.y += dy * diff * wa;
+        b.x -= dx * diff * wb; b.y -= dy * diff * wb;
+      }
+      if (index) resolvePins(w, index, cellSize() * 1.06);
+    }
+    r.ax = p[0].x; r.ay = p[0].y;
   }
 
   /* Сетка сменила частоту — клетка стала другой, и длина в клетках значит
@@ -121,185 +281,18 @@ export function mountCh(workspace) {
     }
   }
 
-  function slackOf(w) {
-    if (!pinned(w)) return Infinity;
-    const span = Math.hypot(world(w.endX) - world(w.x), world(w.endY) - world(w.y));
-    return w.length * cellSize() - span;
-  }
-
-  /* Гвоздик за кадр проходит несколько клеток, поэтому в индекс он ложится не
-     точкой, а всем своим путём от прошлого кадра: иначе быстрый пронос ни разу
-     не попадает под проверку и канат остаётся стоять на месте. */
-  function pinIndex() {
-    const cell = cellSize();
-    const index = new Map();
-    const memory = pinPrev;
-    const next = new Map();
-
-    const put = (x, y, pin) => {
-      const key = `${Math.floor(x / cell)},${Math.floor(y / cell)}`;
-      if (!index.has(key)) index.set(key, []);
-      const bucket = index.get(key);
-      if (!bucket.includes(pin)) bucket.push(pin);
-    };
-
-    const add = (key, x, y, id) => {
-      const was = memory.get(key) || { x, y };
-      const pin = { x, y, px: was.x, py: was.y, id };
-      next.set(key, { x, y });
-      const steps = Math.ceil(Math.hypot(x - was.x, y - was.y) / cell);
-      for (let i = 0; i <= steps; i += 1) {
-        const t = steps === 0 ? 0 : i / steps;
-        put(lerp(was.x, x, t), lerp(was.y, y, t), pin);
-      }
-    };
-
-    for (const w of wires) {
-      add(`${w.id}:start`, w.rt.ax, w.rt.ay, w.id);
-      /* Конец в руке ещё не приколот, но толкать чужие канаты должен. */
-      if (w.rt.dragEnd) add(`${w.id}:tail`, w.rt.dragEnd.x, w.rt.dragEnd.y, w.id);
-      else if (pinned(w)) add(`${w.id}:tail`, world(w.endX), world(w.endY), w.id);
-    }
-    pinPrev = next;
-    return index;
-  }
-
-  /* Расстояние до пути гвоздика, а не до его нынешнего места. */
-  function nearOnPath(point, pin) {
-    const dx = pin.x - pin.px;
-    const dy = pin.y - pin.py;
-    const span = dx * dx + dy * dy;
-    const t = span === 0 ? 0 : clamp(((point.x - pin.px) * dx + (point.y - pin.py) * dy) / span, 0, 1);
-    return Math.hypot(point.x - (pin.px + dx * t), point.y - (pin.py + dy * t));
-  }
-
-  function resolvePins(w, index, clearance, correction, maxPush) {
-    const cell = cellSize();
-    const slop = cell * 0.04;
-    const p = w.rt.points;
-    for (let i = 1; i < p.length - 1; i += 1) {
-      const point = p[i];
-      const cx = Math.floor(point.x / cell);
-      const cy = Math.floor(point.y / cell);
-      for (let gx = cx - 1; gx <= cx + 1; gx += 1) {
-        for (let gy = cy - 1; gy <= cy + 1; gy += 1) {
-          const bucket = index.get(`${gx},${gy}`);
-          if (!bucket) continue;
-          for (const pin of bucket) {
-            if (pin.id === w.id) continue;
-            if (nearOnPath(point, pin) >= clearance - slop) continue;
-
-            /* Нормаль берётся от прошлого места гвоздика: у перпендикуляра к
-               пути произвольный знак, и пролетевший насквозь гвоздик толкал бы
-               канат назад, вместо того чтобы нести его перед собой. */
-            let nx = point.x - pin.px;
-            let ny = point.y - pin.py;
-            let length = Math.hypot(nx, ny);
-            if (length < 1e-6) {
-              nx = point.x - pin.x;
-              ny = point.y - pin.y;
-              length = Math.hypot(nx, ny);
-            }
-            if (length < 1e-6) continue;
-            nx /= length;
-            ny /= length;
-
-            const gap = (point.x - pin.x) * nx + (point.y - pin.y) * ny;
-            const overlap = clearance - gap;
-            if (overlap <= slop) continue;
-            const push = Math.min(overlap * correction, maxPush);
-            point.x += nx * push;
-            point.y += ny * push;
-          }
-        }
-      }
-    }
-  }
-
-  function simulate(w, index) {
-    const cell = cellSize();
-    const r = w.rt;
-    const p = r.points;
-    const last = p.length - 1;
-    const collide = on('collide');
-
-    const follow = r.dragging ? 0.72 : 0.18;
-    r.ax += (r.tx - r.ax) * follow;
-    r.ay += (r.ty - r.ay) * follow;
-    if (!r.dragging && Math.hypot(r.tx - r.ax, r.ty - r.ay) < 0.1) {
-      r.ax = r.tx;
-      r.ay = r.ty;
-    }
-
-    const end = r.dragEnd || (pinned(w) ? { x: world(w.endX), y: world(w.endY) } : null);
-    p[0].x = p[0].ox = r.ax;
-    p[0].y = p[0].oy = r.ay;
-    if (end && last > 0) {
-      p[last].x = p[last].ox = end.x;
-      p[last].y = p[last].oy = end.y;
-    }
-
-    /* Отпущенный конец иначе хлещет: гравитация возвращается не сразу. */
-    const progress = r.release > 0 ? 1 - r.release / RELEASE : 1;
-    const damping = r.release > 0 ? 0.88 + 0.05 * progress : (collide ? 0.78 : 0.94);
-    const gravity = GRAVITY * (cell / CELL_REF) * num('weight')
-      * (r.release > 0 ? 0.68 + 0.32 * progress : 1);
-
-    for (let i = 1; i < p.length; i += 1) {
-      if (end && i === last) continue;
-      const q = p[i];
-      const vx = (q.x - q.ox) * damping;
-      const vy = (q.y - q.oy) * damping;
-      q.ox = q.x;
-      q.oy = q.y;
-      q.x += vx;
-      q.y += vy + gravity;
-    }
-
-    const clearance = cell * 1.06;
-    for (let pass = 0; pass < PASSES; pass += 1) {
-      p[0].x = r.ax;
-      p[0].y = r.ay;
-      if (end && last > 0) {
-        p[last].x = end.x;
-        p[last].y = end.y;
-      }
-      for (let i = 0; i < last; i += 1) {
-        const a = p[i];
-        const b = p[i + 1];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const distance = Math.hypot(dx, dy) || 1;
-        const diff = (distance - r.step) / distance;
-        const fixedA = i === 0;
-        const fixedB = Boolean(end) && i + 1 === last;
-        if (fixedA && fixedB) continue;
-        if (fixedA) {
-          b.x -= dx * diff;
-          b.y -= dy * diff;
-        } else if (fixedB) {
-          a.x += dx * diff;
-          a.y += dy * diff;
-        } else {
-          a.x += dx * diff * 0.5;
-          a.y += dy * diff * 0.5;
-          b.x -= dx * diff * 0.5;
-          b.y -= dy * diff * 0.5;
-        }
-      }
-      if (collide) resolvePins(w, index, clearance, 0.35, cell * 0.5);
-    }
-    if (collide) resolvePins(w, index, clearance, 0.65, cell * 0.35);
-    if (r.release > 0) r.release -= 1;
-  }
-
   function step() {
     if (size !== S) {
       refit(S / (size || S));
       size = S;
     }
-    const index = on('collide') ? pinIndex() : null;
-    for (const w of wires) simulate(w, index);
+    for (const w of wires) adjustLength(w);
+    for (let sub = 0; sub < SUBSTEPS; sub += 1) {
+      for (const w of wires) advance(w);
+      const index = on('collide') ? pinIndex() : null;
+      for (const w of wires) simulate(w, index);
+    }
+    for (const w of wires) if (w.rt.release > 0) w.rt.release -= 1;
   }
 
   /* ---------- рисование ---------- */
@@ -318,7 +311,7 @@ export function mountCh(workspace) {
 
   function drawGrid() {
     const cell = cellSize();
-    ctx.strokeStyle = 'rgba(22,22,22,.09)';
+    ctx.strokeStyle = FAINT;
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let x = 0; x <= S + 0.5; x += cell) {
@@ -353,7 +346,7 @@ export function mountCh(workspace) {
     /* Гвоздик светлый: он дырка в жгуте, а не отдельное тело. */
     ctx.fillStyle = PAPER;
     ctx.beginPath();
-    ctx.arc(w.rt.ax, w.rt.ay, cell * 0.17, 0, Math.PI * 2);
+    ctx.arc(w.rt.ax, w.rt.ay, cell * (w.freeStart ? 0.1 : 0.17), 0, Math.PI * 2);
     ctx.fill();
     if (p.length > 1) {
       const tip = p[p.length - 1];
@@ -366,6 +359,15 @@ export function mountCh(workspace) {
   function draw() {
     if (on('net')) drawGrid();
     for (const w of wires) drawWire(w);
+    if (selected) {
+      ctx.save();
+      ropePath(selected.rt.points);
+      ctx.setLineDash([4, 5]);
+      ctx.strokeStyle = PAPER;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   /* ---------- клетки и жгуты ---------- */
@@ -379,7 +381,7 @@ export function mountCh(workspace) {
   }
 
   function occupied(x, y, exclude = null) {
-    return wires.some(w => (w !== exclude && ((w.x === x && w.y === y)
+    return wires.some(w => (w !== exclude && ((!w.freeStart && w.x === x && w.y === y)
       || (pinned(w) && w.endX === x && w.endY === y))));
   }
 
@@ -391,12 +393,14 @@ export function mountCh(workspace) {
     const w = { id: seq, x, y, length };
     wires.push(w);
     seed(w);
+    if (num('tool') === 1) select(w);
     return true;
   }
 
   function eraseWire(x, y) {
     const before = wires.length;
     wires = wires.filter(w => !(w.x === x && w.y === y));
+    if (!wires.includes(selected)) select(null);
     return wires.length !== before;
   }
 
@@ -418,12 +422,7 @@ export function mountCh(workspace) {
     return cells;
   }
 
-  /* Хвост нельзя приколоть дальше, чем позволяет длина: жгут дотягивается. */
-  function tailMinimum(w, endX, endY) {
-    return Math.max(0.5, Math.hypot(endX - w.x, endY - w.y));
-  }
-
-  function hitPoint() {
+  function hitPoint(includeBody = false) {
     const cell = cellSize();
     const px = pointer.x * S;
     const py = pointer.y * S;
@@ -434,6 +433,19 @@ export function mountCh(workspace) {
       const tip = p[p.length - 1];
       if (p.length > 1 && Math.hypot(px - tip.x, py - tip.y) <= limit) return { wire: w, part: 'tail' };
       if (Math.hypot(px - w.rt.ax, py - w.rt.ay) <= limit) return { wire: w, part: 'start' };
+      if (includeBody) {
+        for (let j = 1; j < p.length; j += 1) {
+          const a = p[j - 1];
+          const b = p[j];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const span = dx * dx + dy * dy;
+          const t = span ? clamp(((px - a.x) * dx + (py - a.y) * dy) / span, 0, 1) : 0;
+          if (Math.hypot(px - lerp(a.x, b.x, t), py - lerp(a.y, b.y, t)) <= cell * 0.55) {
+            return { wire: w, part: 'body' };
+          }
+        }
+      }
     }
     return null;
   }
@@ -443,7 +455,8 @@ export function mountCh(workspace) {
   function letter() {
     wires = [];
     seq = 0;
-    pinPrev = new Map();
+    drag = null;
+    paint = null;
     const unit = Math.ceil(num('grid')) / 20;
     const at = value => Math.round(value * unit);
     const put = (x, y, endX, endY, slack) => {
@@ -456,115 +469,21 @@ export function mountCh(workspace) {
     put(6, 3, 6, 9, 0.4);
     put(6, 9, 13, 9, 1.6);
     put(13, 3, 13, 16, 0.4);
-  }
-
-  /* ---------- ввод ---------- */
-
-  const TOOLS = ['кисть', 'курсор', 'ластик'];
-
-  function onDown() {
-    const tool = num('tool');
-    const cell = pointerCell();
-
-    if (tool === 0) {
-      paint = { last: cell, mode: 'brush' };
-      addWire(cell.x, cell.y, num('len'));
-      return;
-    }
-    if (tool === 2) {
-      paint = { last: cell, mode: 'erase' };
-      eraseWire(cell.x, cell.y);
-      return;
-    }
-
-    const hit = hitPoint();
-    if (!hit) return;
-    const { wire, part } = hit;
-    wire.rt.release = 0;
-    if (part === 'start') {
-      wire.rt.dragging = true;
-      drag = { wire, part };
-    } else {
-      const tip = wire.rt.points[wire.rt.points.length - 1];
-      wire.rt.dragEnd = { x: tip.x, y: tip.y };
-      /* Прошлое положение конца нужно индексу с первого же кадра: рывок бывает
-         быстрее, чем шаг физики, и без памяти путь выйдет нулевым. */
-      pinPrev.set(`${wire.id}:tail`, { x: tip.x, y: tip.y });
-      drag = { wire, part };
-    }
-  }
-
-  function onMove() {
-    const px = pointer.x * S;
-    const py = pointer.y * S;
-
-    if (paint) {
-      const cell = pointerCell();
-      for (const c of cellsBetween(paint.last, cell)) {
-        if (paint.mode === 'brush') addWire(c.x, c.y, num('len'));
-        else eraseWire(c.x, c.y);
-      }
-      paint.last = cell;
-      return;
-    }
-
-    if (!drag) return;
-    if (drag.part === 'start') {
-      drag.wire.rt.tx = px;
-      drag.wire.rt.ty = py;
-    } else {
-      drag.wire.rt.dragEnd = { x: px, y: py };
-      const need = Math.hypot(px - drag.wire.rt.ax, py - drag.wire.rt.ay) / cellSize();
-      if (need > drag.wire.length) {
-        drag.wire.length = Math.min(MAX_LENGTH, need);
-        resample(drag.wire);
-      }
-    }
-  }
-
-  function onUp() {
-    paint = null;
-    if (!drag) return;
-    const { wire, part } = drag;
-    drag = null;
-
-    const limit = Math.ceil(num('grid'));
-    const cell = pointerCell();
-    const inside = cell.x >= 0 && cell.y >= 0 && cell.x < limit && cell.y < limit;
-
-    if (part === 'start') {
-      wire.rt.dragging = false;
-      if (inside && !occupied(cell.x, cell.y, wire)) {
-        wire.x = cell.x;
-        wire.y = cell.y;
-      }
-      wire.rt.tx = world(wire.x);
-      wire.rt.ty = world(wire.y);
-      if (pinned(wire)) wire.length = Math.max(wire.length, tailMinimum(wire, wire.endX, wire.endY));
-    } else {
-      wire.rt.dragEnd = null;
-      if (inside && !occupied(cell.x, cell.y, wire) && !(cell.x === wire.x && cell.y === wire.y)) {
-        wire.endX = cell.x;
-        wire.endY = cell.y;
-        wire.length = Math.max(wire.length, tailMinimum(wire, cell.x, cell.y));
-      }
-    }
-    resample(wire);
-    wire.rt.release = RELEASE;
+    select(null);
   }
 
   /* ---------- слой буквы ---------- */
 
   const HINTS = {
     0: 'проведи по полю — ляжет канат',
-    1: 'тяни гвоздик или конец каната',
+    1: 'клик выбирает канат · тяни концы · двойной клик снимает крепление',
     2: 'проведи по гвоздикам — снимет канаты',
   };
 
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = HINTS[0];
+  hint.textContent = HINTS[1];
 
   const panel = document.createElement('div');
   panel.className = 'sketch-panel';
@@ -573,25 +492,49 @@ export function mountCh(workspace) {
   panel.style.maxHeight = 'calc(100% - 64px)';
   panel.style.overflowY = 'auto';
 
+  let lengthInput = null;
+  let lengthCaption = null;
+
+  /* Ползунок длины служит двум делам сразу: с выбранным жгутом правит его,
+     без выбора задаёт длину новых. Подпись говорит, чем он занят сейчас. */
+  function syncLength() {
+    const minimum = selected ? Math.ceil(minimumLength(selected) * 10) / 10 : 1;
+    const value = selected ? Math.max(minimum, selected.targetLength ?? selected.length) : newLength;
+    lengthInput.min = minimum;
+    lengthInput.max = Math.max(MAX_LENGTH, Math.ceil(value));
+    lengthInput.value = value.toFixed(1);
+    lengthCaption.textContent = `${selected ? `длина №${selected.id}` : 'длина нового'} · ${Number(lengthInput.value)}`;
+  }
+
+  function select(w) {
+    selected = w;
+    if (lengthInput) syncLength();
+  }
+
   const tools = [
-    { type: 'pick', key: 'tool', label: 'инструмент', options: TOOLS, value: 0 },
-    { type: 'range', key: 'len', label: 'длина', min: 1, max: 24, step: 0.5, value: 7 },
+    { type: 'pick', key: 'tool', label: 'инструмент', options: ['кисть', 'курсор', 'ластик'], value: 1 },
+    { type: 'range', key: 'len', label: 'длина нового', min: 1, max: MAX_LENGTH, step: 0.1, value: 7 },
     { type: 'range', key: 'grid', label: 'сетка', min: 10, max: 40, step: 1, value: 20 },
     { type: 'range', key: 'weight', label: 'тяжесть', min: 0.2, max: 2, step: 0.1, value: 1 },
     { type: 'toggle', key: 'net', label: 'сетка видна', value: true },
     { type: 'toggle', key: 'collide', label: 'коллизии', value: false },
     { type: 'button', label: 'собрать Ч', action: letter },
-    { type: 'button', label: 'очистить', action() { wires = []; pinPrev = new Map(); } },
+    { type: 'button', label: 'очистить', action() { wires = []; select(null); } },
   ];
 
   function onTool(key) {
+    if (key === 'len') {
+      if (selected) setLength(selected, num('len'));
+      else newLength = num('len');
+      syncLength();
+    }
     if (key === 'grid') rescale();
-    if (key === 'collide') pinPrev = new Map();
     if (key === 'tool') {
       hint.textContent = HINTS[num('tool')];
-      canvas.style.cursor = num('tool') === 1 ? 'grab' : 'crosshair';
+      canvas.style.cursor = num('tool') === 1 ? 'default' : 'crosshair';
       paint = null;
       drag = null;
+      select(null);
     }
   }
 
@@ -604,15 +547,16 @@ export function mountCh(workspace) {
       const input = document.createElement('input');
       input.type = 'range';
       input.min = tool.min; input.max = tool.max; input.step = tool.step; input.value = tool.value;
-      const update = () => { caption.textContent = `${tool.label} · ${input.value}`; };
+      const update = () => { caption.textContent = `${tool.label} · ${Number(input.value)}`; };
       update();
       input.addEventListener('input', () => {
         values[tool.key] = Number(input.value);
-        update();
-        onTool(tool.key);
+        if (tool.key === 'len') onTool('len');
+        else { update(); onTool(tool.key); }
       });
       label.append(caption, input);
       panel.append(label);
+      if (tool.key === 'len') { lengthInput = input; lengthCaption = caption; }
       continue;
     }
 
@@ -668,6 +612,127 @@ export function mountCh(workspace) {
     toggle.setAttribute('aria-expanded', String(!panel.hidden));
   });
 
+  /* ---------- ввод ---------- */
+
+  function onDown(event) {
+    const tool = num('tool');
+    const cell = pointerCell();
+    press = {
+      x: pointer.x * S, y: pointer.y * S,
+      touch: event.pointerType === 'touch', moved: false, time: performance.now(),
+    };
+
+    if (tool === 0 || tool === 2) {
+      paint = { last: cell, mode: tool === 0 ? 'brush' : 'erase' };
+      if (tool === 0) addWire(cell.x, cell.y, newLength);
+      else eraseWire(cell.x, cell.y);
+      return;
+    }
+
+    const hit = hitPoint(true);
+    select(hit?.wire || null);
+    if (hit && hit.part !== 'body') drag = { ...hit, moved: false };
+  }
+
+  function onMove() {
+    const px = pointer.x * S;
+    const py = pointer.y * S;
+    if (press && Math.hypot(px - press.x, py - press.y) > 6) press.moved = true;
+
+    if (paint) {
+      const cell = pointerCell();
+      for (const c of cellsBetween(paint.last, cell)) {
+        if (paint.mode === 'brush') addWire(c.x, c.y, newLength);
+        else eraseWire(c.x, c.y);
+      }
+      paint.last = cell;
+      return;
+    }
+
+    if (!drag || !press?.moved) return;
+    const { wire, part } = drag;
+    drag.moved = true;
+    wire.rt.release = 0;
+    delete wire.targetLength;
+    if (part === 'start') {
+      wire.rt.dragging = true;
+      wire.rt.tx = px; wire.rt.ty = py;
+    } else {
+      wire.rt.dragEnd = { x: px, y: py };
+    }
+    const other = part === 'start' ? wire.rt.points[wire.rt.points.length - 1] : wire.rt.points[0];
+    if (part === 'tail' || pinned(wire)) {
+      const need = Math.hypot(px - other.x, py - other.y) / cellSize();
+      if (need > wire.length) {
+        wire.length = Math.min(MAX_LENGTH, need);
+        resample(wire);
+      }
+    }
+    syncLength();
+  }
+
+  function onUp() {
+    paint = null;
+    const done = drag;
+    const held = press;
+    drag = null;
+    press = null;
+
+    if (done?.moved) {
+      const { wire, part } = done;
+      const limit = Math.ceil(num('grid'));
+      const cell = pointerCell();
+      const inside = cell.x >= 0 && cell.y >= 0 && cell.x < limit && cell.y < limit;
+      const otherPinned = part === 'start' ? pinned(wire) : !wire.freeStart;
+      const otherX = part === 'start' ? wire.endX : wire.x;
+      const otherY = part === 'start' ? wire.endY : wire.y;
+      const valid = inside && !occupied(cell.x, cell.y, wire)
+        && !(otherPinned && cell.x === otherX && cell.y === otherY);
+
+      if (part === 'start') {
+        wire.rt.dragging = false;
+        if (valid) { wire.x = cell.x; wire.y = cell.y; wire.freeStart = false; }
+        wire.rt.tx = world(wire.x); wire.rt.ty = world(wire.y);
+      } else {
+        wire.rt.dragEnd = null;
+        if (valid) { wire.endX = cell.x; wire.endY = cell.y; }
+      }
+      if (!wire.freeStart && pinned(wire)) {
+        wire.length = Math.max(wire.length, tailMinimum(wire, wire.endX, wire.endY));
+      }
+      resample(wire);
+      wire.rt.release = RELEASE;
+      syncLength();
+    }
+
+    /* На сенсорном экране двойного клика нет — собираем его из двух касаний. */
+    if (held?.touch && !held.moved && performance.now() - held.time < TAP) {
+      const now = performance.now();
+      if (tap && now - tap.time < TAP && Math.hypot(held.x - tap.x, held.y - tap.y) < 18) {
+        onDouble();
+        touchDouble = now;
+        tap = null;
+      } else tap = { x: held.x, y: held.y, time: now };
+    } else tap = null;
+  }
+
+  function onDouble(event) {
+    if (num('tool') !== 1) return;
+    if (event && performance.now() - touchDouble < 500) return;
+    const hit = hitPoint(true);
+    if (hit) {
+      const { wire, part } = hit;
+      if (part === 'body') return;
+      if (part === 'start') wire.freeStart = true;
+      else { delete wire.endX; delete wire.endY; }
+      wire.rt.release = RELEASE;
+      select(wire);
+      return;
+    }
+    const cell = pointerCell();
+    addWire(cell.x, cell.y, newLength);
+  }
+
   function track(event) {
     const bounds = canvas.getBoundingClientRect();
     pointer.x = (event.clientX - bounds.left - ox) / S;
@@ -681,7 +746,7 @@ export function mountCh(workspace) {
     pointer.down = true;
     pointer.id = event.pointerId;
     canvas.setPointerCapture(event.pointerId);
-    onDown();
+    onDown(event);
     if (!sent) { sent = true; reportEvent('Ч'); }
   }
 
@@ -696,6 +761,11 @@ export function mountCh(workspace) {
     onUp();
     pointer.down = false;
     pointer.id = null;
+  }
+
+  function double(event) {
+    track(event);
+    onDouble(event);
   }
 
   function key(event) {
@@ -728,19 +798,22 @@ export function mountCh(workspace) {
   }
 
   workspace.dataset.ground = 'paper';
-  canvas.style.cursor = 'crosshair';
+  canvas.style.cursor = 'default';
   workspace.append(hint, panel, toggle);
   const observer = new ResizeObserver(resize);
   observer.observe(workspace);
   resize();
   size = S;
+  newLength = num('len');
   letter();
+  syncLength();
 
   canvas.addEventListener('pointerdown', down);
   canvas.addEventListener('pointermove', move);
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', up);
   canvas.addEventListener('lostpointercapture', up);
+  canvas.addEventListener('dblclick', double);
   document.addEventListener('keydown', key);
   frameId = requestAnimationFrame(frame);
 
@@ -752,6 +825,7 @@ export function mountCh(workspace) {
     canvas.removeEventListener('pointerup', up);
     canvas.removeEventListener('pointercancel', up);
     canvas.removeEventListener('lostpointercapture', up);
+    canvas.removeEventListener('dblclick', double);
     document.removeEventListener('keydown', key);
     hint.remove(); panel.remove(); toggle.remove();
     delete workspace.dataset.ground;
