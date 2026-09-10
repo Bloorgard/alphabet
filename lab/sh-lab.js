@@ -120,6 +120,15 @@ function shHitTooth(ring) {
       return true;
     }
 
+    /* Удар о кончик отбрасывает кольцо вверх, а не гасит на месте: иначе оно
+       зависает над зубцом, каждый кадр теряя остаток хода. */
+    if (axial && ring.vy > 0) {
+      ring.vy = -Math.abs(ring.vy) * 0.45;
+      ring.vx += (Math.random() - 0.5) * 0.5;
+      ring.spin += (Math.random() - 0.5) * 5;
+      return false;
+    }
+
     /* Снизу вверх соосное кольцо идёт по зубцу свободно — оно на него надето
        ровно настолько, насколько это вообще возможно, не будучи надетым. */
     if (axial && ring.vy <= 0) return false;
@@ -154,6 +163,10 @@ function shSuck(ring) {
 function shStack(ring) {
   const tooth = shTeeth()[ring.pinned.tooth];
   ring.x = tooth;
+  /* Зубец выправляет кольцо: надетое лежит на нём ровно, а не с тем случайным
+     креном, с которым прилетело. */
+  ring.tilt += (0 - ring.tilt) * 0.12;
+  ring.phase += (Math.PI / 2 - ring.phase) * 0.12;
   ring.vy += num('fall') * SH_DRAG_Y * STEP;
   shBlow(ring);
   ring.vy -= ring.vy * SH_STACK_DRAG * STEP;
