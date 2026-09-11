@@ -62,8 +62,8 @@ const LUFT = (RING_R - RING_LINE) - THICK / 2;
 const LEAN = 1.1;
 const RIG_SPEED = 2.6;
 
-const PRIZE_BONUS = 3;     /* секунды, которые снимает красное кольцо */
-const BEST_KEY = 'alphabet-sh-best';
+const FINISH_HOLD = 0.5;
+const BEST_KEY = 'alphabet-sh-best-v2';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const rand = (min, max) => min + Math.random() * (max - min);
@@ -84,8 +84,10 @@ export function mountSh(workspace) {
   let sent = false;
 
   const rig = { x: 0.5, target: 0.5, v: 0 };
-  const jets = JETS.map((x, i) => ({ x, on: false, phase: i * 2.1 }));
-  const round = { time: 0, bonus: 0, over: false, result: 0 };
+  const jets = JETS.map((x, i) => ({ x, on: false, phase: i * 2.1, bubbles: 0 }));
+  const heldKeys = new Set();
+  const contacts = new Map();
+  const round = { time: 0, started: false, paused: false, stable: 0, over: false, result: 0 };
   let rings = [];
   let bubbles = [];
   let clock = 0;
@@ -103,13 +105,16 @@ export function mountSh(workspace) {
     rig.target = 0.5;
     rig.v = 0;
     round.time = 0;
-    round.bonus = 0;
+    round.started = false;
+    round.paused = false;
+    round.stable = 0;
+    last = performance.now();
+    debt = 0;
     round.over = false;
     round.result = 0;
     sent = false;
-    for (const jet of jets) jet.on = false;
-
-    const prize = Math.floor(Math.random() * RING_COUNT);
+    releaseControls();
+    for (const jet of jets) jet.bubbles = 0;
     for (let i = 0; i < RING_COUNT; i++) {
       rings.push({
         x: rand(RING_R + 0.02, 1 - RING_R - 0.02),
@@ -119,9 +124,7 @@ export function mountSh(workspace) {
         phase: Math.PI / 2,
         spin: 0,
         tilt: rand(-0.4, 0.4),
-        prize: i === prize,
         pinned: null,
-        counted: false,
         stall: 0,
       });
     }
@@ -184,13 +187,14 @@ export function mountSh(workspace) {
       if (Math.abs(dx) >= RING_R + THICK / 2) continue;
       const axial = Math.abs(dx) <= CATCH_X;
       const flat = Math.abs(Math.cos(ring.phase)) <= CATCH_FLAT;
-      /* Окно несимметрично: сверху оно кончается там же, где начинается срыв
-         со стержня, снизу шире. Иначе кольцо ловится выше, чем может
-         держаться, и его приходится дёргать вниз — щелчок при посадке. */
-      const atTip = ring.y > TOP - RING_R * 0.4 && ring.y < TOP + RING_R * 1.4;
+      const crossed = ring.previousY < TOP && ring.y >= TOP && ring.vy > 0;
+      const fraction = crossed ? (TOP - ring.previousY) / (ring.y - ring.previousY) : 0;
+      const crossingX = ring.previousX + (ring.x - ring.previousX) * fraction;
+      const toothX = list[i] - rig.v * STEP * (1 - fraction);
+      const through = crossed && Math.abs(crossingX - toothX) <= CATCH_X;
       const slip = Math.abs(ring.vx - rig.v);
 
-      if (axial && flat && atTip && ring.vy > -0.03 && slip < SWIPE) {
+      if (through && flat && slip < SWIPE) {
         /* Ход кольца сохраняется: оно продолжает опускаться с той же
            скоростью, стержень лишь забирает у него свободу вбок. */
         ring.pinned = { tooth: i };
@@ -199,7 +203,7 @@ export function mountSh(workspace) {
         return true;
       }
 
-      if (axial && atTip && ring.vy > -0.03) {
+      if (crossed && axial) {
         /* Промах — по фазе или по прыти — уводит кольцо с оси немедленно:
            мягкий снос оно отыгрывало вязкостью и снова висело над кончиком. */
         const away = Math.sign(ring.vx || dx || (Math.random() - 0.5));
@@ -212,7 +216,7 @@ export function mountSh(workspace) {
 
       /* Соосному кольцу зубец не мешает ни снизу вверх, ни на подлёте
          сверху: над кончиком там просто нет материала. */
-      if (axial && (ring.vy <= 0 || ring.y < TOP)) return false;
+      if (ring.y < TOP || (axial && ring.vy <= 0)) return false;
 
       const push = Math.sign(dx || 1);
       ring.x += (list[i] + push * (RING_R + THICK / 2) - ring.x) * 0.35;
@@ -288,7 +292,8 @@ export function mountSh(workspace) {
       ring.stall = 0;
     }
 
-    if (hitTooth(ring)) return;
+    ring.previousX = ring.x;
+    ring.previousY = ring.y;
     plough(ring);
     suck(ring);
     blow(ring);
@@ -316,6 +321,7 @@ export function mountSh(workspace) {
       ring.spin *= 0.8;
     }
     if (ring.y < RING_R) { ring.y = RING_R; ring.vy = Math.abs(ring.vy) * 0.3; }
+    hitTooth(ring);
   }
 
   /* Кольца не проходят друг сквозь друга: без этого струя сгоняет их в одну
@@ -345,7 +351,9 @@ export function mountSh(workspace) {
   function puff() {
     for (const jet of jets) {
       if (!jet.on) continue;
-      for (let i = 0; i < BUBBLE_RATE * STEP; i++) {
+      jet.bubbles += BUBBLE_RATE * STEP;
+      while (jet.bubbles >= 1) {
+        jet.bubbles--;
         bubbles.push({
           x: jet.x + rand(-JET_CONE, JET_CONE),
           y: BOTTOM - 0.005,
@@ -366,7 +374,8 @@ export function mountSh(workspace) {
 
   function finish() {
     round.over = true;
-    round.result = Math.max(1, round.time - round.bonus);
+    round.result = Math.max(0.1, Math.round(round.time * 10) / 10);
+    releaseControls();
     if (!best || round.result < best) {
       best = round.result;
       localStorage.setItem(BEST_KEY, String(best));
@@ -376,9 +385,10 @@ export function mountSh(workspace) {
   }
 
   function step() {
-    if (round.over) return;
+    if (!round.started || round.paused || round.over) return;
     clock += STEP;
-    round.time += STEP;
+    const direction = Number(heldKeys.has('ArrowRight')) - Number(heldKeys.has('ArrowLeft'));
+    rig.target = clamp(rig.target + direction * 0.7 * STEP, HALF, 1 - HALF);
     const move = clamp((rig.target - rig.x) * 0.22, -RIG_SPEED * STEP, RIG_SPEED * STEP);
     rig.x += move;
     rig.v = move / STEP;
@@ -388,13 +398,10 @@ export function mountSh(workspace) {
     pile();
     crowd();
 
-    for (const ring of rings) {
-      if (ring.pinned && ring.prize && !ring.counted) {
-        ring.counted = true;
-        round.bonus += PRIZE_BONUS;
-      }
-    }
-    if (done() === RING_COUNT) finish();
+    const secure = done() === RING_COUNT
+      && rings.every(r => r.y > TOP + RING_R * 0.4 && Math.abs(r.vy) < 0.04);
+    round.stable = secure ? round.stable + STEP : 0;
+    if (round.stable >= FINISH_HOLD) finish();
   }
 
   /* half: 'back' — дальняя дуга, 'front' — ближняя, иначе кольцо целиком.
@@ -416,7 +423,7 @@ export function mountSh(workspace) {
     ctx.lineWidth = (RING_LINE + 0.008) * S;
     ctx.stroke();
     ringPath(ring, half);
-    ctx.strokeStyle = ring.prize ? RED : PAPER;
+    ctx.strokeStyle = ring.pinned && ring.vy < -0.03 && ring.y < TOP + RING_R * 2 ? RED : PAPER;
     ctx.lineWidth = RING_LINE * S;
     ctx.stroke();
   }
@@ -450,25 +457,19 @@ export function mountSh(workspace) {
   }
 
   const seconds = value => `${value.toFixed(1)} с`;
-  const mono = size => `${Math.round(size * S)}px 'DM Mono', ui-monospace, monospace`;
+  function setText(node, text) {
+    if (node.textContent !== text) node.textContent = text;
+  }
 
   function drawStatus() {
-    ctx.font = mono(0.024);
-    ctx.fillStyle = 'rgba(241,237,229,.45)';
-    ctx.textAlign = 'left';
-    ctx.fillText(`${done()} / ${RING_COUNT}`, 0.04 * S, 0.07 * S);
-    ctx.textAlign = 'right';
-    ctx.fillText(seconds(round.time), 0.96 * S, 0.07 * S);
-
-    if (!round.over) return;
-    ctx.textAlign = 'center';
-    ctx.fillStyle = PAPER;
-    ctx.font = mono(0.05);
-    ctx.fillText(seconds(round.result), 0.5 * S, 0.2 * S);
-    ctx.font = mono(0.022);
-    ctx.fillStyle = 'rgba(241,237,229,.45)';
-    const prize = round.bonus > 0 ? ` · красное сняло ${round.bonus} с` : '';
-    ctx.fillText(`рекорд ${seconds(best)}${prize} · клик — заново`, 0.5 * S, 0.26 * S);
+    setText(count, `${done()} / ${RING_COUNT}`);
+    setText(timer, seconds(round.over ? round.result : round.time));
+    setText(message, round.over ? 'все кольца на месте'
+      : round.paused ? 'пауза · коснись сцены'
+      : !round.started ? 'собери 9 колец · удерживай струи'
+      : done() === RING_COUNT ? 'дай кольцам осесть' : '');
+    setText(result, round.over
+      ? `рекорд ${seconds(best)} · очки: ${Math.round(10000 / round.result)}` : '');
   }
 
   function draw() {
@@ -489,8 +490,10 @@ export function mountSh(workspace) {
   }
 
   function frame(now) {
-    debt = Math.min(0.1, debt + (now - last) / 1000);
+    const elapsed = Math.max(0, (now - last) / 1000);
     last = now;
+    if (round.started && !round.paused && !round.over) round.time += elapsed;
+    debt = Math.min(0.1, debt + elapsed);
     while (debt >= STEP) { step(); debt -= STEP; }
     draw();
     frameId = requestAnimationFrame(frame);
@@ -506,6 +509,10 @@ export function mountSh(workspace) {
     S = Math.min(W, H);
     ox = (W - S) / 2;
     oy = (H - S) / 2;
+    jetButtons.forEach((button, i) => {
+      button.style.left = `${ox + JETS[i] * S}px`;
+      button.style.top = `${oy + 0.91 * S}px`;
+    });
   }
 
   function track(event) {
@@ -514,66 +521,143 @@ export function mountSh(workspace) {
     pointer.y = (event.clientY - rect.top - oy) / S;
   }
 
-  const nearestJet = x => jets.reduce((a, b) => (Math.abs(b.x - x) < Math.abs(a.x - x) ? b : a));
+  function activate() {
+    if (round.over) return false;
+    if (!round.started || round.paused) {
+      round.started = true;
+      round.paused = false;
+      last = performance.now();
+      debt = 0;
+    }
+    return true;
+  }
+
+  function syncJets() {
+    jets.forEach((jet, i) => {
+      jet.on = heldKeys.has(JET_KEYS[i]) || heldKeys.has(`button-${i}`) || [...contacts.values()].includes(i);
+      jetButtons[i].setAttribute('aria-pressed', String(jet.on));
+    });
+  }
+
+  function releaseControls() {
+    heldKeys.clear();
+    contacts.clear();
+    syncJets();
+  }
+
+  function pause() {
+    if (round.started && !round.over && !round.paused) {
+      round.time += Math.max(0, (performance.now() - last) / 1000);
+      round.paused = true;
+    }
+    releaseControls();
+    debt = 0;
+  }
+
+  function visibility() {
+    if (document.hidden) pause();
+  }
 
   function down(event) {
+    if (event.button !== 0 || !activate()) return;
+    event.preventDefault();
     track(event);
-    if (round.over) { seed(); return; }
-    /* На тач-экране низ сцены — сопла, остальное ведёт букву: клавиш там нет,
-       а держать палец на дне и вести Ш другой рукой — то же двурукое дело. */
-    if (event.pointerType !== 'mouse' && pointer.y > BOTTOM - 0.12) {
-      const jet = nearestJet(pointer.x);
-      if (Math.abs(jet.x - pointer.x) < 0.12) { jet.on = true; return; }
-    }
+    contacts.set(event.pointerId, 'rig');
+    canvas.setPointerCapture(event.pointerId);
     rig.target = clamp(pointer.x, HALF, 1 - HALF);
   }
 
   function move(event) {
+    if (!round.started || round.paused || round.over) return;
+    if (event.pointerType !== 'mouse' && contacts.get(event.pointerId) !== 'rig') return;
     track(event);
-    if (event.pointerType !== 'mouse' && jets.some(j => j.on)) return;
     rig.target = clamp(pointer.x, HALF, 1 - HALF);
   }
 
-  function up() {
-    for (const jet of jets) jet.on = false;
+  function up(event) {
+    contacts.delete(event.pointerId);
+    syncJets();
   }
 
   function key(event) {
     if (event.target.closest('input, textarea, select') || event.target.isContentEditable) return;
-    const index = JET_KEYS.indexOf(event.code);
-    if (index >= 0) { event.preventDefault(); jets[index].on = true; return; }
-    if (event.code === 'ArrowLeft') {
+    if (event.code === 'KeyR' || (event.code === 'Enter' && round.over)) {
       event.preventDefault();
-      rig.target = clamp(rig.target - 0.08, HALF, 1 - HALF);
+      if (!event.repeat) seed();
+      return;
     }
-    if (event.code === 'ArrowRight') {
-      event.preventDefault();
-      rig.target = clamp(rig.target + 0.08, HALF, 1 - HALF);
-    }
-    if (event.code === 'Enter' && round.over) seed();
+    if (!JET_KEYS.includes(event.code) && !['ArrowLeft', 'ArrowRight'].includes(event.code)) return;
+    event.preventDefault();
+    if (event.repeat && (!round.started || round.paused)) return;
+    if (!activate()) return;
+    heldKeys.add(event.code);
+    syncJets();
   }
 
   function keyUp(event) {
-    const index = JET_KEYS.indexOf(event.code);
-    if (index >= 0) jets[index].on = false;
+    heldKeys.delete(event.code);
+    syncJets();
   }
+
+  const layer = document.createElement('div');
+  layer.className = 'sh-controls';
+  layer.dataset.letterLayer = '';
+  layer.innerHTML = `
+    <div class="sh-status"><span class="sh-count"></span><button type="button" class="sh-restart">заново</button><span class="sh-timer"></span></div>
+    <div class="sh-message" role="status"></div><div class="sh-result"></div>
+    <button type="button" class="sh-jet" aria-label="Левая струя · удерживать">Q<span>↑</span></button>
+    <button type="button" class="sh-jet" aria-label="Средняя струя · удерживать">W<span>↑</span></button>
+    <button type="button" class="sh-jet" aria-label="Правая струя · удерживать">E<span>↑</span></button>`;
+  const count = layer.querySelector('.sh-count');
+  const timer = layer.querySelector('.sh-timer');
+  const message = layer.querySelector('.sh-message');
+  const result = layer.querySelector('.sh-result');
+  const restart = layer.querySelector('.sh-restart');
+  const jetButtons = [...layer.querySelectorAll('.sh-jet')];
+  restart.addEventListener('click', seed);
+  jetButtons.forEach((button, i) => {
+    button.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || !activate()) return;
+      event.preventDefault();
+      contacts.set(event.pointerId, i);
+      button.setPointerCapture(event.pointerId);
+      syncJets();
+    });
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) button.addEventListener(type, up);
+    button.addEventListener('keydown', event => {
+      if (!['Space', 'Enter'].includes(event.code)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (activate()) { heldKeys.add(`button-${i}`); syncJets(); }
+    });
+    button.addEventListener('keyup', event => {
+      if (!['Space', 'Enter'].includes(event.code)) return;
+      event.preventDefault();
+      heldKeys.delete(`button-${i}`);
+      syncJets();
+    });
+    button.addEventListener('blur', () => { heldKeys.delete(`button-${i}`); syncJets(); });
+  });
 
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = 'Q W E — струи со дна, мышь ведёт Ш · кольцо надевается только через кончик '
-    + 'и только пока идёт вниз почти плашмя';
+  hint.textContent = 'Удерживай кнопки струй или Q W E. Веди Ш пальцем, мышью или ← →. '
+    + 'Лови падающие кольца через кончики. Красное — кольцо срывается. Заново — R.';
 
   const observer = new ResizeObserver(resize);
   observer.observe(workspace);
   resize();
   seed();
-  workspace.append(hint);
+  workspace.append(layer, hint);
 
   canvas.addEventListener('pointerdown', down);
   canvas.addEventListener('pointermove', move);
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', up);
+  canvas.addEventListener('lostpointercapture', up);
+  window.addEventListener('blur', pause);
+  document.addEventListener('visibilitychange', visibility);
   document.addEventListener('keydown', key);
   document.addEventListener('keyup', keyUp);
   frameId = requestAnimationFrame(frame);
@@ -585,6 +669,10 @@ export function mountSh(workspace) {
     canvas.removeEventListener('pointermove', move);
     canvas.removeEventListener('pointerup', up);
     canvas.removeEventListener('pointercancel', up);
+    canvas.removeEventListener('lostpointercapture', up);
+    window.removeEventListener('blur', pause);
+    document.removeEventListener('visibilitychange', visibility);
+    layer.remove();
     document.removeEventListener('keydown', key);
     document.removeEventListener('keyup', keyUp);
     hint.remove();

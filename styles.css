@@ -270,3 +270,17 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+
+.sh-controls { position: absolute; inset: 0; pointer-events: none; font: 12px var(--mono); color: rgba(241, 237, 229, .65); }
+.sh-status { position: absolute; top: 44px; left: 14px; right: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
+.sh-status > span { flex: 1; }
+.sh-timer { text-align: right; }
+.sh-controls button { pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; border: 1px solid rgba(241, 237, 229, .25); background: var(--ink); color: inherit; font: inherit; }
+.sh-restart { min-height: 32px; padding: 4px 12px; }
+.sh-controls button:hover, .sh-controls button:focus-visible { color: var(--paper); border-color: var(--paper); }
+.sh-message, .sh-result { position: absolute; top: 88px; left: 14px; right: 14px; text-align: center; font-size: 11px; }
+.sh-result { top: 110px; }
+.sh-jet { position: absolute; transform: translate(-50%, -50%); width: 48px; height: 44px; border-radius: 22px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.sh-controls .sh-jet[aria-pressed="true"] { color: var(--ink); background: var(--paper); border-color: var(--paper); }
+@media (pointer: coarse) { .sh-jet { font-size: 0 !important; } .sh-jet span { font-size: 18px; } }
