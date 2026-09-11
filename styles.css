@@ -284,3 +284,6 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .sh-jet { position: absolute; transform: translate(-50%, -50%); width: 48px; height: 44px; border-radius: 22px; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .sh-controls .sh-jet[aria-pressed="true"] { color: var(--ink); background: var(--paper); border-color: var(--paper); }
 @media (pointer: coarse) { .sh-jet { font-size: 0 !important; } .sh-jet span { font-size: 18px; } }
+
+.sh-panel { z-index: 3; bottom: 40px; max-height: calc(100% - 84px); overflow-y: auto; }
+.sh-controls .sh-count { white-space: nowrap; font-size: 10px; }

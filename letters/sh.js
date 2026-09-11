@@ -23,7 +23,7 @@ const TOP = 0.44;
 const BOTTOM = 0.84;
 const HALF = SPACING + THICK / 2;
 
-const RING_COUNT = 9;
+const GAME_PARAMS = Object.freeze({ rings: 9, force: 6.5, catchFlat: 0.7 });
 const RING_R = 0.058;
 const RING_LINE = 0.011;
 
@@ -41,7 +41,6 @@ const FLAT = 0.02;
 
 const JETS = [0.25, 0.5, 0.75];
 const JET_KEYS = ['KeyQ', 'KeyW', 'KeyE'];
-const JET_FORCE = 6.5;
 const JET_SWIRL = 0.7;
 const JET_SPIN = 7;
 const JET_CONE = 0.055;
@@ -54,7 +53,6 @@ const SUCK_BAND = 0.09;
 const SUCK_REACH = 0.45;
 
 const CATCH_X = 0.045;
-const CATCH_FLAT = 0.7;
 const SWIPE = 0.5;         /* с какой боковой прытью зубец уже не нанизывает */
 const SLOT_H = 0.04;
 const STACK_DRAG = 3.2;
@@ -72,6 +70,8 @@ export function mountSh(workspace) {
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const pointer = { x: 0.5, y: 0.5 };
+  const params = { ...GAME_PARAMS };
+  let competitive = true;
   let W = 1;
   let H = 1;
   let S = 1;
@@ -98,6 +98,7 @@ export function mountSh(workspace) {
   const done = () => rings.filter(r => r.pinned).length;
 
   function seed() {
+    if (competitive) Object.assign(params, GAME_PARAMS);
     rings = [];
     bubbles = [];
     clock = 0;
@@ -115,7 +116,7 @@ export function mountSh(workspace) {
     sent = false;
     releaseControls();
     for (const jet of jets) jet.bubbles = 0;
-    for (let i = 0; i < RING_COUNT; i++) {
+    for (let i = 0; i < params.rings; i++) {
       rings.push({
         x: rand(RING_R + 0.02, 1 - RING_R - 0.02),
         y: BOTTOM - RING_LINE,
@@ -142,8 +143,8 @@ export function mountSh(workspace) {
       const off = (ring.x - axis) / width;
       if (Math.abs(off) > 1) continue;
       const fade = (1 - Math.abs(off)) * (1 - up / JET_REACH);
-      ring.vy -= JET_FORCE * fade * STEP;
-      ring.vx += off * JET_FORCE * 0.5 * fade * STEP;
+      ring.vy -= params.force * fade * STEP;
+      ring.vx += off * params.force * 0.5 * fade * STEP;
       ring.spin += off * JET_SPIN * fade * STEP;
       /* Завихрение достаётся кольцу россыпью: свой толчок и свой момент. */
       ring.vx += (Math.random() - 0.5) * JET_SWIRL * fade * 3 * STEP;
@@ -186,7 +187,7 @@ export function mountSh(workspace) {
       const dx = ring.x - list[i];
       if (Math.abs(dx) >= RING_R + THICK / 2) continue;
       const axial = Math.abs(dx) <= CATCH_X;
-      const flat = Math.abs(Math.cos(ring.phase)) <= CATCH_FLAT;
+      const flat = Math.abs(Math.cos(ring.phase)) <= params.catchFlat;
       const crossed = ring.previousY < TOP && ring.y >= TOP && ring.vy > 0;
       const fraction = crossed ? (TOP - ring.previousY) / (ring.y - ring.previousY) : 0;
       const crossingX = ring.previousX + (ring.x - ring.previousX) * fraction;
@@ -376,12 +377,12 @@ export function mountSh(workspace) {
     round.over = true;
     round.result = Math.max(0.1, Math.round(round.time * 10) / 10);
     releaseControls();
-    if (!best || round.result < best) {
+    if (competitive && (!best || round.result < best)) {
       best = round.result;
       localStorage.setItem(BEST_KEY, String(best));
     }
     /* Наверх уходят очки, а не секунды: чем быстрее раунд, тем их больше. */
-    if (!sent) { sent = true; reportScore('Ш', Math.round(10000 / round.result)); }
+    if (competitive && !sent) { sent = true; reportScore('Ш', Math.round(10000 / round.result)); }
   }
 
   function step() {
@@ -398,7 +399,7 @@ export function mountSh(workspace) {
     pile();
     crowd();
 
-    const secure = done() === RING_COUNT
+    const secure = done() === params.rings
       && rings.every(r => r.y > TOP + RING_R * 0.4 && Math.abs(r.vy) < 0.04);
     round.stable = secure ? round.stable + STEP : 0;
     if (round.stable >= FINISH_HOLD) finish();
@@ -462,14 +463,14 @@ export function mountSh(workspace) {
   }
 
   function drawStatus() {
-    setText(count, `${done()} / ${RING_COUNT}`);
+    setText(count, `${done()} / ${params.rings}${competitive ? '' : ' · песочница'}`);
     setText(timer, seconds(round.over ? round.result : round.time));
     setText(message, round.over ? 'все кольца на месте'
       : round.paused ? 'пауза · коснись сцены'
-      : !round.started ? 'собери 9 колец · удерживай струи'
-      : done() === RING_COUNT ? 'дай кольцам осесть' : '');
+      : !round.started ? 'удерживай струи · собери кольца'
+      : done() === params.rings ? 'дай кольцам осесть' : '');
     setText(result, round.over
-      ? `рекорд ${seconds(best)} · очки: ${Math.round(10000 / round.result)}` : '');
+      ? competitive ? `рекорд ${seconds(best)} · очки: ${Math.round(10000 / round.result)}` : 'песочница · без зачёта' : '');
   }
 
   function draw() {
@@ -506,9 +507,9 @@ export function mountSh(workspace) {
     H = Math.max(1, rect.height);
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
-    S = Math.min(W, H);
+    S = Math.min(W, Math.max(1, H - 36));
     ox = (W - S) / 2;
-    oy = (H - S) / 2;
+    oy = (H - 36 - S) / 2;
     jetButtons.forEach((button, i) => {
       button.style.left = `${ox + JETS[i] * S}px`;
       button.style.top = `${oy + 0.91 * S}px`;
@@ -581,6 +582,12 @@ export function mountSh(workspace) {
 
   function key(event) {
     if (event.target.closest('input, textarea, select') || event.target.isContentEditable) return;
+    if (event.code === 'Tab') {
+      event.preventDefault();
+      toggle.click();
+      return;
+    }
+    if (panel.contains(event.target)) return;
     if (event.code === 'KeyR' || (event.code === 'Enter' && round.over)) {
       event.preventDefault();
       if (!event.repeat) seed();
@@ -645,11 +652,77 @@ export function mountSh(workspace) {
   hint.textContent = 'Удерживай кнопки струй или Q W E. Веди Ш пальцем, мышью или ← →. '
     + 'Лови падающие кольца через кончики. Красное — кольцо срывается. Заново — R.';
 
+  const panel = document.createElement('div');
+  panel.className = 'sketch-panel sh-panel';
+  panel.dataset.letterLayer = '';
+  panel.id = 'sh-panel';
+  panel.hidden = true;
+  const modes = document.createElement('div');
+  modes.className = 'sketch-modes';
+  const panelNote = document.createElement('p');
+  panel.append(modes, panelNote);
+  const modeButtons = [true, false].map(play => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sketch-mode';
+    button.textContent = play ? 'на рекорд' : 'песочница';
+    button.addEventListener('click', () => {
+      if (competitive === play) return;
+      competitive = play;
+      seed();
+      syncPanel();
+    });
+    modes.append(button);
+    return button;
+  });
+  const fields = [
+    { key: 'rings', label: 'кольца', min: 3, max: 15, step: 1 },
+    { key: 'force', label: 'сила струй', min: 2, max: 10, step: 0.5 },
+    { key: 'catchFlat', label: 'допуск наклона', min: 0.2, max: 1, step: 0.1 },
+  ].map(field => {
+    const label = document.createElement('label');
+    const caption = document.createElement('span');
+    const input = document.createElement('input');
+    Object.assign(input, { type: 'range', min: field.min, max: field.max, step: field.step });
+    input.addEventListener('input', () => {
+      if (competitive) return;
+      params[field.key] = Number(input.value);
+      seed();
+      syncPanel();
+    });
+    label.append(caption, input);
+    panel.append(label);
+    return { ...field, input, caption };
+  });
+  function syncPanel() {
+    modeButtons.forEach((button, i) => button.setAttribute('aria-pressed', String(competitive === (i === 0))));
+    panelNote.textContent = competitive ? 'Фиксированные условия. Результат идёт в зачёт.'
+      : 'Без зачёта. Изменение параметра начинает раунд заново.';
+    for (const field of fields) {
+      field.input.disabled = competitive;
+      field.input.value = params[field.key];
+      field.caption.textContent = `${field.label} · ${params[field.key]}`;
+    }
+  }
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'sketch-toggle';
+  toggle.dataset.letterLayer = '';
+  toggle.textContent = 'параметры (tab)';
+  toggle.setAttribute('aria-controls', panel.id);
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.addEventListener('click', () => {
+    panel.hidden = !panel.hidden;
+    toggle.setAttribute('aria-expanded', String(!panel.hidden));
+    if (!panel.hidden) pause();
+  });
+  syncPanel();
+
   const observer = new ResizeObserver(resize);
   observer.observe(workspace);
   resize();
   seed();
-  workspace.append(layer, hint);
+  workspace.append(layer, hint, panel, toggle);
 
   canvas.addEventListener('pointerdown', down);
   canvas.addEventListener('pointermove', move);
@@ -673,6 +746,8 @@ export function mountSh(workspace) {
     window.removeEventListener('blur', pause);
     document.removeEventListener('visibilitychange', visibility);
     layer.remove();
+    panel.remove();
+    toggle.remove();
     document.removeEventListener('keydown', key);
     document.removeEventListener('keyup', keyUp);
     hint.remove();
