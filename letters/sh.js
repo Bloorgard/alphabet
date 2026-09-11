@@ -472,13 +472,14 @@ export function mountSh(workspace) {
 
   function drawStatus() {
     setText(count, `${done()} / ${params.rings}`);
-    setText(timer, `${seconds(round.over ? round.result : round.time)}${competitive ? '' : ' · песочница'}`);
+    setText(timer, competitive ? seconds(round.over ? round.result : round.time) : '');
+    separator.hidden = !competitive;
     setText(message, round.over ? ''
       : round.paused ? 'пауза · коснись сцены'
       : !round.started ? ''
       : done() === params.rings ? 'дай кольцам осесть' : '');
-    setText(result, round.over
-      ? competitive ? `${round.record ? 'новый рекорд' : `рекорд ${seconds(best)}`} · очки: ${Math.round(10000 / round.result)}` : 'песочница · без зачёта' : '');
+    setText(result, round.over && competitive
+      ? `${round.record ? 'новый рекорд' : `рекорд ${seconds(best)}`} · очки: ${Math.round(10000 / round.result)}` : '');
   }
 
   function draw() {
@@ -618,13 +619,14 @@ export function mountSh(workspace) {
   layer.className = 'sh-controls';
   layer.dataset.letterLayer = '';
   layer.innerHTML = `
-    <div class="sh-status"><span class="sh-count"></span><span aria-hidden="true">·</span><span class="sh-timer"></span></div>
+    <div class="sh-status"><span class="sh-count"></span><span class="sh-separator" aria-hidden="true">·</span><span class="sh-timer"></span></div>
     <div class="sh-message" role="status"></div><div class="sh-result"></div>
-    <button type="button" class="sh-jet" aria-label="Левая струя · удерживать">Q<span>↑</span></button>
-    <button type="button" class="sh-jet" aria-label="Средняя струя · удерживать">W<span>↑</span></button>
-    <button type="button" class="sh-jet" aria-label="Правая струя · удерживать">E<span>↑</span></button>`;
+    <button type="button" class="sh-jet" aria-label="Левая струя · удерживать">Q</button>
+    <button type="button" class="sh-jet" aria-label="Средняя струя · удерживать">W</button>
+    <button type="button" class="sh-jet" aria-label="Правая струя · удерживать">E</button>`;
   const count = layer.querySelector('.sh-count');
   const timer = layer.querySelector('.sh-timer');
+  const separator = layer.querySelector('.sh-separator');
   const message = layer.querySelector('.sh-message');
   const result = layer.querySelector('.sh-result');
   const restart = document.createElement('button');
@@ -658,10 +660,9 @@ export function mountSh(workspace) {
   });
 
   const hint = document.createElement('div');
-  hint.className = 'workspace-hint';
+  hint.className = 'workspace-hint sh-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = 'Удерживай струи кнопками или Q W E. Веди Ш мышью или пальцем, лови сверху. '
-    + 'Красное — риск срыва. R — заново.';
+  hint.textContent = 'Включить струи — Q W E\nБуква управляется стрелками и мышью\nR — заново';
 
   const panel = document.createElement('div');
   panel.className = 'sketch-panel sh-panel';
@@ -708,8 +709,8 @@ export function mountSh(workspace) {
   panel.append(restart);
   function syncPanel() {
     modeButtons.forEach((button, i) => button.setAttribute('aria-pressed', String(competitive === (i === 0))));
-    panelNote.textContent = competitive ? 'Фиксированные условия. Результат идёт в зачёт.'
-      : 'Без зачёта. Изменение параметра начинает раунд заново.';
+    panelNote.textContent = competitive ? 'Фиксированные условия.'
+      : 'Изменение параметра начинает раунд заново.';
     for (const field of fields) {
       field.input.disabled = competitive;
       field.input.value = params[field.key];
