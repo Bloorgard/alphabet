@@ -23,7 +23,7 @@ const TOP = 0.52;
 const BOTTOM = 0.84;
 const HALF = SPACING + THICK / 2;
 
-const GAME_PARAMS = Object.freeze({ rings: 12, force: 6.5, catchFlat: 0.6 });
+const GAME_PARAMS = Object.freeze({ rings: 12, force: 6.5, catchFlat: 0.7 });
 const RING_R = 0.058;
 const RING_LINE = 0.011;
 
@@ -43,6 +43,7 @@ const JETS = [0.25, 0.5, 0.75];
 const JET_KEYS = ['KeyQ', 'KeyW', 'KeyE'];
 const JET_SWIRL = 0.7;
 const JET_SPIN = 7;
+const JET_EDDY = 0.9;
 const JET_CONE = 0.055;
 const JET_SPREAD = 0.22;
 const JET_REACH = 0.9;
@@ -52,7 +53,7 @@ const SUCK = 1.2;
 const SUCK_BAND = 0.09;
 const SUCK_REACH = 0.45;
 
-const CATCH_X = 0.038;
+const CATCH_X = 0.045;
 const SWIPE = 0.5;         /* с какой боковой прытью зубец уже не нанизывает */
 const SLOT_H = 0.04;
 const STACK_DRAG = 3.2;
@@ -61,7 +62,7 @@ const LEAN = 1.1;
 const RIG_SPEED = 2.6;
 
 const FINISH_HOLD = 0.5;
-const BEST_KEY = 'alphabet-sh-best-v4';
+const BEST_KEY = 'alphabet-sh-best-v5';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const rand = (min, max) => min + Math.random() * (max - min);
@@ -125,6 +126,7 @@ export function mountSh(workspace) {
         vy: 0,
         phase: Math.PI / 2,
         spin: 0,
+        flowPhase: rand(0, Math.PI * 2),
         tilt: rand(-0.4, 0.4),
         pinned: null,
         stall: 0,
@@ -147,9 +149,13 @@ export function mountSh(workspace) {
       ring.vy -= params.force * fade * STEP;
       ring.vx += off * params.force * 0.5 * fade * STEP;
       ring.spin += off * JET_SPIN * fade * STEP;
-      /* Завихрение достаётся кольцу россыпью: свой толчок и свой момент. */
-      ring.vx += (Math.random() - 0.5) * JET_SWIRL * fade * 3 * STEP;
-      ring.spin += (Math.random() - 0.5) * JET_SWIRL * fade * 26 * STEP;
+      /* Плавные вихри разворачивают свободное кольцо и уводят его вбок.
+         Собственная фаза разводит траектории колец внутри одной струи. */
+      if (!ring.pinned) {
+        const eddy = Math.sin(clock * 4 + up * 9 + jet.phase + ring.flowPhase);
+        ring.vx += eddy * JET_EDDY * fade * STEP;
+        ring.spin += eddy * JET_EDDY * 5 * fade * STEP;
+      }
     }
   }
 
