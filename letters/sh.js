@@ -19,11 +19,11 @@ const RED = '#e0210f';
 
 const THICK = 0.06;
 const SPACING = 0.22;
-const TOP = 0.44;
+const TOP = 0.52;
 const BOTTOM = 0.84;
 const HALF = SPACING + THICK / 2;
 
-const GAME_PARAMS = Object.freeze({ rings: 9, force: 6.5, catchFlat: 0.7 });
+const GAME_PARAMS = Object.freeze({ rings: 12, force: 6.5, catchFlat: 0.7 });
 const RING_R = 0.058;
 const RING_LINE = 0.011;
 
@@ -61,7 +61,7 @@ const LEAN = 1.1;
 const RIG_SPEED = 2.6;
 
 const FINISH_HOLD = 0.5;
-const BEST_KEY = 'alphabet-sh-best-v2';
+const BEST_KEY = 'alphabet-sh-best-v3';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const rand = (min, max) => min + Math.random() * (max - min);
@@ -113,6 +113,7 @@ export function mountSh(workspace) {
     debt = 0;
     round.over = false;
     round.result = 0;
+    round.record = false;
     sent = false;
     releaseControls();
     for (const jet of jets) jet.bubbles = 0;
@@ -377,7 +378,8 @@ export function mountSh(workspace) {
     round.over = true;
     round.result = Math.max(0.1, Math.round(round.time * 10) / 10);
     releaseControls();
-    if (competitive && (!best || round.result < best)) {
+    round.record = competitive && (!best || round.result < best);
+    if (round.record) {
       best = round.result;
       localStorage.setItem(BEST_KEY, String(best));
     }
@@ -400,7 +402,7 @@ export function mountSh(workspace) {
     crowd();
 
     const secure = done() === params.rings
-      && rings.every(r => r.y > TOP + RING_R * 0.4 && Math.abs(r.vy) < 0.04);
+      && rings.every(r => r.y > TOP - RING_R * 0.4 + RING_LINE && Math.abs(r.vy) < 0.04);
     round.stable = secure ? round.stable + STEP : 0;
     if (round.stable >= FINISH_HOLD) finish();
   }
@@ -465,12 +467,12 @@ export function mountSh(workspace) {
   function drawStatus() {
     setText(count, `${done()} / ${params.rings}${competitive ? '' : ' · песочница'}`);
     setText(timer, seconds(round.over ? round.result : round.time));
-    setText(message, round.over ? 'все кольца на месте'
+    setText(message, round.over ? ''
       : round.paused ? 'пауза · коснись сцены'
-      : !round.started ? 'удерживай струи · собери кольца'
+      : !round.started ? ''
       : done() === params.rings ? 'дай кольцам осесть' : '');
     setText(result, round.over
-      ? competitive ? `рекорд ${seconds(best)} · очки: ${Math.round(10000 / round.result)}` : 'песочница · без зачёта' : '');
+      ? competitive ? `${round.record ? 'новый рекорд' : `рекорд ${seconds(best)}`} · очки: ${Math.round(10000 / round.result)}` : 'песочница · без зачёта' : '');
   }
 
   function draw() {
@@ -610,7 +612,7 @@ export function mountSh(workspace) {
   layer.className = 'sh-controls';
   layer.dataset.letterLayer = '';
   layer.innerHTML = `
-    <div class="sh-status"><span class="sh-count"></span><button type="button" class="sh-restart">заново</button><span class="sh-timer"></span></div>
+    <div class="sh-status"><span class="sh-count"></span><span class="sh-timer"></span></div>
     <div class="sh-message" role="status"></div><div class="sh-result"></div>
     <button type="button" class="sh-jet" aria-label="Левая струя · удерживать">Q<span>↑</span></button>
     <button type="button" class="sh-jet" aria-label="Средняя струя · удерживать">W<span>↑</span></button>
@@ -619,7 +621,10 @@ export function mountSh(workspace) {
   const timer = layer.querySelector('.sh-timer');
   const message = layer.querySelector('.sh-message');
   const result = layer.querySelector('.sh-result');
-  const restart = layer.querySelector('.sh-restart');
+  const restart = document.createElement('button');
+  restart.type = 'button';
+  restart.className = 'sketch-action';
+  restart.textContent = 'заново (R)';
   const jetButtons = [...layer.querySelectorAll('.sh-jet')];
   restart.addEventListener('click', seed);
   jetButtons.forEach((button, i) => {
@@ -649,8 +654,8 @@ export function mountSh(workspace) {
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
-  hint.textContent = 'Удерживай кнопки струй или Q W E. Веди Ш пальцем, мышью или ← →. '
-    + 'Лови падающие кольца через кончики. Красное — кольцо срывается. Заново — R.';
+  hint.textContent = 'Удерживай струи кнопками или Q W E. Веди Ш мышью или пальцем, лови сверху. '
+    + 'Красное — риск срыва. R — заново.';
 
   const panel = document.createElement('div');
   panel.className = 'sketch-panel sh-panel';
@@ -694,6 +699,7 @@ export function mountSh(workspace) {
     panel.append(label);
     return { ...field, input, caption };
   });
+  panel.append(restart);
   function syncPanel() {
     modeButtons.forEach((button, i) => button.setAttribute('aria-pressed', String(competitive === (i === 0))));
     panelNote.textContent = competitive ? 'Фиксированные условия. Результат идёт в зачёт.'
