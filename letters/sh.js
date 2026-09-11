@@ -23,7 +23,7 @@ const TOP = 0.52;
 const BOTTOM = 0.84;
 const HALF = SPACING + THICK / 2;
 
-const GAME_PARAMS = Object.freeze({ rings: 12, force: 6.5, catchFlat: 0.7 });
+const GAME_PARAMS = Object.freeze({ rings: 12, force: 6.5, catchFlat: 0.6 });
 const RING_R = 0.058;
 const RING_LINE = 0.011;
 
@@ -52,7 +52,7 @@ const SUCK = 1.2;
 const SUCK_BAND = 0.09;
 const SUCK_REACH = 0.45;
 
-const CATCH_X = 0.045;
+const CATCH_X = 0.038;
 const SWIPE = 0.5;         /* с какой боковой прытью зубец уже не нанизывает */
 const SLOT_H = 0.04;
 const STACK_DRAG = 3.2;
@@ -61,7 +61,7 @@ const LEAN = 1.1;
 const RIG_SPEED = 2.6;
 
 const FINISH_HOLD = 0.5;
-const BEST_KEY = 'alphabet-sh-best-v3';
+const BEST_KEY = 'alphabet-sh-best-v4';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const rand = (min, max) => min + Math.random() * (max - min);
@@ -465,8 +465,8 @@ export function mountSh(workspace) {
   }
 
   function drawStatus() {
-    setText(count, `${done()} / ${params.rings}${competitive ? '' : ' · песочница'}`);
-    setText(timer, seconds(round.over ? round.result : round.time));
+    setText(count, `${done()} / ${params.rings}`);
+    setText(timer, `${seconds(round.over ? round.result : round.time)}${competitive ? '' : ' · песочница'}`);
     setText(message, round.over ? ''
       : round.paused ? 'пауза · коснись сцены'
       : !round.started ? ''
@@ -612,7 +612,7 @@ export function mountSh(workspace) {
   layer.className = 'sh-controls';
   layer.dataset.letterLayer = '';
   layer.innerHTML = `
-    <div class="sh-status"><span class="sh-count"></span><span class="sh-timer"></span></div>
+    <div class="sh-status"><span class="sh-count"></span><span aria-hidden="true">·</span><span class="sh-timer"></span></div>
     <div class="sh-message" role="status"></div><div class="sh-result"></div>
     <button type="button" class="sh-jet" aria-label="Левая струя · удерживать">Q<span>↑</span></button>
     <button type="button" class="sh-jet" aria-label="Средняя струя · удерживать">W<span>↑</span></button>
