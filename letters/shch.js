@@ -78,6 +78,7 @@ export function mountShch(workspace) {
     });
     debt = 0;
     last = performance.now();
+    syncStatus();
   }
 
   function reward() {
@@ -97,6 +98,7 @@ export function mountShch(workspace) {
     state.win = false;
     state.winTime = 0;
     state.turns += 1;
+    syncStatus();
     state.reels.forEach((reel, i) => {
       reel.time = 0;
       reel.from = reel.pos;
@@ -143,6 +145,7 @@ export function mountShch(workspace) {
     state.win = state.reels.every(reel => symbolAt(reel) === symbolAt(state.reels[0]));
     if (state.win) {
       state.wins += 1;
+      syncStatus();
       state.winTime = 0;
       state.confetti = Array.from({ length: 72 }, (_, i) => ({
         x: .035 + Math.random() * .93,
@@ -268,8 +271,6 @@ export function mountShch(workspace) {
       ctx.restore();
     }
 
-    text(`вращения · ${state.turns}`, g.x, .105);
-    text(`комбо · ${state.wins}`, g.right, .105, 'right', state.win ? RED : MUTED);
     state.reels.forEach((reel, i) => {
       const x = g.x + i * (g.w + g.columnGap);
       ctx.save();
@@ -317,13 +318,6 @@ export function mountShch(workspace) {
     ctx.fillStyle = RED;
     ctx.fill();
 
-    text('собери три одинаковых внизу', .5, .79, 'center', RED, .016);
-    const caption = state.spinning ? 'смотрим на нижнюю строку'
-      : state.win ? 'три одинаковых'
-      : state.dragging ? 'отпусти хвост'
-      : 'нажми или потяни рычаг ↓';
-    text(caption, g.x, .88, 'left', state.win ? RED : MUTED, .02);
-    if (S >= 520) text('совпавшая пара держится сама · касание меняет выбор', g.x, .925, 'left', MUTED, .014);
   }
 
   function resize() {
@@ -389,6 +383,19 @@ export function mountShch(workspace) {
     else if (clicked) trigger();
   }
 
+  const controls = document.createElement('div');
+  controls.className = 'shch-controls';
+  controls.dataset.letterLayer = '';
+  controls.innerHTML = '<div class="shch-status"><span class="shch-turns"></span><span aria-hidden="true">·</span><span class="shch-wins"></span></div>';
+  const statusTurns = controls.querySelector('.shch-turns');
+  const statusWins = controls.querySelector('.shch-wins');
+
+  function syncStatus() {
+    statusTurns.textContent = `вращения · ${state.turns}`;
+    statusWins.textContent = `комбо · ${state.wins}`;
+    statusWins.classList.toggle('is-win', state.win);
+  }
+
   const hint = document.createElement('div');
   hint.className = 'workspace-hint';
   hint.dataset.letterLayer = '';
@@ -451,7 +458,7 @@ export function mountShch(workspace) {
   }
 
   const observer = new ResizeObserver(resize);
-  workspace.append(hint, panel, toggle);
+  workspace.append(controls, hint, panel, toggle);
   observer.observe(workspace);
   resize();
   reset();
@@ -473,6 +480,7 @@ export function mountShch(workspace) {
     canvas.removeEventListener('pointercancel', up);
     canvas.removeEventListener('lostpointercapture', up);
     document.removeEventListener('keydown', key);
+    controls.remove();
     hint.remove();
     panel.remove();
     toggle.remove();

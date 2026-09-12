@@ -285,3 +285,11 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 .sh-timer:empty { display: none; }
 .sh-hint { white-space: pre-line; }
 .letter-workspace:has(.sh-controls) .wall-credit { max-width: calc(50% - 106px); }
+
+.shch-controls { position: absolute; inset: 0; pointer-events: none; color: rgba(22, 22, 22, .45); font: 10px var(--mono); letter-spacing: .08em; }
+.shch-status { position: absolute; top: 14px; left: 90px; right: 90px; display: flex; justify-content: center; gap: 8px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.shch-status .is-win { color: var(--red); }
+
+@media (max-width: 510px) {
+  .shch-status { top: 34px; left: 14px; right: 14px; }
+}
