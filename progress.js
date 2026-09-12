@@ -68,7 +68,9 @@ export function clearPendingProgress() {
 function remember(kind, letter, value) {
   const queue = pendingProgress();
   const box = queue[kind] && typeof queue[kind] === 'object' ? queue[kind] : {};
-  if (kind === 'scores') box[letter] = Math.max(Number(box[letter]) || 0, value);
+  /* Щ платит за каждое комбо, поэтому копит все метки, а не лучшую. */
+  if (kind === 'scores' && letter === 'Щ') box[letter] = [].concat(box[letter] ?? [], value);
+  else if (kind === 'scores') box[letter] = Math.max(Number(box[letter]) || 0, value);
   else box[letter] = true;
   queue[kind] = box;
   writeStore(QUEUE_KEY, queue);

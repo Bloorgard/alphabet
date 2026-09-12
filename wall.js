@@ -18,7 +18,7 @@ import {
   reportScore,
   reportVisit,
   saveToken,
-} from './progress.js?v=6';
+} from './progress.js?v=7';
 
 const demo = {
   level: 0,
@@ -67,7 +67,7 @@ async function flushPending() {
   const queue = pendingProgress();
   const scores = queue.scores || {};
   const events = queue.events || {};
-  for (const [letter, value] of Object.entries(scores)) await reportScore(letter, value);
+  for (const [letter, values] of Object.entries(scores)) for (const value of [].concat(values)) await reportScore(letter, value);
   for (const letter of Object.keys(events)) await reportEvent(letter);
   clearPendingProgress();
 }

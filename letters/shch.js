@@ -1,4 +1,4 @@
-import { reportScore } from '../progress.js?v=6';
+import { reportScore } from '../progress.js?v=7';
 
 const STEP = 1 / 60;
 const DARK = '#161616';

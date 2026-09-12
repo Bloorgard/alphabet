@@ -24,10 +24,10 @@ import { mountH } from './letters/h.js?v=3';
 import { mountTs } from './letters/ts.js?v=1';
 import { mountCh } from './letters/ch.js?v=3';
 import { mountSh } from './letters/sh.js?v=9';
-import { mountShch } from './letters/shch.js?v=3';
+import { mountShch } from './letters/shch.js?v=4';
 import { mountYa } from './letters/ya.js?v=22';
-import { reportVisit } from './progress.js?v=6';
-import { mountCredit } from './wall.js?v=13';
+import { reportVisit } from './progress.js?v=7';
+import { mountCredit } from './wall.js?v=14';
 
 const LETTERS = [
   'А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ё', 'Ж', 'З', 'И', 'Й',
