@@ -58,4 +58,5 @@ test('awards score events once and adds movement bonuses', () => {
   assert.equal(scorePoints({ value: 3, best_rank: 7 }, 4, 5), 2);
   assert.equal(scorePoints({ value: 3, best_rank: 7 }, 4, 1), 4);
   assert.equal(scorePoints({ value: 4, best_rank: 1 }, 4, 1), 0);
+  assert.equal(scorePoints({ value: 3, best_rank: 7 }, 4, 1, false), 1);
 });

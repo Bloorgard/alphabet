@@ -133,7 +133,7 @@ const LABS = [
     mechanics: ['кольца'],
   },
   {
-    slug: 'shch', letter: 'Щ', title: 'однорукий бандит', tile: true,
+    slug: 'shch', letter: 'Щ', title: 'однорукий бандит', tile: true, chosen: 'автомат',
     mechanics: ['автомат', 'удержание'],
   },
 ];

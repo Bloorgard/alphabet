@@ -90,6 +90,7 @@ async function state(request, env) {
   const names = Object.fromEntries(visible.map((player) => [aliases.get(player.id), player.name]));
   const top = Object.fromEntries(LETTERS.map((letter) => [letter, []]));
   for (const score of scores.results) {
+    if (score.letter === 'Щ') continue;
     /* Десятка: попадание в неё и подъём внутри неё — то, за что начисляются
        клетки, значит человек должен видеть её целиком. */
     if (top[score.letter].length >= 10) continue;
@@ -139,7 +140,7 @@ async function score(request, env, player) {
   }
 
   const nextRank = rankFor(rows.results, player.id, value, now);
-  const points = scorePoints(previous, value, nextRank);
+  const points = scorePoints(previous, value, nextRank, letter !== 'Щ');
 
   const claimId = crypto.randomUUID();
   await env.DB.batch([

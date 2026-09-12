@@ -18,7 +18,7 @@ import {
   reportScore,
   reportVisit,
   saveToken,
-} from './progress.js?v=5';
+} from './progress.js?v=6';
 
 const demo = {
   level: 0,
@@ -195,7 +195,7 @@ export async function putMark(x, y) {
    есть, где бы он ни находился. Последнее состояние держим в модуле, чтобы
    строка не заказывала его заново на каждой букве. */
 let known = null;
-const GAMES = new Set(['З', 'Ё', 'К']);
+const GAMES = new Set(['З', 'Ё', 'К', 'Щ']);
 
 /* Числительное согласуется везде, где показывается: «1 клетка», «2 клетки»,
    «5 клеток», «твоя 1», «твои 2». Форма живёт в одном месте, потому что

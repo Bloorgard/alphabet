@@ -93,7 +93,7 @@ async function post(path, body) {
 
 /* Результат игровой буквы. Возвращает {earned, wallet} или null, если
    отправить не удалось — буква на это никак не реагирует. */
-export async function reportScore(letter, value) {
+export async function reportScore(letter, value, title = letter === 'Щ' ? 'комбо собрано' : 'рекорд побит') {
   const score = Number(value);
   if (!Number.isFinite(score) || score < 0) return null;
   if (!playerToken() && !DEMO) {
@@ -101,7 +101,7 @@ export async function reportScore(letter, value) {
     return null;
   }
   const result = await post('/score', { letter, value: score });
-  if (result?.earned > 0) award(result.earned);
+  if (result?.earned > 0) award(result.earned, title);
   return result;
 }
 

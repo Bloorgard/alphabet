@@ -71,9 +71,10 @@ export function rankFor(scores, playerId, value, updatedAt) {
   return rows.findIndex((score) => score.player_id === playerId) + 1;
 }
 
-export function scorePoints(previous, nextValue, nextRank) {
+export function scorePoints(previous, nextValue, nextRank, movementBonus = true) {
   if (previous && nextValue <= previous.value) return 0;
   let points = 1;
+  if (!movementBonus) return points;
   if (previous?.best_rank && nextRank < previous.best_rank) points += 1;
   if (previous?.best_rank && previous.best_rank > 1 && nextRank === 1) points += 2;
   return points;
