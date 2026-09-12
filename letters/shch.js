@@ -323,7 +323,7 @@ export function mountShch(workspace) {
       : state.dragging ? 'отпусти хвост'
       : 'нажми или потяни рычаг ↓';
     text(caption, g.x, .88, 'left', state.win ? RED : MUTED, .02);
-    text('совпавшая пара держится сама · касание меняет выбор', g.x, .925, 'left', MUTED, .014);
+    if (S >= 520) text('совпавшая пара держится сама · касание меняет выбор', g.x, .925, 'left', MUTED, .014);
   }
 
   function resize() {
