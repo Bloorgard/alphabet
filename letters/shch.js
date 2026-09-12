@@ -1,15 +1,14 @@
 import { reportScore } from '../progress.js?v=6';
 
 const STEP = 1 / 60;
-const INK = '#161616';
-const PAPER = '#f1ede5';
+const DARK = '#161616';
+const LIGHT = '#f1ede5';
 const RED = '#e0210f';
-const MUTED = 'rgba(22,22,22,.45)';
 
 const ROW_GAP = .012;
-const COLUMN_GAP = .05;
 const CELL = .19;
 const TILE = CELL - ROW_GAP;
+const COLUMN_GAP = TILE / 4;
 const WIDTH = TILE * 3 + COLUMN_GAP * 2;
 const GEOMETRY = {
   x: (1 - WIDTH) / 2,
@@ -44,7 +43,18 @@ function symbolAt(reel, row = 2) {
 }
 
 export function mountShch(workspace) {
-  workspace.dataset.ground = 'paper';
+  let night = false;
+  let INK = DARK;
+  let PAPER = LIGHT;
+  let MUTED = 'rgba(22,22,22,.45)';
+
+  function applyNight() {
+    INK = night ? LIGHT : DARK;
+    PAPER = night ? DARK : LIGHT;
+    MUTED = night ? 'rgba(241,237,229,.45)' : 'rgba(22,22,22,.45)';
+    workspace.dataset.ground = night ? 'ink' : 'paper';
+  }
+  applyNight();
   const canvas = workspace.querySelector('#letter-canvas');
   const ctx = canvas.getContext('2d');
   const pointer = { x: .5, y: .5, down: false, id: null };
@@ -168,7 +178,7 @@ export function mountShch(workspace) {
     }
   }
 
-  function pattern(kind, x, y, w, h, phase = 0, animated = false) {
+  function pattern(kind, x, y, w, h, phase = 0, amp = 0) {
     ctx.save();
     ctx.beginPath();
     ctx.rect(x, y, w, h);
@@ -180,13 +190,13 @@ export function mountShch(workspace) {
 
     if (kind === 0) {
       for (let row = 0; row < 4; row++) for (let col = -1; col < Math.ceil(w / unit) + 1; col++) {
-        const pulse = animated ? .76 + .24 * Math.sin(phase * 5 + row * .8 + col * .6) : 1;
+        const pulse = 1 + (.24 * Math.sin(phase * 5 + row * .8 + col * .6) - .24) * amp;
         ctx.beginPath();
         ctx.arc(x + (col + .5) * unit, y + (row + .5) * h / 4, unit * .32 * pulse, 0, Math.PI * 2);
         ctx.fill();
       }
     } else if (kind === 1) {
-      const shift = animated ? mod(phase * .035, unit) : 0;
+      const shift = mod(phase * .035, unit);
       for (let k = -6; k < Math.ceil(w / unit) + 7; k++) {
         const a = x + k * unit + shift;
         ctx.beginPath();
@@ -197,7 +207,7 @@ export function mountShch(workspace) {
         ctx.fill();
       }
     } else if (kind === 2) {
-      const shift = animated ? Math.sin(phase * 2.5) * unit * .2 : 0;
+      const shift = Math.sin(phase * 2.5) * unit * .2;
       for (let row = -1; row < 5; row++) for (let col = -2; col < Math.ceil(w / unit) + 2; col++) {
         const cx = x + (col + .5) * unit + shift * (row % 2 ? -1 : 1);
         const cy = y + (row + .5) * h / 4 + shift * .45;
@@ -215,7 +225,7 @@ export function mountShch(workspace) {
       for (let row = -1; row < 6; row++) {
         ctx.beginPath();
         for (let t = -.01; t <= w + .01; t += .002) {
-          const wave = animated ? phase * 3 : 0;
+          const wave = phase * 3;
           const yy = y + row * h / 4 + Math.sin(t / unit * Math.PI * 2 - wave) * h / 16;
           if (t === -.01) ctx.moveTo(x + t, yy);
           else ctx.lineTo(x + t, yy);
@@ -226,7 +236,7 @@ export function mountShch(workspace) {
       for (let row = 0; row < 4; row++) for (let col = 0; col < Math.ceil(w / unit); col++) {
         const cx = x + (col + .5) * unit;
         const cy = y + (row + .5) * h / 4;
-        const turn = animated ? Math.sin(phase * 3 + row + col) * .22 : 0;
+        const turn = Math.sin(phase * 3 + row + col) * .22 * amp;
         ctx.save();
         ctx.translate(cx, cy);
         ctx.rotate(turn);
@@ -237,7 +247,7 @@ export function mountShch(workspace) {
     } else {
       ctx.strokeStyle = PAPER;
       for (let row = 0; row < 4; row++) for (let col = -1; col < Math.ceil(w / unit) + 1; col++) {
-        const pulse = animated ? .72 + .2 * (1 + Math.sin(phase * 4 + row + col)) : 1;
+        const pulse = 1 + (.2 * Math.sin(phase * 4 + row + col) - .08) * amp;
         ctx.lineWidth = unit * .13 * pulse;
         ctx.beginPath();
         ctx.arc(x + (col + .5) * unit, y + (row + .5) * h / 4, unit * (.25 + .06 * pulse), 0, Math.PI * 2);
@@ -295,7 +305,19 @@ export function mountShch(workspace) {
     });
 
     if (state.win) {
-      pattern(symbolAt(state.reels[0]), g.x, g.y + 2 * g.cell, g.right - g.x, g.cell - g.rowGap, state.winTime, true);
+      const t = clamp(state.winTime / .5, 0, 1);
+      const reach = g.columnGap / 2 * t * t * (3 - 2 * t);
+      ctx.save();
+      ctx.beginPath();
+      for (let i = 0; i < 3; i++) {
+        const x = g.x + i * (g.w + g.columnGap);
+        const left = Math.max(g.x, x - reach);
+        ctx.rect(left, g.y + 2 * g.cell, Math.min(g.right, x + g.w + reach) - left, g.cell - g.rowGap);
+      }
+      ctx.clip();
+      const amp = clamp((state.winTime - .3) / .8, 0, 1);
+      pattern(symbolAt(state.reels[0]), g.x, g.y + 2 * g.cell, g.right - g.x, g.cell - g.rowGap, state.winTime, amp * amp * (3 - 2 * amp));
+      ctx.restore();
     }
 
     ctx.strokeStyle = RED;
@@ -413,7 +435,17 @@ export function mountShch(workspace) {
   restart.className = 'sketch-action';
   restart.textContent = 'заново (R)';
   restart.addEventListener('click', reset);
-  panel.append(note, restart);
+  const nightSwitch = document.createElement('button');
+  nightSwitch.type = 'button';
+  nightSwitch.className = 'sketch-switch';
+  nightSwitch.textContent = 'ночь';
+  nightSwitch.setAttribute('aria-pressed', 'false');
+  nightSwitch.addEventListener('click', () => {
+    night = !night;
+    nightSwitch.setAttribute('aria-pressed', String(night));
+    applyNight();
+  });
+  panel.append(note, nightSwitch, restart);
 
   const toggle = document.createElement('button');
   toggle.type = 'button';
