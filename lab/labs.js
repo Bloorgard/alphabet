@@ -132,4 +132,8 @@ const LABS = [
     slug: 'sh', letter: 'Ш', title: 'кольца в воде', tile: true, chosen: 'кольца',
     mechanics: ['кольца'],
   },
+  {
+    slug: 'shch', letter: 'Щ', title: 'однорукий бандит', tile: true,
+    mechanics: ['автомат', 'удержание'],
+  },
 ];
