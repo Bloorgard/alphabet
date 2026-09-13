@@ -294,3 +294,9 @@ h1 { margin-bottom: 24px; font-size: clamp(44px, 7vw, 92px); line-height: .95; l
 @media (max-width: 510px) {
   .shch-status { top: 34px; left: 14px; right: 14px; }
 }
+
+.hard-status { position: absolute; top: 14px; left: 90px; right: 90px; text-align: center; white-space: nowrap; pointer-events: none; color: rgba(241, 237, 229, .45); font: 10px var(--mono); letter-spacing: .08em; }
+
+@media (max-width: 510px) {
+  .hard-status { top: 34px; left: 14px; right: 14px; }
+}

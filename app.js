@@ -25,6 +25,7 @@ import { mountTs } from './letters/ts.js?v=1';
 import { mountCh } from './letters/ch.js?v=3';
 import { mountSh } from './letters/sh.js?v=9';
 import { mountShch } from './letters/shch.js?v=4';
+import { mountHard } from './letters/hard.js?v=1';
 import { mountYa } from './letters/ya.js?v=22';
 import { reportVisit } from './progress.js?v=7';
 import { mountCredit } from './wall.js?v=14';
@@ -68,6 +69,7 @@ const READY = new Map([
   ['Ч', mountCh],
   ['Ш', mountSh],
   ['Щ', mountShch],
+  ['Ъ', mountHard],
   ['Я', mountYa]
 ]);
 

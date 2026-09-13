@@ -136,4 +136,8 @@ const LABS = [
     slug: 'shch', letter: 'Щ', title: 'однорукий бандит', tile: true, chosen: 'автомат',
     mechanics: ['автомат', 'удержание'],
   },
+  {
+    slug: 'hard', letter: 'Ъ', title: 'твёрдость', tile: true, chosen: 'натяжение',
+    mechanics: ['зацеп', 'походка', 'эксцентрик', 'ткань', 'натяжение'],
+  },
 ];
