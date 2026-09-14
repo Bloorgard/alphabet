@@ -50,7 +50,9 @@ function yHint(text) {
 }
 
 function yReset() {
-  modeState = { strands: [], active: null, grab: null, time: 0, bodies: [], clock: 0, serial: 0 };
+  yHush();
+  modeState = { strands: [], active: null, grab: null, time: 0, bodies: [], clock: 0, serial: 0,
+    singers: [], bubbles: [], drums: [0, 0, 0, 0, 0, 0, 0, 0], marks: [], next: 0, beat: 0, softs: [], sticks: [], pops: [] };
 }
 
 function yStroke(points, kind) {
@@ -629,6 +631,663 @@ function yGrinderDraw() {
   yGrinderLabel(state.message || (state.source.length ? 'ручкой — по кругу. или включи мотор ↓' : 'рисуй слева — Ы съест всё'), 0.5, 0.085, 'center');
 }
 
+let yAudio = null;
+const yVoices = new Set();
+const Y_FLOOR = 0.826;
+const Y_TALL = 0.68;
+const Y_STRIP = { top: 0.845, line: 0.95, left: 0.0474, pitch: 0.1142, width: 0.1031 };
+const Y_FORMANTS = [[300, 4, 1.6], [1550, 12, 1.1], [2450, 14, 0.5]];
+const Y_SCALES = [[0, 2, 4, 7, 9, 12], [0, 2, 4, 5, 7, 9, 11, 12]];
+
+function yAudioOut() {
+  const Context = window.AudioContext || window.webkitAudioContext;
+  if (!Context) return null;
+  if (!yAudio) {
+    const context = new Context();
+    const out = context.createDynamicsCompressor();
+    const level = context.createGain();
+    level.gain.value = 0.8;
+    out.connect(level).connect(context.destination);
+    const voices = context.createGain();
+    const beat = context.createGain();
+    voices.connect(out);
+    beat.connect(out);
+    yAudio = { context, out, voices, beat };
+  }
+  if (yAudio.context.state === 'suspended') yAudio.context.resume();
+  return yAudio;
+}
+
+function yChoirSemis(height) {
+  return clamp((height - 0.06) / (Y_TALL - 0.06), 0, 1) * 28;
+}
+
+function yChoirPitch(singer) {
+  const semis = yChoirSemis(singer.H);
+  let note = semis;
+  if (num('scale') < 2) {
+    const octave = Math.floor(semis / 12);
+    const within = semis - octave * 12;
+    let best = 0;
+    for (const degree of Y_SCALES[num('scale')]) if (Math.abs(degree - within) < Math.abs(best - within)) best = degree;
+    note = octave * 12 + best;
+  }
+  return 98 * 2 ** (note / 12);
+}
+
+function yVoiceStop(voice, sigh = true) {
+  const now = voice.context.currentTime;
+  voice.gain.gain.cancelScheduledValues(now);
+  voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
+  voice.gain.gain.setTargetAtTime(0, now, sigh ? 0.09 : 0.02);
+  if (sigh) voice.source.frequency.setTargetAtTime(voice.source.frequency.value * 0.78, now, 0.12);
+  voice.source.stop(now + 0.6);
+  voice.vibrato.stop(now + 0.6);
+  yVoices.delete(voice);
+}
+
+function yHush() {
+  for (const voice of [...yVoices]) yVoiceStop(voice, false);
+}
+
+function yFormants(c, source, target) {
+  for (const [frequency, q, level] of Y_FORMANTS) {
+    const band = c.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = frequency;
+    band.Q.value = q;
+    const amount = c.createGain();
+    amount.gain.value = level;
+    source.connect(band).connect(amount).connect(target);
+  }
+}
+
+function ySing(singer, seconds = 0) {
+  singer.until = seconds ? modeState.time + seconds : 0;
+  if (singer.voice) return;
+  const audio = yAudioOut();
+  singer.singing = true;
+  if (!audio) return;
+  const c = audio.context, now = c.currentTime, pitch = yChoirPitch(singer);
+  const source = c.createOscillator();
+  source.type = 'sawtooth';
+  source.frequency.value = pitch;
+  const vibrato = c.createOscillator();
+  vibrato.frequency.value = 4.5 + Math.random() * 1.5;
+  const depth = c.createGain();
+  depth.gain.value = pitch * 0.014;
+  vibrato.connect(depth).connect(source.frequency);
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(0.32, now + 0.06);
+  gain.connect(audio.voices);
+  yFormants(c, source, gain);
+  source.start(now);
+  vibrato.start(now);
+  singer.voice = { context: c, source, vibrato, depth, gain };
+  yVoices.add(singer.voice);
+}
+
+function yHushSinger(singer, sigh = true) {
+  singer.singing = false;
+  if (singer.voice) yVoiceStop(singer.voice, sigh);
+  singer.voice = null;
+}
+
+function yRetune(singer) {
+  if (!singer.voice) return;
+  const pitch = yChoirPitch(singer), now = singer.voice.context.currentTime;
+  singer.voice.source.frequency.setTargetAtTime(pitch, now, num('scale') === 2 ? 0.01 : 0.025);
+  singer.voice.depth.gain.setTargetAtTime(pitch * 0.014, now, 0.05);
+}
+
+function yChoirAdd(x, height) {
+  const singers = modeState.singers;
+  if (singers.length >= 16) yHushSinger(singers.shift(), false);
+  const w = ySize() * 1.38;
+  const singer = { x, w, H: clamp(height, w, Y_TALL), color: modeState.serial++, singing: false, voice: null,
+    until: 0, sway: 0, puff: 0, doomed: false, clock: 0 };
+  singers.push(singer);
+  return singer;
+}
+
+function yChoirExample() {
+  yReset();
+  modeState.drums = [1, 0, 2, 0, 1, 0, 2, 0];
+  [0, 0.1, 0.22, 0.34, 0.2, 0.46].forEach((lift, i) => yChoirAdd(0.113 + i * 0.157, 0.16 + lift));
+}
+
+function yChoirHit() {
+  const singers = modeState.singers;
+  for (let i = singers.length - 1; i >= 0; i--) {
+    const s = singers[i];
+    if (Math.abs(pointer.x - s.x) < s.w * 0.64 + 0.012 && pointer.y > Y_FLOOR - s.H - 0.03 && pointer.y < Y_FLOOR + 0.02) return s;
+  }
+  return null;
+}
+
+function yChoirDown() {
+  const state = modeState;
+  if (pointer.y > Y_STRIP.top) {
+    const cell = clamp(Math.floor((pointer.x - Y_STRIP.left) / Y_STRIP.pitch), 0, 7);
+    state.drums[cell] = (state.drums[cell] + 1) % 3;
+    const audio = yAudioOut();
+    if (audio && state.drums[cell]) {
+      yHit(audio.context.currentTime, state.drums[cell] === 1);
+      state.marks.push({ index: cell, at: audio.context.currentTime, poke: true });
+    }
+    return;
+  }
+  let singer = yChoirHit();
+  const was = Boolean(singer?.singing);
+  const dy = singer ? Y_FLOOR - singer.H - pointer.y : 0;
+  if (!singer) singer = yChoirAdd(clamp(pointer.x, 0.05, 0.95), Y_FLOOR - pointer.y);
+  state.grab = { singer, was, dy, dx: singer.x - pointer.x, x0: pointer.x, y0: pointer.y };
+  ySing(singer);
+}
+
+function yChoirMove() {
+  const grab = modeState.grab;
+  if (!pointer.down || !grab) return;
+  const s = grab.singer;
+  const top = pointer.y + grab.dy;
+  s.sway = clamp(s.sway + (pointer.x - pointer.px) * 6, -1, 1);
+  s.x = clamp(pointer.x + grab.dx, 0.05, 0.95);
+  s.doomed = pointer.y > Y_STRIP.top + 0.01;
+  s.H = clamp(Y_FLOOR - top, s.w, Y_TALL);
+  yRetune(s);
+}
+
+function yChoirUp() {
+  const grab = modeState.grab;
+  if (!grab) return;
+  modeState.grab = null;
+  const s = grab.singer;
+  const tap = Math.hypot(pointer.x - grab.x0, pointer.y - grab.y0) < 0.01;
+  if (s.doomed) {
+    yHushSinger(s);
+    modeState.singers.splice(modeState.singers.indexOf(s), 1);
+  } else if (!on('drone') || (grab.was && tap)) yHushSinger(s);
+}
+
+function yChoirAll() {
+  const singers = modeState.singers;
+  if (on('drone') && singers.length && singers.every((s) => s.singing)) {
+    for (const s of singers) yHushSinger(s);
+    return;
+  }
+  for (const s of singers) ySing(s, on('drone') ? 0 : 1.6);
+}
+
+function yChoirStep() {
+  const state = modeState;
+  state.time += STEP;
+  if (yAudio) {
+    yAudio.voices.gain.value = num('voice') / 5;
+    yAudio.beat.gain.value = num('beat') / 5;
+  }
+  yBeat();
+  for (const s of state.singers) {
+    if (s.singing && s.until && state.time > s.until && state.grab?.singer !== s) yHushSinger(s);
+    s.sway *= 0.9;
+    s.puff = lerp(s.puff, s.singing ? 1 : 0, 0.18);
+    if (s.singing) {
+      s.clock += STEP;
+      if (s.clock > 0.22) {
+        s.clock = 0;
+        state.bubbles.push({ x: s.x + (Math.random() - 0.5) * s.w * 0.6, y: Y_FLOOR - s.H - s.w * 0.3,
+          size: s.w * (0.35 + Math.random() * 0.3), color: s.color, age: 0, drift: (Math.random() - 0.5) * 0.04 });
+      }
+    }
+  }
+  for (const b of state.bubbles) {
+    b.age += STEP / 1.5;
+    b.y -= STEP * 0.06;
+    b.x += b.drift * STEP;
+  }
+  state.bubbles = state.bubbles.filter((b) => b.age < 1).slice(-90);
+}
+
+const yCell = (i) => Y_STRIP.left + Y_STRIP.pitch * i + Y_STRIP.width / 2;
+
+function yHit(at, low) {
+  const c = yAudio.context, out = yAudio.beat;
+  const length = low ? 0.2 : 0.08;
+  const source = c.createOscillator();
+  source.type = 'sawtooth';
+  source.frequency.setValueAtTime(low ? 120 : 340, at);
+  source.frequency.exponentialRampToValueAtTime(low ? 60 : 250, at + length);
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(low ? 0.9 : 0.55, at + 0.006);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
+  gain.connect(out);
+  yFormants(c, source, gain);
+  source.start(at);
+  source.stop(at + length + 0.05);
+  if (low) {
+    const thump = c.createOscillator();
+    thump.frequency.setValueAtTime(90, at);
+    thump.frequency.exponentialRampToValueAtTime(40, at + 0.16);
+    const body = c.createGain();
+    body.gain.setValueAtTime(0.8, at);
+    body.gain.exponentialRampToValueAtTime(0.0001, at + 0.2);
+    thump.connect(body).connect(out);
+    thump.start(at);
+    thump.stop(at + 0.25);
+  }
+  if (!yAudio.noise) {
+    yAudio.noise = c.createBuffer(1, Math.round(c.sampleRate * 0.04), c.sampleRate);
+    const data = yAudio.noise.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  }
+  const click = c.createBufferSource();
+  click.buffer = yAudio.noise;
+  const air = c.createBiquadFilter();
+  air.type = 'bandpass';
+  air.frequency.value = 1700;
+  air.Q.value = 0.8;
+  const snap = c.createGain();
+  const k = at + length * 0.85;
+  snap.gain.setValueAtTime(0.0001, k);
+  snap.gain.exponentialRampToValueAtTime(low ? 0.1 : 0.14, k + 0.008);
+  snap.gain.exponentialRampToValueAtTime(0.0001, k + 0.04);
+  click.connect(air).connect(snap).connect(out);
+  click.start(k);
+}
+
+function yBeat() {
+  const state = modeState;
+  if (!yAudio || !state.drums.some(Boolean)) { state.next = 0; return; }
+  const now = yAudio.context.currentTime, step = 30 / num('tempo');
+  if (state.next < now - 0.05) state.next = now + 0.05;
+  while (state.next < now + 0.12) {
+    const kind = state.drums[state.beat];
+    if (kind) yHit(state.next, kind === 1);
+    state.marks.push({ index: state.beat, at: state.next, hit: Boolean(kind) });
+    state.beat = (state.beat + 1) % 8;
+    state.next += step;
+  }
+  for (const mark of state.marks) if (mark.hit && !mark.shown && mark.at <= now) {
+    mark.shown = true;
+    state.bubbles.push({ x: yCell(mark.index), y: Y_STRIP.top - 0.005, size: 0.04, color: mark.index, age: 0,
+      drift: (Math.random() - 0.5) * 0.05, text: 'ык' });
+  }
+  state.marks = state.marks.filter((mark) => mark.at > now - 1);
+}
+
+function yDrumsDraw() {
+  const state = modeState;
+  const now = yAudio ? yAudio.context.currentTime : 0;
+  let cursor = -1;
+  const last = {};
+  for (const mark of state.marks) if (mark.at <= now) {
+    if (!mark.poke && state.next) cursor = mark.index;
+    if (mark.hit || mark.poke) last[mark.index] = mark.at;
+  }
+  for (let i = 0; i < 8; i++) {
+    const x = Y_STRIP.left + Y_STRIP.pitch * i;
+    line(x, Y_STRIP.line, x + Y_STRIP.width, Y_STRIP.line, INK, i === cursor ? 0.0042 : 0.0014);
+    const kind = state.drums[i];
+    if (!kind) continue;
+    const kick = Math.max(0, 1 - (now - (last[i] ?? -9)) / 0.18);
+    const lift = Math.sin(kick * Math.PI) * 0.012;
+    yBlock(yCell(i), 0.936 - lift, 0.873 - lift, 0.0485, kind === 1 ? 0.0167 : 0.0084, yColor(i));
+  }
+}
+
+/* Геометрическая Ы: прямые палки, пузо — полукруг, концы квадратные. Все размеры в долях кадра. */
+function yBlock(x, bottom, top, D, T, color, lean = 0, belly = 0) {
+  const left = x - D / 2, right = x + D / 2;
+  const b = bottom - T / 2, t = top + T / 2;
+  const R = D * 0.273 + belly, cx = left + D * 0.374, cy = b - R;
+  const stem = (y) => left + lean * (b - y) / (b - t);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = T * S;
+  ctx.lineJoin = 'miter';
+  ctx.beginPath();
+  ctx.moveTo((left + lean) * S, t * S);
+  ctx.lineTo(left * S, b * S);
+  ctx.moveTo((right + lean) * S, t * S);
+  ctx.lineTo(right * S, b * S);
+  ctx.lineCap = 'square';
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(left * S, b * S);
+  ctx.lineTo(cx * S, b * S);
+  ctx.arc(cx * S, cy * S, R * S, Math.PI / 2, -Math.PI / 2, true);
+  ctx.lineTo(stem(cy - R) * S, (cy - R) * S);
+  ctx.lineCap = 'butt';
+  ctx.stroke();
+}
+
+function yTall(s) {
+  const t = modeState.time;
+  const shake = s.puff * Math.sin(t * 34 + s.x * 50) * 0.012;
+  const lean = (s.sway * 0.2 + shake) * s.H;
+  const belly = s.puff * s.w * (0.03 + Math.sin(t * 9 + s.x * 20) * 0.02);
+  yBlock(s.x, Y_FLOOR, Y_FLOOR - s.H, s.w, s.w * 0.281, s.doomed ? ink(0.25) : yColor(s.color), lean, belly);
+}
+
+function yChoirDraw() {
+  const state = modeState;
+  if (num('scale') < 2) {
+    for (let octave = 0; octave < 3; octave++) for (const degree of Y_SCALES[num('scale')]) {
+      const semis = octave * 12 + degree;
+      if (semis > 28 || (degree === 12 && octave < 2)) continue;
+      const y = Y_FLOOR - (0.06 + semis / 28 * (Y_TALL - 0.06));
+      line(0.047, y, 0.949, y, degree % 12 ? GHOST : FAINT, 0.001);
+    }
+  }
+  line(0.047, Y_FLOOR, 0.949, Y_FLOOR, INK, 0.0014);
+  yDrumsDraw();
+  for (const s of state.singers) yTall(s);
+  ctx.textAlign = 'center';
+  for (const b of state.bubbles) {
+    ctx.globalAlpha = 1 - b.age;
+    ctx.fillStyle = yColor(b.color);
+    ctx.font = `500 ${Math.round(b.size * S * (0.8 + b.age * 0.6))}px 'DM Mono', monospace`;
+    ctx.fillText(b.text || 'ы', b.x * S, b.y * S);
+  }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
+  yGrinderLabel(state.grab?.singer.doomed ? 'отпусти — и её не станет' : 'тяни Ы вверх — выше · буквы внизу — бит', 0.5, 0.06, 'center');
+}
+
+const Y_FIELD = { left: 0.05, right: 0.95, top: 0.14, bottom: 0.88 };
+const yReach = (soft) => soft.h * (0.76 + 0.42 * soft.sticks.length);
+const yShout = (x, y, text, color) => modeState.pops.push({ x, y, text, color, age: 0 });
+
+function yCanesSoft(x, y, count = 0) {
+  const h = ySize() * 1.5;
+  const soft = { x, y, h, color: modeState.serial++, heading: Math.random() * Math.PI * 2, phase: Math.random() * 6,
+    lean: 0, hop: 0, shock: 0, rest: 0, sulk: 2 + Math.random() * 4, sits: 0, sticks: [] };
+  modeState.softs.push(soft);
+  for (let i = 0; i < count; i++) {
+    const stick = yCanesStick(x + yReach(soft), y - h * 0.4, h);
+    stick.owner = soft;
+    stick.angle = 0;
+    soft.sticks.push(stick);
+  }
+  return soft;
+}
+
+function yCanesStick(x, y, h = ySize() * 1.5) {
+  const sticks = modeState.sticks;
+  if (sticks.length >= 40) {
+    const old = sticks.findIndex((s) => !s.owner && modeState.grab?.stick !== s);
+    if (old >= 0) sticks.splice(old, 1);
+  }
+  const stick = { x, y, h, angle: Math.PI / 2, vx: 0, vy: 0, spin: 0, owner: null };
+  sticks.push(stick);
+  return stick;
+}
+
+function yCanesExample() {
+  yReset();
+  const spots = [[0.14, 0.34, 1], [0.5, 0.3, 2], [0.78, 0.42, 1], [0.24, 0.62, 0], [0.56, 0.7, 1], [0.84, 0.78, 0], [0.4, 0.5, 0]];
+  for (const [x, y, count] of spots) yCanesSoft(x, y, count);
+  const stick = yCanesStick(0.14, 0.82);
+  stick.angle = 1.3;
+}
+
+function yTake(soft, stick) {
+  const st = modeState;
+  if (stick.owner) {
+    const victim = stick.owner;
+    victim.sticks.splice(victim.sticks.indexOf(stick), 1);
+    victim.hop = 1; victim.shock = 1.6;
+    yShout(victim.x, victim.y - victim.h * 1.1, victim.sticks.length ? 'ы?' : 'ь?!', victim.color);
+  }
+  if (st.grab?.stick === stick) st.grab = null;
+  stick.owner = soft;
+  soft.sticks.push(stick);
+  soft.hop = 1;
+  soft.sits = 0;
+  const n = soft.sticks.length;
+  yShout(soft.x + soft.h * 0.5, soft.y - soft.h * 1.1, n === 1 ? 'ы!' : 'ы'.repeat(n) + '!', soft.color);
+}
+
+function yCanesStep() {
+  const st = modeState;
+  st.time += STEP;
+  const fuss = num('fuss') / 3;
+  for (const soft of st.softs) {
+    const n = soft.sticks.length;
+    soft.hop = Math.max(0, soft.hop - STEP * 2.5); soft.shock -= STEP;
+    if (st.grab?.soft === soft) {
+      soft.x = clamp(pointer.x + st.grab.dx, Y_FIELD.left, Y_FIELD.right);
+      soft.y = clamp(pointer.y + st.grab.dy, Y_FIELD.top, Y_FIELD.bottom);
+      soft.lean = lerp(soft.lean, clamp((pointer.x - pointer.px) * 60, -0.9, 0.9) + Math.sin(st.time * 14) * 0.2, 0.25);
+      soft.phase += STEP * 16;
+      continue;
+    }
+    let target = null, best = Infinity;
+    if (!n && soft.shock <= 0) {
+      const consider = (stick) => {
+        const x = stick.x - soft.h * 0.76, y = stick.y + stick.h * 0.4;
+        const d = Math.hypot(x - soft.x, y - soft.y);
+        if (d < best) { best = d; target = { x, y, stick }; }
+      };
+      for (const stick of st.sticks) if (!stick.owner) consider(stick);
+      for (const other of st.softs) if (other.sticks.length > 1 && st.grab?.soft !== other) consider(other.sticks.at(-1));
+    }
+    soft.target = target?.stick.owner || null;
+    let speed = 0;
+    if (target) {
+      if (best < soft.h * (target.stick.owner ? 0.6 : 0.3)) { yTake(soft, target.stick); continue; }
+      soft.heading = Math.atan2(target.y - soft.y, target.x - soft.x);
+      speed = 0.2 * fuss * (st.grab?.stick === target.stick ? 1.5 : 1);
+      soft.sits = 0;
+    } else if (n) {
+      soft.rest -= STEP;
+      if (soft.rest < -2 - Math.random() * 3) soft.rest = 0.5 + Math.random() * 1.5;
+      if (soft.rest <= 0) {
+        soft.heading += (Math.random() - 0.5) * STEP * 5;
+        speed = (n > 1 ? 0.045 : 0.09) * fuss;
+      }
+    } else {
+      soft.sits = Math.min(1, soft.sits + STEP * 2);
+      soft.sulk -= STEP;
+      if (soft.sulk < 0) {
+        soft.sulk = 4 + Math.random() * 5;
+        yShout(soft.x, soft.y - soft.h * 0.9, 'ь…', soft.color);
+      }
+    }
+    if (soft.entering && !target) {
+      soft.heading = Math.atan2(0.5 - soft.y, 0.5 - soft.x);
+      speed = 0.2 * fuss;
+      soft.sits = 0;
+    }
+    soft.x += Math.cos(soft.heading) * speed * STEP;
+    soft.y += Math.sin(soft.heading) * speed * STEP;
+    const right = Y_FIELD.right - (n ? yReach(soft) - soft.h * 0.42 : soft.h * 0.5);
+    if (soft.entering && soft.x > Y_FIELD.left && soft.x < right) soft.entering = false;
+    if (!soft.entering && (soft.x < Y_FIELD.left || soft.x > right)) soft.heading = Math.PI - soft.heading;
+    if (soft.y < Y_FIELD.top + soft.h || soft.y > Y_FIELD.bottom) soft.heading = -soft.heading;
+    if (!soft.entering) soft.x = clamp(soft.x, Y_FIELD.left, Math.max(Y_FIELD.left, right));
+    soft.y = clamp(soft.y, Y_FIELD.top + soft.h, Y_FIELD.bottom);
+    soft.phase += speed * STEP / (soft.h * 0.12);
+    const sad = n ? 0 : (target ? 0.25 * Math.sign(Math.cos(soft.heading)) : 0.35);
+    const proud = n > 1 ? -0.14 : 0;
+    soft.lean = lerp(soft.lean, sad + proud + Math.sin(soft.phase) * (speed ? 0.12 : 0.02), 0.15);
+  }
+  for (let i = 0; i < st.softs.length; i++) for (let j = i + 1; j < st.softs.length; j++) {
+    const a = st.softs[i], b = st.softs[j];
+    if (a.target === b || b.target === a) continue;
+    const ax = a.x + yReach(a) * 0.4, bx = b.x + yReach(b) * 0.4;
+    const dx = bx - ax, dy = (b.y - a.y) * 1.8, d = Math.hypot(dx, dy) || 0.001;
+    const room = (yReach(a) + yReach(b)) * 0.45;
+    if (d > room) continue;
+    const push = (room - d) * 0.1;
+    if (st.grab?.soft !== a) { a.x -= dx / d * push; a.y -= dy / d * push * 0.5; }
+    if (st.grab?.soft !== b) { b.x += dx / d * push; b.y += dy / d * push * 0.5; }
+  }
+  for (const stick of st.sticks) {
+    if (st.grab?.stick === stick) {
+      stick.x = pointer.x + st.grab.dx;
+      stick.y = pointer.y + st.grab.dy;
+      stick.angle = lerp(stick.angle, clamp((pointer.x - pointer.px) * 40, -1, 1), 0.2);
+    } else if (stick.owner) {
+      const soft = stick.owner, k = soft.sticks.indexOf(stick);
+      const jump = Math.sin(soft.hop * Math.PI) * soft.h * 0.3;
+      const tx = soft.x + soft.h * (0.76 + 0.42 * k);
+      const ty = soft.y - soft.h * 0.4 - jump - Math.abs(Math.sin(soft.phase + 1.6 + k)) * soft.h * 0.06;
+      stick.x = lerp(stick.x, tx, 0.3);
+      stick.y = lerp(stick.y, ty, 0.3);
+      stick.angle = lerp(stick.angle, soft.lean * 0.6 + Math.sin(soft.phase + k) * 0.08, 0.2);
+    } else {
+      stick.x += stick.vx * STEP;
+      stick.y += stick.vy * STEP;
+      stick.vx *= 0.93;
+      stick.vy *= 0.93;
+      stick.angle += stick.spin * STEP;
+      stick.spin *= 0.92;
+      if (Math.abs(stick.spin) < 1) {
+        const lying = Math.PI / 2 + Math.round((stick.angle - Math.PI / 2) / Math.PI) * Math.PI;
+        stick.angle = lerp(stick.angle, lying, 0.08);
+      }
+      if (stick.x < Y_FIELD.left || stick.x > Y_FIELD.right) stick.vx *= -1;
+      if (stick.y < Y_FIELD.top || stick.y > Y_FIELD.bottom) stick.vy *= -1;
+      stick.x = clamp(stick.x, Y_FIELD.left, Y_FIELD.right);
+      stick.y = clamp(stick.y, Y_FIELD.top, Y_FIELD.bottom);
+    }
+  }
+  for (const pop of st.pops) pop.age += STEP / 1.2;
+  st.pops = st.pops.filter((pop) => pop.age < 1);
+}
+
+function yCanesDown() {
+  const st = modeState;
+  const order = [...st.sticks].sort((a, b) => b.y - a.y);
+  for (const stick of order) {
+    const dx = pointer.x - stick.x, dy = pointer.y - stick.y;
+    const c = Math.cos(stick.angle), s = Math.sin(stick.angle);
+    if (Math.abs(dx * c + dy * s) < stick.h * 0.14 + 0.012 && Math.abs(-dx * s + dy * c) < stick.h * 0.45 + 0.01) {
+      if (stick.owner) {
+        const owner = stick.owner;
+        owner.sticks.splice(owner.sticks.indexOf(stick), 1);
+        owner.hop = 1; owner.shock = 1.6;
+        yShout(owner.x, owner.y - owner.h * 1.1, owner.sticks.length ? 'ы?' : 'ь?!', owner.color);
+        stick.owner = null;
+      }
+      st.grab = { stick, dx: stick.x - pointer.x, dy: stick.y - pointer.y };
+      return;
+    }
+  }
+  const softs = [...st.softs].sort((a, b) => b.y - a.y);
+  for (const soft of softs) {
+    if (pointer.x > soft.x - soft.h * 0.12 && pointer.x < soft.x + soft.h * 0.6 && pointer.y > soft.y - soft.h * 0.95 && pointer.y < soft.y + soft.h * 0.1) {
+      st.grab = { soft, dx: soft.x - pointer.x, dy: soft.y - pointer.y };
+      yShout(soft.x + soft.h * 0.3, soft.y - soft.h * 1.1, 'ыа!', soft.color);
+      return;
+    }
+  }
+  const stick = yCanesStick(clamp(pointer.x, Y_FIELD.left, Y_FIELD.right), clamp(pointer.y, Y_FIELD.top, Y_FIELD.bottom));
+  stick.angle = Math.random() * Math.PI;
+  stick.spin = (Math.random() < 0.5 ? -1 : 1) * (12 + Math.random() * 10);
+  stick.vx = (Math.random() - 0.5) * 0.2;
+  stick.vy = (Math.random() - 0.5) * 0.2;
+  if (st.softs.length >= 16) return;
+  const fromLeft = stick.x > 0.5;
+  const runner = yCanesSoft(fromLeft ? -0.08 : 1.02, clamp(stick.y + (Math.random() - 0.5) * 0.3, Y_FIELD.top + 0.15, Y_FIELD.bottom));
+  runner.entering = true;
+  runner.heading = fromLeft ? 0 : Math.PI;
+}
+
+function yCanesUp() {
+  const st = modeState, grab = st.grab;
+  if (!grab) return;
+  st.grab = null;
+  if (grab.soft) { grab.soft.hop = 1; return; }
+  const stick = grab.stick;
+  let taker = null, best = Infinity;
+  for (const soft of st.softs) {
+    const d = Math.hypot(stick.x - soft.x - yReach(soft), stick.y + stick.h * 0.4 - soft.y);
+    if (d < soft.h * 0.6 && d < best && soft.sticks.length < 5) { best = d; taker = soft; }
+  }
+  if (taker) { yTake(taker, stick); return; }
+  stick.vx = clamp((pointer.x - pointer.px) / STEP * 0.5, -2, 2);
+  stick.vy = clamp((pointer.y - pointer.py) / STEP * 0.5, -2, 2);
+  stick.spin = stick.vx * 20 + (Math.random() - 0.5) * 4;
+}
+
+function yCanesScatter() {
+  for (const soft of modeState.softs) {
+    if (soft.sticks.length) yShout(soft.x, soft.y - soft.h * 1.1, 'ь?!', soft.color);
+    for (const stick of soft.sticks) {
+      stick.owner = null;
+      stick.vx = (Math.random() - 0.5) * 2.6;
+      stick.vy = (Math.random() - 0.5) * 2.6;
+      stick.spin = (Math.random() - 0.5) * 30;
+    }
+    soft.sticks = [];
+    soft.hop = 1;
+    soft.shock = 1.4 + Math.random();
+  }
+}
+
+function ySoft(soft) {
+  const n = soft.sticks.length;
+  const jump = Math.sin(soft.hop * Math.PI) * soft.h * 0.3;
+  const bob = Math.abs(Math.sin(soft.phase)) * soft.h * 0.06;
+  const scale = 1 + Math.min(n - 1, 3) * 0.1 * Number(n > 1);
+  const squash = 1 - soft.sits * 0.22;
+  ctx.beginPath();
+  ctx.ellipse((soft.x + soft.h * 0.25) * S, soft.y * S, soft.h * 0.45 * S, soft.h * 0.1 * S, 0, 0, Math.PI * 2);
+  ctx.fillStyle = ink(0.07);
+  ctx.fill();
+  ctx.save();
+  ctx.globalAlpha = n ? 1 : 0.55;
+  ctx.translate(soft.x * S, (soft.y - jump - bob) * S);
+  ctx.rotate(soft.lean);
+  ctx.scale(soft.h * S * scale, soft.h * S * scale * squash);
+  ctx.beginPath();
+  ctx.moveTo(0, -0.8);
+  ctx.lineTo(0, 0);
+  ctx.lineTo(0.21, 0);
+  ctx.bezierCurveTo(0.62, 0, 0.62, -0.44, 0.22, -0.44);
+  ctx.lineTo(0, -0.44);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = yColor(soft.color);
+  ctx.lineWidth = 0.155;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function yStick(stick) {
+  const color = stick.owner ? yColor(stick.owner.color) : INK;
+  const scale = stick.owner && stick.owner.sticks.length > 1 ? 1 + Math.min(stick.owner.sticks.length - 1, 3) * 0.1 : 1;
+  const half = stick.h * 0.4 * scale;
+  const c = Math.sin(stick.angle) * half, s = Math.cos(stick.angle) * half;
+  if (!stick.owner) line(stick.x - c, stick.y + s + 0.006, stick.x + c, stick.y - s + 0.006, ink(0.07), stick.h * 0.2);
+  line(stick.x - c, stick.y + s, stick.x + c, stick.y - s, color, stick.h * 0.155);
+}
+
+function yCanesDraw() {
+  const st = modeState;
+  const held = st.grab?.stick;
+  const items = [
+    ...st.softs.map((soft) => ({ y: soft.y, draw() { ySoft(soft); for (const stick of soft.sticks) yStick(stick); } })),
+    ...st.sticks.filter((s) => !s.owner && s !== held).map((stick) => ({ y: stick.y, draw() { yStick(stick); } })),
+  ].sort((a, b) => a.y - b.y);
+  for (const item of items) item.draw();
+  if (held) yStick(held);
+  ctx.textAlign = 'center';
+  for (const pop of st.pops) {
+    ctx.globalAlpha = 1 - pop.age ** 2;
+    ctx.fillStyle = yColor(pop.color);
+    ctx.font = `500 ${Math.max(11, Math.round(S * 0.026))}px 'DM Mono', monospace`;
+    ctx.fillText(pop.text, pop.x * S, (pop.y - pop.age * 0.05) * S);
+  }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
+  const whole = st.softs.filter((s) => s.sticks.length).length;
+  drawStatus(`Ы ${whole} · Ь ${st.softs.length - whole}`);
+  yHint(held ? 'поднеси к букве — отдашь · брось — улетит' : 'хватай палки и буквы · тап по пустому — палка и новый Ь');
+}
+
 const yTools = () => [
   { type: 'range', key: 'size', label: 'размер', min: 35, max: 130, step: 5, value: 75 },
 ];
@@ -693,9 +1352,31 @@ const MODES = {
     },
     onMove: yTumbleMove, onUp() { modeState.pouring = false; },
   },
+  choir: {
+    label: 'хор', cursor: 'pointer',
+    note: 'Каждая Ы поёт гласную «ы»: пилообразный тон через три форманты этого звука. Держи букву — поёт; тяни вверх — вытягивается и берёт выше, линии на фоне показывают ступени лада. Тап по пустому месту ставит новую певицу, утащи её вниз в клетки — уйдёт со вздохом. Клетки под полом — бит на 8 долей: тап сажает низкого барабанщика, второй тап — высокого, третий убирает. Бит идёт, пока в клетках кто-то сидит. «Не замолкать» оставляет звук после отпускания, тап по поющей её гасит.',
+    tools: [...yTools(),
+      { type: 'pick', key: 'scale', label: 'лад', options: ['пентатоника', 'мажор', 'как попало'], value: 0 },
+      { type: 'range', key: 'tempo', label: 'темп', min: 70, max: 180, step: 10, value: 120 },
+      { type: 'range', key: 'voice', label: 'хор', min: 0, max: 10, step: 1, value: 5 },
+      { type: 'range', key: 'beat', label: 'бит', min: 0, max: 10, step: 1, value: 8 },
+      { type: 'toggle', key: 'drone', label: 'не замолкать', value: false },
+      { type: 'button', label: 'хором', action: yChoirAll }],
+    setup: yChoirExample, step: yChoirStep, draw: yChoirDraw,
+    onDown: yChoirDown, onMove: yChoirMove, onUp: yChoirUp,
+  },
+  canes: {
+    label: 'ь и палка', cursor: 'grab',
+    note: 'Ы — это Ь, который ходит со своей палкой. Отними палку, и останется бледный Ь: он пойдёт искать свободную палку или отнимет лишнюю у зазнавшегося соседа. Поднеси палку к букве — возьмёт; с двумя палками Ыы раздувается и важничает. Тап по пустому месту бросает новую палку, и за ней из-за края выбегает новый Ь. «Рассыпать» выбивает все палки разом.',
+    tools: [...yTools(),
+      { type: 'range', key: 'fuss', label: 'суета', min: 1, max: 5, step: 1, value: 3 },
+      { type: 'button', label: 'рассыпать', action: yCanesScatter }],
+    setup: yCanesExample, step: yCanesStep, draw: yCanesDraw,
+    onDown: yCanesDown, onUp: yCanesUp,
+  },
 };
 
-canvas.addEventListener('pointercancel', () => { pointer.down = false; yEnd(); modeState.pouring = false; if (current === 'grinder') yGrinderEnd(); });
+canvas.addEventListener('pointercancel', () => { pointer.down = false; MODES[current].onUp?.(); });
 startLab({
   title: 'Ы · ерунда', modes: MODES, start: 'grinder', ground: 'paper',
   globalTools: [
