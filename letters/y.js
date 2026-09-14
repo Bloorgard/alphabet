@@ -235,7 +235,7 @@ export function mountY(workspace) {
   function reset() {
     clear();
     drums = [...START_DRUMS];
-    START_NOTES.forEach((semis, i) => addSinger(0.113 + i * 0.157, 0.06 + semis / 28 * (TALL - 0.06)));
+    START_NOTES.forEach((semis, i) => addSinger(0.498 + (i - 1) * 0.157, 0.06 + semis / 28 * (TALL - 0.06)));
   }
 
   function chorus() {
