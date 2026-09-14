@@ -374,10 +374,285 @@ function yTumbleExample() {
   for (let i = 0; i < 32; i++) yDrop(0.16 + Math.random() * 0.68, 0.12 + Math.random() * 0.55);
 }
 
+function yGrinderReset() {
+  yReset();
+  Object.assign(modeState, { source: [], material: [], eaten: 0, crank: 0, drawing: null,
+    turning: false, lastAngle: 0, damage: 0, generation: 0, message: '', settle: 0 });
+}
+
+function yGrinderCompile() {
+  const material = [];
+  for (const stroke of modeState.source) {
+    for (let i = 1; i < stroke.points.length; i++) {
+      material.push({ a: stroke.points[i - 1], b: stroke.points[i], color: stroke.color,
+        width: stroke.width, stroke });
+    }
+  }
+  modeState.material = material;
+  modeState.eaten = 0;
+  modeState.settle = 0;
+}
+
+function yGrinderAdd(stroke, x, y) {
+  const last = stroke.points.at(-1);
+  const distance = Math.hypot(x - last.x, y - last.y);
+  const count = Math.floor(distance / 0.006);
+  for (let i = 1; i <= count; i++) stroke.points.push({ x: lerp(last.x, x, i / count), y: lerp(last.y, y, i / count) });
+}
+
+function yGrinderExample() {
+  yGrinderReset();
+  const stroke = (color, width, points) => {
+    const s = { color, width, points: [points[0]] };
+    for (const p of points.slice(1)) yGrinderAdd(s, p.x, p.y);
+    modeState.source.push(s);
+  };
+  stroke(4, 0.013, [{ x: 0.21, y: 0.37 }, { x: 0.2, y: 0.65 }]);
+  stroke(4, 0.012, [{ x: 0.2, y: 0.57 }, { x: 0.11, y: 0.48 }, { x: 0.13, y: 0.56 }, { x: 0.2, y: 0.59 }]);
+  const petals = [];
+  for (let i = 0; i <= 160; i++) {
+    const a = i / 160 * Math.PI * 2;
+    const r = 0.073 + Math.cos(a * 5) * 0.029;
+    petals.push({ x: 0.2 + Math.cos(a) * r, y: 0.35 + Math.sin(a) * r });
+  }
+  stroke(0, 0.017, petals);
+  const center = [];
+  for (let i = 0; i <= 55; i++) {
+    const a = i * 0.23, r = 0.028 * (1 - i / 65);
+    center.push({ x: 0.2 + Math.cos(a) * r, y: 0.35 + Math.sin(a) * r });
+  }
+  stroke(1, 0.014, center);
+  stroke(2, 0.012, [{ x: 0.075, y: 0.7 }, { x: 0.13, y: 0.675 }, { x: 0.18, y: 0.7 }, { x: 0.23, y: 0.675 }, { x: 0.29, y: 0.7 }]);
+  modeState.serial = 3;
+  yGrinderCompile();
+}
+
+function yGrinderTurn(delta) {
+  const state = modeState;
+  if (!state.material.length) return;
+  state.crank += delta;
+  const before = state.eaten;
+  state.eaten = clamp(state.eaten + delta * 20, 0, state.material.length);
+  if (state.eaten !== before) state.settle = 0;
+  if (delta < 0 && before > 0) state.damage += Math.min(before, -delta * 20) * 0.00011;
+  state.message = state.eaten === state.material.length ? 'всё. можно скормить ещё раз' : '';
+}
+
+function yGrinderSourcePoint(p, i = 0) {
+  const amount = Math.min(modeState.damage, 0.025);
+  return { x: p.x + Math.sin(p.y * 55 + i * 0.2) * amount,
+    y: p.y + Math.sin(p.x * 68) * amount };
+}
+
+function yGrinderOutput(index, settled = false) {
+  const material = modeState.material;
+  const item = material[index];
+  const t = index / Math.max(1, material.length - 1);
+  const phase = t * 29 + modeState.generation * 1.7;
+  const x = 0.765 + Math.sin(phase + Math.sin(phase * 1.7) * 0.6) * (0.09 + t * 0.07)
+    + (item.b.x - item.a.x) * 1.6;
+  const y = 0.73 + t * 0.11 + Math.cos(phase * 1.4) * 0.052
+    + (item.b.y - item.a.y) * 1.6;
+  const age = clamp((modeState.eaten - index + modeState.settle) / 22, 0, 1);
+  const f = settled ? 1 : 1 - (1 - age) ** 2;
+  return { x: lerp(0.565, x, f), y: lerp(0.66, y, f) };
+}
+
+function yGrinderRefeed() {
+  const state = modeState;
+  const count = Math.floor(state.eaten);
+  if (count < 3) { state.message = 'сначала покрути ручку'; return; }
+  const source = [];
+  let stroke = null;
+  let previous = null;
+  for (let i = 0; i < count; i++) {
+    const item = state.material[i], p = yGrinderOutput(i, true);
+    const point = { x: 0.07 + (p.x - 0.58) * 0.68, y: 0.25 + (p.y - 0.66) * 1.9 };
+    if (previous !== item.stroke) {
+      stroke = { points: [point], color: item.color, width: Math.min(0.027, item.width * 1.2) };
+      source.push(stroke);
+      previous = item.stroke;
+    } else yGrinderAdd(stroke, point.x, point.y);
+  }
+  state.source = source;
+  state.generation++;
+  state.damage = 0;
+  state.message = 'ещё один круг унижения';
+  yGrinderCompile();
+}
+
+function yGrinderDown() {
+  const state = modeState;
+  if (pointer.x < 0.355 && pointer.y > 0.19 && pointer.y < 0.77) {
+    if (state.eaten > 0) {
+      const remaining = [];
+      let previous = null;
+      for (let i = Math.ceil(state.eaten); i < state.material.length; i++) {
+        const item = state.material[i];
+        if (item.stroke !== previous) {
+          remaining.push({ points: [item.a, item.b], width: item.width, color: item.color });
+          previous = item.stroke;
+        } else remaining.at(-1).points.push(item.b);
+      }
+      // Новая порция включает остаток рисунка и уже перемолотый материал.
+      if (state.eaten >= 3) { yGrinderRefeed(); remaining.unshift(...state.source); }
+      state.source = remaining;
+    }
+    const p = { x: clamp(pointer.x, 0.045, 0.34), y: pointer.y };
+    state.drawing = { points: [p, { x: p.x + 0.0001, y: p.y }], color: state.serial++, width: num('pen') / 1000 };
+    state.source.push(state.drawing);
+    state.message = '';
+    yGrinderCompile();
+  } else if (Math.hypot(pointer.x - 0.705, pointer.y - 0.47) < 0.22) {
+    state.turning = true;
+    state.lastAngle = Math.atan2(pointer.y - 0.47, pointer.x - 0.705);
+  }
+}
+
+function yGrinderMove() {
+  if (!pointer.down) return;
+  const state = modeState;
+  if (state.drawing) {
+    if (state.drawing.points.length < 1600) yGrinderAdd(state.drawing, clamp(pointer.x, 0.045, 0.34), clamp(pointer.y, 0.2, 0.76));
+    yGrinderCompile();
+  }
+  if (state.turning) {
+    const angle = Math.atan2(pointer.y - 0.47, pointer.x - 0.705);
+    const delta = Math.atan2(Math.sin(angle - state.lastAngle), Math.cos(angle - state.lastAngle));
+    yGrinderTurn(delta);
+    state.lastAngle = angle;
+  }
+}
+
+function yGrinderEnd() {
+  modeState.drawing = null;
+  modeState.turning = false;
+}
+
+function yGrinderLabel(text, x, y, align = 'left') {
+  ctx.fillStyle = MUTED;
+  ctx.textAlign = align;
+  ctx.font = `${Math.max(9, S * 0.016)}px 'DM Mono', monospace`;
+  ctx.fillText(text, x * S, y * S);
+  ctx.textAlign = 'left';
+}
+
+function yGrinderDraw() {
+  const state = modeState;
+  const material = state.material;
+  const eaten = state.eaten;
+  ctx.save();
+  ctx.setLineDash([S * 0.004, S * 0.008]);
+  ctx.strokeStyle = FAINT;
+  ctx.lineWidth = S * 0.001;
+  ctx.strokeRect(S * 0.035, S * 0.19, S * 0.32, S * 0.59);
+  ctx.restore();
+  yGrinderLabel('01 / нарисуй', 0.04, 0.15);
+  yGrinderLabel('02 / крути', 0.705, 0.15, 'center');
+  yGrinderLabel('03 / получи фарш', 0.94, 0.94, 'right');
+  for (let i = Math.max(0, Math.floor(eaten) - 18); i < material.length; i++) {
+    const item = material[i];
+    const p = yGrinderSourcePoint(item.a, i), q = yGrinderSourcePoint(item.b, i + 1);
+    const swallow = i < eaten ? clamp((eaten - i + state.settle) / 18, 0, 1) : 0;
+    if (swallow === 1) continue;
+    const f = swallow * swallow;
+    const x = lerp(p.x, 0.51, f), y = lerp(p.y, 0.535, f);
+    const xx = lerp(q.x, 0.51, f), yy = lerp(q.y, 0.535, f);
+    line(x, y, xx, yy, yColor(item.color), item.width * (1 - swallow * 0.72));
+  }
+  const count = Math.floor(eaten);
+  if (num('cut') === 0) {
+    for (let i = 1; i < count; i++) {
+      const item = material[i];
+      if (item.stroke !== material[i - 1].stroke) continue;
+      const a = yGrinderOutput(i - 1), b = yGrinderOutput(i);
+      line(a.x, a.y, b.x, b.y, ink(0.14), item.width * 1.75 + 0.003);
+      line(a.x, a.y, b.x, b.y, yColor(item.color), item.width * 1.75);
+    }
+  } else {
+    for (let i = 0; i < count; i += 4) {
+      const item = material[i], p = yGrinderOutput(i);
+      const angle = Math.atan2(item.b.y - item.a.y, item.b.x - item.a.x) + i;
+      if (num('cut') === 2) yGlyph(p.x, p.y, item.width * 3.5, angle, yColor(item.color), true, 1.4, 0.8);
+      else {
+        const r = item.width * (0.7 + Math.sin(i * 8) * 0.3);
+        line(p.x, p.y, p.x + Math.cos(angle) * r * 1.8, p.y + Math.sin(angle) * r * 1.8, yColor(item.color), r * 1.5);
+      }
+    }
+  }
+  if (!eaten) yGrinderLabel('пока пусто', 0.78, 0.83, 'center');
+
+  const shake = Math.sin(state.crank * 13) * Math.min(1, Math.abs(state.velocity || 0)) * 0.003;
+  ctx.save();
+  ctx.translate(shake * S, 0);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = S * 0.061;
+  ctx.beginPath();
+  ctx.moveTo(S * 0.435, S * 0.295);
+  ctx.lineTo(S * 0.435, S * 0.635);
+  ctx.lineTo(S * 0.51, S * 0.635);
+  ctx.bezierCurveTo(S * 0.655, S * 0.635, S * 0.655, S * 0.465, S * 0.51, S * 0.465);
+  ctx.lineTo(S * 0.435, S * 0.465);
+  ctx.stroke();
+  line(0.565, 0.626, 0.565, 0.666, INK, 0.055);
+  line(0.542, 0.671, 0.588, 0.671, INK, 0.008);
+  dot(0.525, 0.545, PAPER, 0.05);
+  for (let i = 0; i < 7; i++) {
+    const a = state.crank * 2 + i * Math.PI * 2 / 7;
+    line(0.525 + Math.cos(a) * 0.037, 0.545 + Math.sin(a) * 0.037,
+      0.525 + Math.cos(a + 0.45) * 0.017, 0.545 + Math.sin(a + 0.45) * 0.017, INK, 0.006);
+  }
+  dot(0.525, 0.545, yColor(0), 0.012);
+  ctx.restore();
+
+  const a = state.crank - Math.PI / 2;
+  const hx = 0.705 + Math.cos(a) * 0.145, hy = 0.47 + Math.sin(a) * 0.145;
+  const tx = 0.705 - Math.cos(a) * 0.145, ty = 0.47 - Math.sin(a) * 0.145;
+  ctx.save();
+  ctx.setLineDash([S * 0.003, S * 0.009]);
+  ctx.beginPath();
+  ctx.arc(S * 0.705, S * 0.47, S * 0.145, 0, Math.PI * 2);
+  ctx.strokeStyle = FAINT;
+  ctx.lineWidth = S * 0.0015;
+  ctx.stroke();
+  ctx.restore();
+  line(0.603, 0.49, 0.705, 0.47, ink(0.35), 0.008);
+  line(tx, ty, hx, hy, INK, 0.045);
+  dot(0.705, 0.47, PAPER, 0.009);
+  dot(hx, hy, INK, 0.039);
+  dot(hx, hy, yColor(1), 0.031);
+  dot(hx - 0.007, hy - 0.008, paper(0.6), 0.008);
+  yGrinderLabel('↻', 0.89, 0.485, 'center');
+  line(0.59, 0.91, 0.96, 0.91, FAINT, 0.001);
+  yGrinderLabel(state.message || (state.source.length ? 'ручкой — по кругу. или включи мотор ↓' : 'рисуй слева — Ы съест всё'), 0.5, 0.085, 'center');
+}
+
 const yTools = () => [
   { type: 'range', key: 'size', label: 'размер', min: 35, max: 130, step: 5, value: 75 },
 ];
 const MODES = {
+  grinder: {
+    label: 'мясорубка', cursor: 'crosshair',
+    note: 'Нарисуй что-нибудь в поле слева. Вращай жёлтую ручку вокруг оси: по часовой стрелке Ы съедает рисунок, против — возвращает его испорченным. Мотор крутит сам; «ход» задаёт его направление. «Скормить ещё» превращает фарш в новый рисунок. Цвет материала берётся из твоих линий.',
+    tools: [
+      { type: 'range', key: 'pen', label: 'кисть', min: 5, max: 25, step: 1, value: 13 },
+      { type: 'pick', key: 'cut', label: 'помол', options: ['лапша', 'фарш', 'мутанты'], value: 0 },
+      { type: 'toggle', key: 'motor', label: 'мотор', value: false },
+      { type: 'pick', key: 'direction', label: 'ход', options: ['вперёд', 'назад'], value: 0 },
+      { type: 'button', label: 'скормить ещё', action: yGrinderRefeed },
+    ],
+    setup: yGrinderExample, draw: yGrinderDraw,
+    step() {
+      modeState.time += STEP;
+      modeState.settle = Math.min(24, modeState.settle + STEP * 28);
+      if (on('motor') && !modeState.drawing && !modeState.turning) yGrinderTurn(STEP * 3 * (num('direction') ? -1 : 1));
+      modeState.velocity = lerp(modeState.velocity || 0, modeState.crank - (modeState.previousCrank || 0), 0.2);
+      modeState.previousCrank = modeState.crank;
+    },
+    onDown: yGrinderDown, onMove: yGrinderMove, onUp: yGrinderEnd,
+  },
   garland: {
     label: 'гирлянда', cursor: 'crosshair',
     note: 'Рисуй нить на пустом месте: концы закрепятся там, где начал и отпустил. Хватай нить, чтобы потрясти; крайние булавки можно переставлять. Размер действует на новые гирлянды.',
@@ -420,12 +695,12 @@ const MODES = {
   },
 };
 
-canvas.addEventListener('pointercancel', () => { pointer.down = false; yEnd(); modeState.pouring = false; });
+canvas.addEventListener('pointercancel', () => { pointer.down = false; yEnd(); modeState.pouring = false; if (current === 'grinder') yGrinderEnd(); });
 startLab({
-  title: 'Ы · ерунда', modes: MODES, start: 'garland', ground: 'paper',
+  title: 'Ы · ерунда', modes: MODES, start: 'grinder', ground: 'paper',
   globalTools: [
     { type: 'pick', key: 'palette', label: 'краска', options: ['праздник', 'чернила'], value: 0 },
-    { type: 'button', label: 'очистить', action: yReset },
+    { type: 'button', label: 'очистить', action() { if (current === 'grinder') yGrinderReset(); else yReset(); } },
     { type: 'button', label: 'пример', action() { MODES[current].setup(); } },
   ],
 });
