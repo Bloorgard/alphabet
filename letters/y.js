@@ -18,7 +18,7 @@ const FORMANTS = [[300, 4, 1.6], [1550, 12, 1.1], [2450, 14, 0.5]];
 const SCALES = [[0, 2, 4, 7, 9, 12], [0, 2, 4, 5, 7, 9, 11, 12]];
 const SCALE_NAMES = ['пентатоника', 'мажор', 'как попало'];
 const START_DRUMS = [1, 0, 2, 0, 1, 0, 2, 0];
-const START_SINGERS = [0, 0.1, 0.22, 0.34, 0.2, 0.46];
+const START_NOTES = [12, 19, 28];
 const cell = (i) => STRIP.left + STRIP.pitch * i + STRIP.width / 2;
 
 function formants(c, source, target) {
@@ -235,7 +235,7 @@ export function mountY(workspace) {
   function reset() {
     clear();
     drums = [...START_DRUMS];
-    START_SINGERS.forEach((lift, i) => addSinger(0.113 + i * 0.157, 0.16 + lift));
+    START_NOTES.forEach((semis, i) => addSinger(0.113 + i * 0.157, 0.06 + semis / 28 * (TALL - 0.06)));
   }
 
   function chorus() {
