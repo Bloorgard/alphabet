@@ -27,6 +27,7 @@ import { mountSh } from './letters/sh.js?v=9';
 import { mountShch } from './letters/shch.js?v=4';
 import { mountHard } from './letters/hard.js?v=1';
 import { mountY } from './letters/y.js?v=5';
+import { mountSoft } from './letters/soft.js?v=1';
 import { mountYa } from './letters/ya.js?v=22';
 import { reportVisit } from './progress.js?v=7';
 import { mountCredit } from './wall.js?v=14';
@@ -72,6 +73,7 @@ const READY = new Map([
   ['Щ', mountShch],
   ['Ъ', mountHard],
   ['Ы', mountY],
+  ['Ь', mountSoft],
   ['Я', mountYa]
 ]);
 
